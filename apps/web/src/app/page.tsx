@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   type FormEvent,
   useCallback,
   useEffect,
@@ -419,6 +420,15 @@ function Dashboard({
       window.history.pushState({}, "", url);
     }
     return true;
+  }
+
+  function navigateToArticlesSection(section: "root" | "content") {
+    if (!navigateTo("articles")) return;
+    const url = new URL(window.location.href);
+    if (section === "content") url.searchParams.set("subview", "content");
+    else url.searchParams.delete("subview");
+    window.history.replaceState({}, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }
   const initials = session.user.fullName
     .split(" ")
@@ -1523,22 +1533,39 @@ function Dashboard({
                         ? selectedPageId === item.pageId
                         : item.id !== "pages" || !selectedPageId);
                     return (
-                      <button
-                        key={item.pageId ?? item.id}
-                        type="button"
-                        title={item.label}
-                        className={`nav-item site-nav-item ${active ? "active" : ""}`}
-                        aria-current={active ? "page" : undefined}
-                        onClick={() => navigateTo(item.id, item.pageId)}
-                      >
-                        <Icon>
-                          <span
-                            className={`site-system-icon ${item.icon}`}
-                            aria-hidden="true"
-                          />
-                        </Icon>
-                        <span className="nav-text">{item.label}</span>
-                      </button>
+                      <Fragment key={item.pageId ?? item.id}>
+                        <button
+                          type="button"
+                          title={item.label}
+                          className={`nav-item site-nav-item ${active ? "active" : ""}`}
+                          aria-current={active ? "page" : undefined}
+                          onClick={() =>
+                            item.id === "articles" && site.siteType === "media"
+                              ? navigateToArticlesSection("root")
+                              : navigateTo(item.id, item.pageId)
+                          }
+                        >
+                          <Icon>
+                            <span
+                              className={`site-system-icon ${item.icon}`}
+                              aria-hidden="true"
+                            />
+                          </Icon>
+                          <span className="nav-text">{item.label}</span>
+                        </button>
+                        {item.id === "articles" && site.siteType === "media" ? (
+                          <button
+                            type="button"
+                            className="nav-item site-nav-item"
+                            onClick={() => navigateToArticlesSection("content")}
+                          >
+                            <Icon>
+                              <span aria-hidden="true">↳</span>
+                            </Icon>
+                            <span className="nav-text">Контент</span>
+                          </button>
+                        ) : null}
+                      </Fragment>
                     );
                   })}
                 </div>

@@ -1,11 +1,13 @@
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
   IsHexColor,
   IsInt,
+  IsISO8601,
   IsObject,
   IsOptional,
   IsString,
@@ -23,8 +25,10 @@ import {
   ArticleStatus,
   BannerPlacement,
   CategoryStatus,
+  EditorialState,
   PageKind,
   PageStatus,
+  PublicationState,
 } from '../database/entities';
 
 export class CreateCategoryDto {
@@ -45,6 +49,10 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsEnum(CategoryStatus)
   status?: CategoryStatus;
+
+  @IsOptional()
+  @IsEnum(PublicationState)
+  publicationState?: PublicationState;
 
   @IsOptional()
   @IsString()
@@ -95,6 +103,20 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsBoolean()
   noIndex?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  displayTemplateKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  displayTemplateVersion?: string;
+
+  @IsOptional()
+  @IsObject()
+  displayTemplateConfig?: Record<string, unknown>;
 }
 
 export class CreateAuthorDto {
@@ -145,6 +167,14 @@ export class CreateArticleDto {
   status?: ArticleStatus;
 
   @IsOptional()
+  @IsEnum(PublicationState)
+  publicationState?: PublicationState;
+
+  @IsOptional()
+  @IsEnum(EditorialState)
+  editorialState?: EditorialState;
+
+  @IsOptional()
   @IsUUID()
   categoryId?: string;
 
@@ -192,6 +222,20 @@ export class CreateArticleDto {
   @IsOptional()
   @IsBoolean()
   noIndex?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  displayTemplateKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  displayTemplateVersion?: string;
+
+  @IsOptional()
+  @IsObject()
+  displayTemplateConfig?: Record<string, unknown>;
 }
 
 export class UploadMediaDto {
@@ -592,4 +636,71 @@ export class AddArticleCommentDto {
 export class ChangeArticleStatusDto {
   @IsEnum(ArticleStatus)
   status!: ArticleStatus;
+}
+
+export class UpdatePublicationStateDto {
+  @IsEnum(PublicationState)
+  state!: PublicationState;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
+export class UpdateEditorialStateDto {
+  @IsEnum(EditorialState)
+  state!: EditorialState;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+}
+
+export class SchedulePublicationDto extends UpdatePublicationStateDto {
+  @IsISO8601({ strict: true })
+  executeAt!: string;
+}
+
+export class UpdateRelatedArticlesDto {
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  articleIds!: string[];
+}
+
+export class DuplicateContentDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(240)
+  title?: string;
+
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  @MaxLength(160)
+  slug!: string;
+}
+
+export class RestoreArticleVersionDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  expectedRevision!: number;
+}
+
+export class UpdateArticleSectionSettingsDto {
+  @IsString()
+  @MaxLength(80)
+  templateKey!: string;
+
+  @IsString()
+  @MaxLength(40)
+  templateVersion!: string;
+
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, unknown>;
 }

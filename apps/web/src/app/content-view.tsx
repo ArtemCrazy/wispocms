@@ -24,6 +24,7 @@ type Category = {
   slug: string;
   description: string | null;
   status: "active" | "hidden" | "draft";
+  publicationState: PublicationState;
   publishedAt: string | null;
   sortOrder: number;
   color: string;
@@ -34,6 +35,9 @@ type Category = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  displayTemplateKey: string;
+  displayTemplateVersion: string;
+  displayTemplateConfig: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   createdBy: { id: string; fullName: string } | null;
@@ -51,6 +55,9 @@ type MediaItem = {
 };
 type ArticleStatus =
   "draft" | "review" | "changes_requested" | "published" | "hidden";
+type PublicationState =
+  "draft" | "published" | "hidden" | "disabled" | "archive";
+type EditorialState = "draft" | "review" | "changes" | "approved";
 type Article = {
   id: string;
   title: string;
@@ -64,6 +71,11 @@ type Article = {
   canonicalUrl: string | null;
   noIndex: boolean;
   status: ArticleStatus;
+  publicationState: PublicationState;
+  editorialState: EditorialState;
+  displayTemplateKey: string;
+  displayTemplateVersion: string;
+  displayTemplateConfig: Record<string, unknown>;
   publishedAt: string | null;
   sortOrder: number;
   revision: number;
@@ -80,8 +92,9 @@ type Article = {
   previewMediaId: string | null;
   previewMedia: MediaItem | null;
 };
-type EditorTab =
-  "editor" | "main" | "publication" | "display" | "seo" | "history";
+type EditorTab = "editor" | "parameters" | "seo" | "history";
+type ArticleFilter =
+  "all" | `publication:${PublicationState}` | `editorial:${EditorialState}`;
 type AutosaveStatus = "idle" | "saving" | "saved" | "error" | "conflict";
 type Activity = {
   id: string;
@@ -92,6 +105,33 @@ type Activity = {
   createdAt: string;
   user: { id: string; fullName: string };
 };
+type ContentEvent = {
+  id: string;
+  eventType: string;
+  reason: string | null;
+  changes: Record<string, { before: unknown; after: unknown }> | null;
+  createdAt: string;
+  actor: { id: string; fullName: string } | null;
+};
+type ArticleVersion = {
+  id: string;
+  versionNumber: number;
+  reason: string;
+  createdAt: string;
+  actor: { fullName: string } | null;
+};
+type PendingSchedule = {
+  id: string;
+  targetPublicationState: PublicationState;
+  executeAt: string;
+};
+type ContentTemplate = {
+  id: string;
+  key: string;
+  version: string;
+  kind: "articles_list" | "article" | "category";
+  name: string;
+};
 
 const statusNames: Record<ArticleStatus, string> = {
   draft: "Черновик",
@@ -100,6 +140,27 @@ const statusNames: Record<ArticleStatus, string> = {
   published: "Опубликовано",
   hidden: "Скрыто",
 };
+const publicationNames: Record<PublicationState, string> = {
+  draft: "Черновик",
+  published: "Опубликовано",
+  hidden: "Скрыто из списков",
+  disabled: "Отключено",
+  archive: "Архив",
+};
+const editorialNames: Record<EditorialState, string> = {
+  draft: "Черновик",
+  review: "На согласовании",
+  changes: "Нужны правки",
+  approved: "Одобрено",
+};
+
+function matchesArticleFilter(article: Article, filter: ArticleFilter) {
+  if (filter === "all") return true;
+  const [kind, state] = filter.split(":");
+  return kind === "publication"
+    ? article.publicationState === state
+    : article.editorialState === state;
+}
 
 class RequestError extends Error {
   constructor(
@@ -210,6 +271,18 @@ export function ContentView({
   const [authors, setAuthors] = useState<Author[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [contentEvents, setContentEvents] = useState<ContentEvent[]>([]);
+  const [articleVersions, setArticleVersions] = useState<ArticleVersion[]>([]);
+  const [templates, setTemplates] = useState<ContentTemplate[]>([]);
+  const [relatedIds, setRelatedIds] = useState<string[]>([]);
+  const [pendingSchedule, setPendingSchedule] =
+    useState<PendingSchedule | null>(null);
+  const [categorySchedule, setCategorySchedule] =
+    useState<PendingSchedule | null>(null);
+  const [trash, setTrash] = useState<{
+    articles: Article[];
+    categories: Category[];
+  } | null>(null);
   const [articleRedirects, setArticleRedirects] = useState<RedirectAlias[]>([]);
   const [categoryActivity, setCategoryActivity] = useState<
     Array<{
@@ -241,11 +314,11 @@ export function ContentView({
   >(null);
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoryTab, setCategoryTab] = useState<
-    "main" | "position" | "display" | "seo" | "history"
-  >("main");
+    "parameters" | "seo" | "history"
+  >("parameters");
   const [searchQuery, setSearchQuery] = useState("");
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [filter, setFilter] = useState<ArticleStatus | "all">("all");
+  const [filter, setFilter] = useState<ArticleFilter>("all");
   const [sortNewest, setSortNewest] = useState(true);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -274,7 +347,7 @@ export function ContentView({
     canEdit &&
     (editor === "new" ||
       !editor ||
-      editor.status !== "published" ||
+      editor.publicationState !== "published" ||
       canEditPublished);
 
   const drainAutosave = useCallback((): Promise<void> => {
@@ -364,12 +437,13 @@ export function ContentView({
     }
     try {
       const base = `/api/sites/${siteId}/content`;
-      const [articleRows, categoryRows, authorRows, mediaRows] =
+      const [articleRows, categoryRows, authorRows, mediaRows, templateRows] =
         await Promise.all([
           request<Article[]>(`${base}/articles`),
           request<Category[]>(`${base}/categories`),
           request<Author[]>(`${base}/authors`),
           request<MediaItem[]>(`${base}/media`),
+          request<ContentTemplate[]>(`${base}/templates`),
         ]);
       setArticles(articleRows);
       setSelectedIds((current) =>
@@ -380,6 +454,7 @@ export function ContentView({
       setCategories(categoryRows);
       setAuthors(authorRows);
       setMedia(mediaRows);
+      setTemplates(templateRows);
       setMessage("");
       onCountChange?.(articleRows.length);
     } catch (reason) {
@@ -452,6 +527,10 @@ export function ContentView({
       setAutosaveStatus("saved");
       setDirty(false);
       setActivity([]);
+      setContentEvents([]);
+      setArticleVersions([]);
+      setRelatedIds([]);
+      setPendingSchedule(null);
       setArticleRedirects([]);
       void Promise.all([
         request<Activity[]>(
@@ -460,11 +539,36 @@ export function ContentView({
         request<RedirectAlias[]>(
           `/api/sites/${siteId}/content/articles/${article.id}/redirects`,
         ),
+        request<ContentEvent[]>(
+          `/api/sites/${siteId}/content/articles/${article.id}/events`,
+        ),
+        request<ArticleVersion[]>(
+          `/api/sites/${siteId}/content/articles/${article.id}/versions`,
+        ),
+        request<Array<{ relatedArticleId: string }>>(
+          `/api/sites/${siteId}/content/articles/${article.id}/related`,
+        ),
+        request<PendingSchedule | null>(
+          `/api/sites/${siteId}/content/articles/${article.id}/schedule`,
+        ),
       ])
-        .then(([activityRows, redirectRows]) => {
-          setActivity(activityRows);
-          setArticleRedirects(redirectRows);
-        })
+        .then(
+          ([
+            activityRows,
+            redirectRows,
+            eventRows,
+            versionRows,
+            relatedRows,
+            schedule,
+          ]) => {
+            setActivity(activityRows);
+            setArticleRedirects(redirectRows);
+            setContentEvents(eventRows);
+            setArticleVersions(versionRows);
+            setRelatedIds(relatedRows.map((row) => row.relatedArticleId));
+            setPendingSchedule(schedule);
+          },
+        )
         .catch((reason) =>
           setMessage(
             reason instanceof Error
@@ -578,7 +682,7 @@ export function ContentView({
     const statusFiltered =
       filter === "all"
         ? articles
-        : articles.filter((article) => article.status === filter);
+        : articles.filter((article) => matchesArticleFilter(article, filter));
     const categoryFiltered =
       selectedCategoryId === "uncategorized"
         ? statusFiltered.filter((article) => !article.categoryId)
@@ -638,7 +742,7 @@ export function ContentView({
     articles
       .filter(
         (article) =>
-          (filter === "all" || article.status === filter) &&
+          matchesArticleFilter(article, filter) &&
           (!selectedAuthorId || article.authorId === selectedAuthorId) &&
           (!query ||
             article.title.toLocaleLowerCase("ru").includes(query) ||
@@ -682,7 +786,7 @@ export function ContentView({
         .filter(
           (article) =>
             article.categoryId === category.id &&
-            (filter === "all" || article.status === filter) &&
+            matchesArticleFilter(article, filter) &&
             (!selectedAuthorId || article.authorId === selectedAuthorId) &&
             (!query ||
               categoryMatches ||
@@ -725,8 +829,8 @@ export function ContentView({
     selectedCategoryId,
     selectedAuthorId,
   ]);
-  const count = (status: ArticleStatus) =>
-    articles.filter((article) => article.status === status).length;
+  const count = (target: ArticleFilter) =>
+    articles.filter((article) => matchesArticleFilter(article, target)).length;
   const allVisibleSelected =
     visibleArticles.length > 0 &&
     visibleArticles.every((article) => selectedIds.includes(article.id));
@@ -738,20 +842,33 @@ export function ContentView({
     selectedArticles.length > 0 &&
     selectedArticles.every(
       (article) =>
-        article.status === "draft" || article.status === "changes_requested",
+        article.editorialState === "draft" ||
+        article.editorialState === "changes",
     );
   const canApproveSelected =
     canApprove &&
     selectedArticles.length > 0 &&
-    selectedArticles.every((article) => article.status === "review");
+    selectedArticles.every((article) => article.editorialState === "review");
+  const canPublishSelected =
+    canApprove &&
+    selectedArticles.length > 0 &&
+    selectedArticles.every(
+      (article) =>
+        article.editorialState === "approved" &&
+        article.publicationState !== "published",
+    );
   const canUnpublishSelected =
     canApprove &&
     selectedArticles.length > 0 &&
-    selectedArticles.every((article) => article.status === "published");
+    selectedArticles.every(
+      (article) => article.publicationState === "published",
+    );
   const canDeleteSelected =
     canEdit &&
     selectedArticles.length > 0 &&
-    selectedArticles.every((article) => article.status !== "published");
+    selectedArticles.every(
+      (article) => article.publicationState !== "published",
+    );
 
   function toggleAllVisible() {
     setSelectedIds((current) =>
@@ -787,9 +904,20 @@ export function ContentView({
     let completed = 0;
     for (const article of selectedArticles) {
       try {
+        const editorialState =
+          status === "review"
+            ? "review"
+            : status === "changes_requested"
+              ? "changes"
+              : status === "published" && article.editorialState === "review"
+                ? "approved"
+                : null;
         await request(
-          `/api/sites/${siteId}/content/articles/${article.id}/status`,
-          { method: "POST", body: JSON.stringify({ status }) },
+          `/api/sites/${siteId}/content/articles/${article.id}/${editorialState ? "editorial" : "publication"}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ state: editorialState ?? status }),
+          },
         );
         completed += 1;
       } catch {
@@ -810,7 +938,7 @@ export function ContentView({
     if (!siteId || !selectedArticles.length || !canDeleteSelected) return;
     if (
       !window.confirm(
-        `Удалить выбранные материалы (${selectedArticles.length}) без возможности восстановления?`,
+        `Переместить выбранные материалы (${selectedArticles.length}) в корзину?`,
       )
     )
       return;
@@ -877,19 +1005,46 @@ export function ContentView({
     setAutosaveStatus(article === "new" ? "idle" : "saved");
     setDirty(false);
     setActivity([]);
+    setContentEvents([]);
+    setArticleVersions([]);
+    setRelatedIds([]);
+    setPendingSchedule(null);
     setArticleRedirects([]);
     if (article !== "new" && siteId) {
       try {
-        const [activityRows, redirectRows] = await Promise.all([
+        const [
+          activityRows,
+          redirectRows,
+          eventRows,
+          versionRows,
+          relatedRows,
+          schedule,
+        ] = await Promise.all([
           request<Activity[]>(
             `/api/sites/${siteId}/content/articles/${article.id}/activity`,
           ),
           request<RedirectAlias[]>(
             `/api/sites/${siteId}/content/articles/${article.id}/redirects`,
           ),
+          request<ContentEvent[]>(
+            `/api/sites/${siteId}/content/articles/${article.id}/events`,
+          ),
+          request<ArticleVersion[]>(
+            `/api/sites/${siteId}/content/articles/${article.id}/versions`,
+          ),
+          request<Array<{ relatedArticleId: string }>>(
+            `/api/sites/${siteId}/content/articles/${article.id}/related`,
+          ),
+          request<PendingSchedule | null>(
+            `/api/sites/${siteId}/content/articles/${article.id}/schedule`,
+          ),
         ]);
         setActivity(activityRows);
         setArticleRedirects(redirectRows);
+        setContentEvents(eventRows);
+        setArticleVersions(versionRows);
+        setRelatedIds(relatedRows.map((row) => row.relatedArticleId));
+        setPendingSchedule(schedule);
       } catch (reason) {
         setMessage(
           reason instanceof Error
@@ -966,13 +1121,24 @@ export function ContentView({
     const data = new FormData(form);
     const publishedAt = data.get("publishedAt");
     const sortOrder = data.get("sortOrder");
+    const [displayTemplateKey, displayTemplateVersion] = String(
+      data.get("displayTemplateSelection") ?? "standard-article@1",
+    ).split("@");
     return {
       ...Object.fromEntries(
         [...data.entries()].filter(
-          ([name, value]) => name !== "noIndex" && value !== "",
+          ([name, value]) =>
+            ![
+              "noIndex",
+              "scheduleAt",
+              "scheduleState",
+              "displayTemplateSelection",
+            ].includes(name) && value !== "",
         ),
       ),
       noIndex: data.get("noIndex") === "on",
+      displayTemplateKey,
+      displayTemplateVersion,
       body: articleBody,
       bodyDocument: articleDocument,
       publishedAt:
@@ -986,11 +1152,20 @@ export function ContentView({
 
   async function reloadActivity(articleId: string) {
     if (!siteId) return;
-    setActivity(
-      await request<Activity[]>(
+    const [activityRows, eventRows, versionRows] = await Promise.all([
+      request<Activity[]>(
         `/api/sites/${siteId}/content/articles/${articleId}/activity`,
       ),
-    );
+      request<ContentEvent[]>(
+        `/api/sites/${siteId}/content/articles/${articleId}/events`,
+      ),
+      request<ArticleVersion[]>(
+        `/api/sites/${siteId}/content/articles/${articleId}/versions`,
+      ),
+    ]);
+    setActivity(activityRows);
+    setContentEvents(eventRows);
+    setArticleVersions(versionRows);
   }
 
   async function removeArticleRedirect(redirectId: string) {
@@ -1034,9 +1209,22 @@ export function ContentView({
           { method: "PATCH", body: JSON.stringify(articlePayload(form)) },
         );
       }
+      const editorialState =
+        status === "review"
+          ? "review"
+          : status === "changes_requested"
+            ? "changes"
+            : null;
+      const publicationState =
+        status === "published" || status === "hidden" || status === "draft"
+          ? status
+          : null;
       const updated = await request<Article>(
-        `/api/sites/${siteId}/content/articles/${editor.id}/status`,
-        { method: "POST", body: JSON.stringify({ status }) },
+        `/api/sites/${siteId}/content/articles/${editor.id}/${editorialState ? "editorial" : "publication"}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ state: editorialState ?? publicationState }),
+        },
       );
       setEditor({ ...current, ...updated });
       setDirty(false);
@@ -1056,6 +1244,136 @@ export function ContentView({
     } finally {
       setStatusBusy(false);
     }
+  }
+
+  async function approveEditorial(form?: HTMLFormElement | null) {
+    if (!siteId || !editor || editor === "new") return;
+    if (form && !form.reportValidity()) return;
+    setStatusBusy(true);
+    try {
+      if (!(await flushAutosave())) return;
+      const updated = await request<Article>(
+        `/api/sites/${siteId}/content/articles/${editor.id}/editorial`,
+        { method: "POST", body: JSON.stringify({ state: "approved" }) },
+      );
+      setEditor((current) =>
+        current && current !== "new" ? { ...current, ...updated } : current,
+      );
+      setMessage("Редакционная версия одобрена");
+      await reloadActivity(editor.id);
+      await load();
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error ? reason.message : "Не удалось одобрить",
+      );
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  async function saveRelatedArticles() {
+    if (!siteId || !editor || editor === "new") return;
+    try {
+      await request(
+        `/api/sites/${siteId}/content/articles/${editor.id}/related`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ articleIds: relatedIds }),
+        },
+      );
+      setMessage("Связанные материалы сохранены");
+      await reloadActivity(editor.id);
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error ? reason.message : "Не удалось сохранить связи",
+      );
+    }
+  }
+
+  async function restoreVersion(version: ArticleVersion) {
+    if (!siteId || !editor || editor === "new") return;
+    if (
+      !window.confirm(`Восстановить версию ${version.versionNumber} как новую?`)
+    )
+      return;
+    try {
+      const restored = await request<Article>(
+        `/api/sites/${siteId}/content/articles/${editor.id}/versions/${version.id}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({ expectedRevision: editor.revision }),
+        },
+      );
+      await openEditor(restored, false);
+      await load();
+      setMessage(`Версия ${version.versionNumber} восстановлена как новая`);
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить версию",
+      );
+    }
+  }
+
+  async function compareVersion(version: ArticleVersion) {
+    if (!siteId || !editor || editor === "new" || !articleVersions.length)
+      return;
+    const current = articleVersions[0];
+    const comparison = await request<{ changes: Record<string, unknown> }>(
+      `/api/sites/${siteId}/content/articles/${editor.id}/versions/compare?from=${version.versionNumber}&to=${current.versionNumber}`,
+    );
+    const fields = Object.keys(comparison.changes);
+    setMessage(
+      fields.length
+        ? `Версия ${version.versionNumber}: изменены поля ${fields.join(", ")}`
+        : `Версия ${version.versionNumber} совпадает с текущей`,
+    );
+  }
+
+  async function scheduleArticle(form: HTMLFormElement) {
+    if (!siteId || !editor || editor === "new") return;
+    const data = new FormData(form);
+    const scheduleAt = String(data.get("scheduleAt") ?? "");
+    const state = String(data.get("scheduleState") ?? "published");
+    if (!scheduleAt) {
+      setMessage("Укажите дату и время перехода");
+      return;
+    }
+    try {
+      const saved = await request<PendingSchedule>(
+        `/api/sites/${siteId}/content/articles/${editor.id}/schedule`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            state,
+            executeAt: new Date(scheduleAt).toISOString(),
+          }),
+        },
+      );
+      setPendingSchedule(saved);
+      setMessage("Переход запланирован");
+      await reloadActivity(editor.id);
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось создать расписание",
+      );
+    }
+  }
+
+  async function cancelArticleSchedule() {
+    if (!siteId || !editor || editor === "new") return;
+    await request(
+      `/api/sites/${siteId}/content/articles/${editor.id}/schedule`,
+      {
+        method: "DELETE",
+      },
+    );
+    setPendingSchedule(null);
+    setMessage("Запланированный переход отменён");
+    await reloadActivity(editor.id);
   }
 
   async function addComment() {
@@ -1116,7 +1434,7 @@ export function ContentView({
     if (!siteId || !editor || editor === "new") return;
     if (
       !window.confirm(
-        `Удалить статью «${editor.title}» без возможности восстановления?`,
+        `Переместить статью «${editor.title}» в корзину? Её можно восстановить.`,
       )
     )
       return;
@@ -1131,7 +1449,7 @@ export function ContentView({
       nextLocation.searchParams.delete("contentArticle");
       window.history.replaceState({}, "", nextLocation);
       setSelectedIds((current) => current.filter((id) => id !== editor.id));
-      setMessage("Статья удалена");
+      setMessage("Статья перемещена в корзину");
       await load();
     } catch (reason) {
       setMessage(
@@ -1168,15 +1486,13 @@ export function ContentView({
     event.preventDefault();
     if (!siteId || !categoryEditor) return;
     const data = new FormData(event.currentTarget);
-    const categoryPublishedAt = String(data.get("publishedAt") ?? "");
+    const [displayTemplateKey, displayTemplateVersion] = String(
+      data.get("displayTemplateSelection") ?? "standard-category@1",
+    ).split("@");
     const payload = {
       name: String(data.get("name") ?? ""),
       slug: String(data.get("slug") ?? ""),
       description: String(data.get("description") ?? "").trim() || null,
-      status: String(data.get("status") ?? "active"),
-      publishedAt: categoryPublishedAt
-        ? new Date(categoryPublishedAt).toISOString()
-        : null,
       sortOrder: Number(data.get("sortOrder") ?? 0),
       color: String(data.get("color") ?? "#9f91ef"),
       parentId: String(data.get("parentId") ?? "") || null,
@@ -1186,6 +1502,8 @@ export function ContentView({
       seoDescription: String(data.get("seoDescription") ?? "").trim() || null,
       canonicalUrl: String(data.get("canonicalUrl") ?? "").trim() || null,
       noIndex: data.get("noIndex") === "on",
+      displayTemplateKey,
+      displayTemplateVersion,
     };
     setCategoryBusy(true);
     try {
@@ -1221,40 +1539,18 @@ export function ContentView({
     }>(`/api/sites/${siteId}/content/categories/${category.id}/delete-summary`);
     if (
       !window.confirm(
-        `Удалить рубрику «${category.name}»? В ней ${summary.articleCount} материалов (${summary.publishedArticleCount} опубликовано) и ${summary.childCount} дочерних рубрик. Контент будет перемещён, а не удалён.`,
+        `Переместить ветку «${category.name}» в корзину? Будут скрыты ${summary.articleCount} материалов (${summary.publishedArticleCount} опубликовано) и ${summary.childCount} дочерних рубрик. Ветку можно восстановить.`,
       )
     )
       return;
-    let moveToCategoryId: string | null = category.parentId;
-    if (summary.articleCount || summary.childCount) {
-      const targetName = window.prompt(
-        "Куда переместить содержимое? Оставьте поле пустым для родительской рубрики или введите точное название другой рубрики.",
-        "",
-      );
-      if (targetName === null) return;
-      if (targetName.trim()) {
-        const target = categories.find(
-          (item) =>
-            item.id !== category.id &&
-            item.name.toLocaleLowerCase("ru") ===
-              targetName.trim().toLocaleLowerCase("ru"),
-        );
-        if (!target) {
-          setMessage("Рубрика для переноса не найдена — удаление отменено");
-          return;
-        }
-        moveToCategoryId = target.id;
-      }
-    }
     setCategoryBusy(true);
     try {
       await request(`/api/sites/${siteId}/content/categories/${category.id}`, {
         method: "DELETE",
-        body: JSON.stringify({ moveToCategoryId }),
       });
       if (selectedCategoryId === category.id) openCategory(null);
       setCategoryEditor(null);
-      setMessage("Рубрика удалена");
+      setMessage("Ветка рубрики перемещена в корзину");
       await load();
     } catch (reason) {
       setMessage(
@@ -1263,6 +1559,108 @@ export function ContentView({
     } finally {
       setCategoryBusy(false);
     }
+  }
+
+  async function changeCategoryPublication(state: PublicationState) {
+    if (!siteId || !categoryEditor || categoryEditor === "new") return;
+    setCategoryBusy(true);
+    try {
+      const updated = await request<Category>(
+        `/api/sites/${siteId}/content/categories/${categoryEditor.id}/publication`,
+        { method: "POST", body: JSON.stringify({ state }) },
+      );
+      setCategoryEditor(updated);
+      setMessage(`Статус рубрики: ${publicationNames[state]}`);
+      await load();
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось изменить публикацию",
+      );
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  async function scheduleCategory(form: HTMLFormElement) {
+    if (!siteId || !categoryEditor || categoryEditor === "new") return;
+    const data = new FormData(form);
+    const executeAt = String(data.get("categoryScheduleAt") ?? "");
+    const state = String(data.get("categoryScheduleState") ?? "published");
+    if (!executeAt) return setMessage("Укажите дату и время перехода");
+    const saved = await request<PendingSchedule>(
+      `/api/sites/${siteId}/content/categories/${categoryEditor.id}/schedule`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          state,
+          executeAt: new Date(executeAt).toISOString(),
+        }),
+      },
+    );
+    setCategorySchedule(saved);
+    setMessage("Переход рубрики запланирован");
+  }
+
+  async function cancelCategorySchedule() {
+    if (!siteId || !categoryEditor || categoryEditor === "new") return;
+    await request(
+      `/api/sites/${siteId}/content/categories/${categoryEditor.id}/schedule`,
+      { method: "DELETE" },
+    );
+    setCategorySchedule(null);
+    setMessage("Запланированный переход рубрики отменён");
+  }
+
+  async function duplicateArticle() {
+    if (!siteId || !editor || editor === "new") return;
+    const duplicate = await request<Article>(
+      `/api/sites/${siteId}/content/articles/${editor.id}/duplicate`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          slug: `${editor.slug.slice(0, 130)}-copy-${Date.now().toString(36)}`,
+        }),
+      },
+    );
+    await load();
+    await openEditor(duplicate);
+    setMessage("Копия статьи создана как черновик");
+  }
+
+  async function duplicateCategory() {
+    if (!siteId || !categoryEditor || categoryEditor === "new") return;
+    const duplicate = await request<Category>(
+      `/api/sites/${siteId}/content/categories/${categoryEditor.id}/duplicate`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          slug: `${categoryEditor.slug.slice(0, 70)}-copy-${Date.now().toString(36)}`,
+        }),
+      },
+    );
+    await load();
+    setCategoryEditor(duplicate);
+    setMessage("Копия рубрики создана как черновик");
+  }
+
+  async function openTrash() {
+    if (!siteId) return;
+    setTrash(
+      await request<{ articles: Article[]; categories: Category[] }>(
+        `/api/sites/${siteId}/content/trash`,
+      ),
+    );
+  }
+
+  async function restoreFromTrash(type: "articles" | "categories", id: string) {
+    if (!siteId) return;
+    await request(`/api/sites/${siteId}/content/${type}/${id}/restore`, {
+      method: "POST",
+    });
+    await Promise.all([load(), openTrash()]);
+    setMessage("Материал восстановлен как черновик");
   }
 
   if (loading) return <div className="section-state">Загружаем материалы…</div>;
@@ -1278,6 +1676,9 @@ export function ContentView({
             </div>
             {canEdit ? (
               <div className="content-add-menu">
+                <button type="button" onClick={() => void openTrash()}>
+                  Корзина
+                </button>
                 <button
                   className="primary-button"
                   disabled={!siteId}
@@ -1307,7 +1708,7 @@ export function ContentView({
                       role="menuitem"
                       onClick={() => {
                         setAddMenuOpen(false);
-                        setCategoryTab("main");
+                        setCategoryTab("parameters");
                         setCategoryEditor("new");
                         setNewCategoryParentId(
                           selectedCategoryId === "uncategorized"
@@ -1323,6 +1724,44 @@ export function ContentView({
               </div>
             ) : null}
           </section>
+          {trash ? (
+            <section className="directory-form">
+              <header className="category-level-heading">
+                <strong>Корзина</strong>
+                <button type="button" onClick={() => setTrash(null)}>
+                  Закрыть
+                </button>
+              </header>
+              {[
+                ...trash.categories.map((item) => ({
+                  type: "categories" as const,
+                  id: item.id,
+                  name: `Рубрика: ${item.name}`,
+                })),
+                ...trash.articles.map((item) => ({
+                  type: "articles" as const,
+                  id: item.id,
+                  name: `Статья: ${item.title}`,
+                })),
+              ].map((item) => (
+                <div
+                  className="workflow-actions"
+                  key={`${item.type}-${item.id}`}
+                >
+                  <span>{item.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => void restoreFromTrash(item.type, item.id)}
+                  >
+                    Восстановить
+                  </button>
+                </div>
+              ))}
+              {!trash.categories.length && !trash.articles.length ? (
+                <p>Корзина пуста.</p>
+              ) : null}
+            </section>
+          ) : null}
 
           {message ? <div className="inline-message">{message}</div> : null}
           <section className="stats-grid" aria-label="Сводка по контенту">
@@ -1337,7 +1776,7 @@ export function ContentView({
             <article>
               <span className="stat-icon amber">◷</span>
               <div>
-                <b>{count("review")}</b>
+                <b>{count("editorial:review")}</b>
                 <small>На согласовании</small>
               </div>
               <em className="muted">требуют внимания</em>
@@ -1345,7 +1784,7 @@ export function ContentView({
             <article>
               <span className="stat-icon green">✓</span>
               <div>
-                <b>{count("published")}</b>
+                <b>{count("publication:published")}</b>
                 <small>Опубликовано</small>
               </div>
               <em>готовы на сайте</em>
@@ -1353,7 +1792,7 @@ export function ContentView({
             <article>
               <span className="stat-icon blue">✎</span>
               <div>
-                <b>{count("draft")}</b>
+                <b>{count("editorial:draft")}</b>
                 <small>Черновики</small>
               </div>
               <em className="muted">в работе</em>
@@ -1366,10 +1805,14 @@ export function ContentView({
                 {(
                   [
                     ["all", "Все"],
-                    ["draft", "Черновики"],
-                    ["review", "Согласование"],
-                    ["published", "Опубликовано"],
-                    ["hidden", "Скрыто"],
+                    ["editorial:draft", "Черновики"],
+                    ["editorial:review", "Согласование"],
+                    ["editorial:changes", "Нужны правки"],
+                    ["editorial:approved", "Одобрено"],
+                    ["publication:published", "Опубликовано"],
+                    ["publication:hidden", "Скрыто"],
+                    ["publication:disabled", "Отключено"],
+                    ["publication:archive", "Архив"],
                   ] as const
                 ).map(([value, label]) => (
                   <button
@@ -1452,6 +1895,18 @@ export function ContentView({
                       <button
                         className="primary"
                         disabled={bulkBusy || !canApproveSelected}
+                        onClick={() =>
+                          void changeSelectedStatus(
+                            "published",
+                            `Одобрить выбранные материалы (${selectedArticles.length})?`,
+                          )
+                        }
+                      >
+                        Одобрить
+                      </button>
+                      <button
+                        className="primary"
+                        disabled={bulkBusy || !canPublishSelected}
                         onClick={() =>
                           void changeSelectedStatus(
                             "published",
@@ -1650,12 +2105,28 @@ export function ContentView({
                           const category = categoryById.get(selectedCategoryId);
                           if (!category) return;
                           setCategoryEditor(category);
-                          setCategoryTab("main");
+                          setCategoryTab("parameters");
                           setNewCategoryParentId(null);
                           if (siteId)
-                            void request<typeof categoryActivity>(
-                              `/api/sites/${siteId}/content/categories/${category.id}/activity`,
-                            ).then(setCategoryActivity);
+                            void Promise.all([
+                              request<ContentEvent[]>(
+                                `/api/sites/${siteId}/content/categories/${category.id}/events`,
+                              ),
+                              request<PendingSchedule | null>(
+                                `/api/sites/${siteId}/content/categories/${category.id}/schedule`,
+                              ),
+                            ]).then(([rows, schedule]) => {
+                              setCategoryActivity(
+                                rows.map((row) => ({
+                                  id: row.id,
+                                  action: row.eventType,
+                                  message: row.reason,
+                                  createdAt: row.createdAt,
+                                  user: row.actor,
+                                })),
+                              );
+                              setCategorySchedule(schedule);
+                            });
                         }}
                       >
                         Настроить категорию
@@ -1746,10 +2217,13 @@ export function ContentView({
                           </td>
                           <td>
                             <span
-                              className={`status status-${article.status === "changes_requested" ? "changes" : article.status}`}
+                              className={`status status-${article.publicationState}`}
                             >
-                              {statusNames[article.status]}
+                              {publicationNames[article.publicationState]}
                             </span>
+                            <small>
+                              {editorialNames[article.editorialState]}
+                            </small>
                           </td>
                           <td className="date-cell">
                             {new Intl.DateTimeFormat("ru", {
@@ -1828,11 +2302,9 @@ export function ContentView({
           <nav className="category-settings-tabs" aria-label="Разделы рубрики">
             {(
               [
-                ["main", "Основное"],
-                ["position", "Положение"],
-                ["display", "Отображение"],
+                ["parameters", "Параметры"],
                 ["seo", "SEO"],
-                ["history", "История"],
+                ["history", "История изменений"],
               ] as const
             ).map(([value, label]) => (
               <button
@@ -1850,7 +2322,7 @@ export function ContentView({
             onSubmit={saveCategory}
           >
             <div
-              className={`category-tab-panel ${categoryTab === "main" ? "active" : ""}`}
+              className={`category-tab-panel ${categoryTab === "parameters" ? "active" : ""}`}
             >
               <label>
                 <span>Название</span>
@@ -1892,7 +2364,7 @@ export function ContentView({
               </label>
             </div>
             <div
-              className={`category-tab-panel ${categoryTab === "position" ? "active" : ""}`}
+              className={`category-tab-panel ${categoryTab === "parameters" ? "active" : ""}`}
             >
               <label>
                 <span>Родительская рубрика</span>
@@ -1932,34 +2404,106 @@ export function ContentView({
               </label>
             </div>
             <div
-              className={`category-tab-panel ${categoryTab === "display" ? "active" : ""}`}
+              className={`category-tab-panel ${categoryTab === "parameters" ? "active" : ""}`}
             >
+              {categoryEditor !== "new" ? (
+                <div className="workflow-panel">
+                  <strong>
+                    Публикация:{" "}
+                    {publicationNames[categoryEditor.publicationState]}
+                  </strong>
+                  <div className="workflow-actions">
+                    {(
+                      [
+                        "draft",
+                        "published",
+                        "hidden",
+                        "disabled",
+                        "archive",
+                      ] as PublicationState[]
+                    ).map((state) => (
+                      <button
+                        key={state}
+                        type="button"
+                        disabled={
+                          categoryBusy ||
+                          state === categoryEditor.publicationState
+                        }
+                        onClick={() => void changeCategoryPublication(state)}
+                      >
+                        {publicationNames[state]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="editor-grid publication-settings">
+                    {categorySchedule ? (
+                      <div className="cms-preview-action">
+                        <span>
+                          {
+                            publicationNames[
+                              categorySchedule.targetPublicationState
+                            ]
+                          }{" "}
+                          ·{" "}
+                          {new Intl.DateTimeFormat("ru", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          }).format(new Date(categorySchedule.executeAt))}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void cancelCategorySchedule()}
+                        >
+                          Отменить
+                        </button>
+                      </div>
+                    ) : null}
+                    <input type="datetime-local" name="categoryScheduleAt" />
+                    <select
+                      name="categoryScheduleState"
+                      defaultValue="published"
+                    >
+                      <option value="published">Опубликовать</option>
+                      <option value="hidden">Скрыть</option>
+                      <option value="disabled">Отключить</option>
+                      <option value="archive">В архив</option>
+                      <option value="draft">В черновик</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={(event) =>
+                        event.currentTarget.form &&
+                        void scheduleCategory(event.currentTarget.form)
+                      }
+                    >
+                      Запланировать
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p>Новая рубрика будет создана как черновик.</p>
+              )}
               <label>
-                <span>Видимость</span>
+                <span>Шаблон рубрики</span>
                 <select
-                  name="status"
+                  name="displayTemplateSelection"
                   defaultValue={
-                    categoryEditor === "new" ? "active" : categoryEditor.status
+                    categoryEditor === "new"
+                      ? "standard-category@1"
+                      : `${categoryEditor.displayTemplateKey}@${categoryEditor.displayTemplateVersion}`
                   }
                 >
-                  <option value="active">Активна</option>
-                  <option value="hidden">Скрыта</option>
-                  <option value="draft">Черновик</option>
+                  {templates
+                    .filter((template) => template.kind === "category")
+                    .map((template) => (
+                      <option
+                        key={template.id}
+                        value={`${template.key}@${template.version}`}
+                      >
+                        {template.name} · v{template.version}
+                      </option>
+                    ))}
                 </select>
-              </label>
-              <label>
-                <span>Показывать с даты</span>
-                <input
-                  name="publishedAt"
-                  type="datetime-local"
-                  defaultValue={
-                    categoryEditor !== "new" && categoryEditor.publishedAt
-                      ? new Date(categoryEditor.publishedAt)
-                          .toISOString()
-                          .slice(0, 16)
-                      : ""
-                  }
-                />
               </label>
               <div className="category-visual-fields">
                 <label>
@@ -2146,14 +2690,23 @@ export function ContentView({
             </div>
             <div className="directory-form-actions">
               {categoryEditor !== "new" ? (
-                <button
-                  type="button"
-                  className="danger"
-                  disabled={categoryBusy}
-                  onClick={() => void deleteCategory(categoryEditor)}
-                >
-                  Удалить
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={categoryBusy}
+                    onClick={() => void duplicateCategory()}
+                  >
+                    Создать копию
+                  </button>
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={categoryBusy}
+                    onClick={() => void deleteCategory(categoryEditor)}
+                  >
+                    В корзину
+                  </button>
+                </>
               ) : null}
               <button disabled={categoryBusy}>
                 {categoryBusy ? "Сохраняем…" : "Сохранить"}
@@ -2207,11 +2760,9 @@ export function ContentView({
                 {(
                   [
                     ["editor", "Редактор"],
-                    ["main", "Главное"],
-                    ["publication", "Публикация"],
-                    ["display", "Отображение"],
+                    ["parameters", "Параметры"],
                     ["seo", "SEO"],
-                    ["history", "История"],
+                    ["history", "История изменений"],
                   ] as const
                 ).map(([id, label]) => (
                   <button
@@ -2250,7 +2801,7 @@ export function ContentView({
                 ) : null}
               </nav>
               <label
-                className={`article-tab-panel ${editorTab === "main" ? "active" : ""}`}
+                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
               >
                 Название
                 <input
@@ -2262,7 +2813,7 @@ export function ContentView({
                 />
               </label>
               <label
-                className={`article-tab-panel ${editorTab === "main" ? "active" : ""}`}
+                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
               >
                 Slug
                 <input
@@ -2284,7 +2835,7 @@ export function ContentView({
                 />
               </label>
               <label
-                className={`article-tab-panel ${editorTab === "main" ? "active" : ""}`}
+                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
               >
                 Краткое описание
                 <textarea
@@ -2313,7 +2864,7 @@ export function ContentView({
                 />
               </div>
               <div
-                className={`editor-grid article-tab-panel ${editorTab === "main" ? "active" : ""}`}
+                className={`editor-grid article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
               >
                 <label>
                   Категория
@@ -2353,7 +2904,7 @@ export function ContentView({
                 </label>
               </div>
               <label
-                className={`article-tab-panel ${editorTab === "display" ? "active" : ""}`}
+                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
               >
                 Обложка
                 <select
@@ -2372,7 +2923,7 @@ export function ContentView({
                 </select>
               </label>
               <label
-                className={`article-tab-panel ${editorTab === "display" ? "active" : ""}`}
+                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
               >
                 Изображение превью
                 <select
@@ -2391,6 +2942,116 @@ export function ContentView({
                 </select>
                 <small>Отдельное изображение для карточек и списков.</small>
               </label>
+              <label
+                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
+              >
+                Шаблон статьи
+                <select
+                  name="displayTemplateSelection"
+                  disabled={!editorCanEdit}
+                  defaultValue={
+                    editor === "new"
+                      ? "standard-article@1"
+                      : `${editor.displayTemplateKey}@${editor.displayTemplateVersion}`
+                  }
+                >
+                  {templates
+                    .filter((template) => template.kind === "article")
+                    .map((template) => (
+                      <option
+                        key={template.id}
+                        value={`${template.key}@${template.version}`}
+                      >
+                        {template.name} · v{template.version}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {editor !== "new" ? (
+                <section
+                  className={`workflow-panel article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
+                >
+                  <strong>Связанные материалы · ручной порядок</strong>
+                  {relatedIds.map((id, index) => {
+                    const related = articles.find(
+                      (article) => article.id === id,
+                    );
+                    return (
+                      <div className="workflow-actions" key={id}>
+                        <span>{related?.title ?? id}</span>
+                        <button
+                          type="button"
+                          disabled={index === 0}
+                          onClick={() =>
+                            setRelatedIds((rows) => {
+                              const next = [...rows];
+                              [next[index - 1], next[index]] = [
+                                next[index],
+                                next[index - 1],
+                              ];
+                              return next;
+                            })
+                          }
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={index === relatedIds.length - 1}
+                          onClick={() =>
+                            setRelatedIds((rows) => {
+                              const next = [...rows];
+                              [next[index], next[index + 1]] = [
+                                next[index + 1],
+                                next[index],
+                              ];
+                              return next;
+                            })
+                          }
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRelatedIds((rows) =>
+                              rows.filter((row) => row !== id),
+                            )
+                          }
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <select
+                    value=""
+                    onChange={(event) => {
+                      if (event.target.value)
+                        setRelatedIds((rows) => [...rows, event.target.value]);
+                    }}
+                  >
+                    <option value="">Добавить материал…</option>
+                    {articles
+                      .filter(
+                        (article) =>
+                          article.id !== editor.id &&
+                          !relatedIds.includes(article.id),
+                      )
+                      .map((article) => (
+                        <option key={article.id} value={article.id}>
+                          {article.title}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void saveRelatedArticles()}
+                  >
+                    Сохранить связи
+                  </button>
+                </section>
+              ) : null}
               <details
                 className={`item-seo-editor article-tab-panel ${editorTab === "seo" ? "active" : ""}`}
                 open
@@ -2476,7 +3137,7 @@ export function ContentView({
               </details>
               {editor === "new" ? (
                 <section
-                  className={`workflow-panel article-tab-panel ${editorTab === "publication" ? "active" : ""}`}
+                  className={`workflow-panel article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
                 >
                   <input type="hidden" name="status" value="draft" />
                   <div className="editor-grid publication-settings">
@@ -2507,7 +3168,7 @@ export function ContentView({
                 </section>
               ) : (
                 <section
-                  className={`workflow-panel article-tab-panel ${editorTab === "publication" ? "active" : ""}`}
+                  className={`workflow-panel article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
                 >
                   <div className="editor-grid publication-settings">
                     <label>
@@ -2542,14 +3203,19 @@ export function ContentView({
                     </label>
                   </div>
                   <header>
-                    <span>Текущий статус</span>
-                    <strong
-                      className={`status status-${editor.status === "changes_requested" ? "changes" : editor.status}`}
-                    >
-                      {statusNames[editor.status]}
-                    </strong>
+                    <span>
+                      Редакция:{" "}
+                      <strong>{editorialNames[editor.editorialState]}</strong>
+                    </span>
+                    <span>
+                      Публикация:{" "}
+                      <strong>
+                        {publicationNames[editor.publicationState]}
+                      </strong>
+                    </span>
                   </header>
-                  {editor.status === "published" && editor.publishedAt ? (
+                  {editor.publicationState === "published" &&
+                  editor.publishedAt ? (
                     <div className="publication-meta">
                       <span>
                         Опубликовано{" "}
@@ -2589,10 +3255,58 @@ export function ContentView({
                         : "Доступные действия зависят от вашей роли в рабочем пространстве."}
                     </p>
                   )}
+                  {pendingSchedule ? (
+                    <div className="cms-preview-action">
+                      <span>
+                        Запланировано:{" "}
+                        {
+                          publicationNames[
+                            pendingSchedule.targetPublicationState
+                          ]
+                        }{" "}
+                        ·{" "}
+                        {new Intl.DateTimeFormat("ru", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(pendingSchedule.executeAt))}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void cancelArticleSchedule()}
+                      >
+                        Отменить
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="editor-grid publication-settings">
+                    <label>
+                      Запланировать переход
+                      <input type="datetime-local" name="scheduleAt" />
+                    </label>
+                    <label>
+                      Состояние
+                      <select name="scheduleState" defaultValue="published">
+                        <option value="published">Опубликовать</option>
+                        <option value="hidden">Скрыть из списков</option>
+                        <option value="disabled">Отключить</option>
+                        <option value="archive">В архив</option>
+                        <option value="draft">В черновик</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={(event) =>
+                        event.currentTarget.form &&
+                        void scheduleArticle(event.currentTarget.form)
+                      }
+                    >
+                      Запланировать
+                    </button>
+                  </div>
                   <div className="workflow-actions">
                     {canEdit &&
-                    (editor.status === "draft" ||
-                      editor.status === "changes_requested") ? (
+                    (editor.editorialState === "draft" ||
+                      editor.editorialState === "changes") ? (
                       <button
                         disabled={statusBusy}
                         type="button"
@@ -2603,7 +3317,7 @@ export function ContentView({
                         Отправить на согласование
                       </button>
                     ) : null}
-                    {canApprove && editor.status === "review" ? (
+                    {canApprove && editor.editorialState === "review" ? (
                       <>
                         <button
                           disabled={statusBusy}
@@ -2623,17 +3337,31 @@ export function ContentView({
                           type="button"
                           className="publish"
                           onClick={(event) =>
-                            void changeStatus(
-                              "published",
-                              event.currentTarget.form,
-                            )
+                            void approveEditorial(event.currentTarget.form)
                           }
                         >
-                          {statusBusy ? "Публикуем…" : "Опубликовать"}
+                          {statusBusy ? "Одобряем…" : "Одобрить"}
                         </button>
                       </>
                     ) : null}
-                    {canApprove && editor.status === "published" ? (
+                    {canApprove &&
+                    editor.editorialState === "approved" &&
+                    editor.publicationState !== "published" ? (
+                      <button
+                        disabled={statusBusy}
+                        type="button"
+                        className="publish"
+                        onClick={(event) =>
+                          void changeStatus(
+                            "published",
+                            event.currentTarget.form,
+                          )
+                        }
+                      >
+                        Опубликовать
+                      </button>
+                    ) : null}
+                    {canApprove && editor.publicationState === "published" ? (
                       <>
                         <button
                           disabled={statusBusy}
@@ -2659,7 +3387,7 @@ export function ContentView({
                         </button>
                       </>
                     ) : null}
-                    {canApprove && editor.status === "hidden" ? (
+                    {canApprove && editor.publicationState === "hidden" ? (
                       <>
                         <button
                           disabled={statusBusy}
@@ -2685,6 +3413,56 @@ export function ContentView({
                         </button>
                       </>
                     ) : null}
+                    {canApprove && editor.publicationState !== "disabled" ? (
+                      <button
+                        disabled={statusBusy}
+                        type="button"
+                        onClick={() =>
+                          siteId &&
+                          request<Article>(
+                            `/api/sites/${siteId}/content/articles/${editor.id}/publication`,
+                            {
+                              method: "POST",
+                              body: JSON.stringify({ state: "disabled" }),
+                            },
+                          ).then((updated) => {
+                            setEditor((current) =>
+                              current && current !== "new"
+                                ? { ...current, ...updated }
+                                : current,
+                            );
+                            void load();
+                          })
+                        }
+                      >
+                        Отключить
+                      </button>
+                    ) : null}
+                    {canApprove && editor.publicationState !== "archive" ? (
+                      <button
+                        disabled={statusBusy}
+                        type="button"
+                        onClick={() =>
+                          siteId &&
+                          request<Article>(
+                            `/api/sites/${siteId}/content/articles/${editor.id}/publication`,
+                            {
+                              method: "POST",
+                              body: JSON.stringify({ state: "archive" }),
+                            },
+                          ).then((updated) => {
+                            setEditor((current) =>
+                              current && current !== "new"
+                                ? { ...current, ...updated }
+                                : current,
+                            );
+                            void load();
+                          })
+                        }
+                      >
+                        В архив
+                      </button>
+                    ) : null}
                   </div>
                 </section>
               )}
@@ -2707,6 +3485,58 @@ export function ContentView({
                       timeStyle: "short",
                     }).format(new Date(editor.updatedAt))}
                   </p>
+                  <h4>Версии</h4>
+                  <div className="activity-list">
+                    {articleVersions.map((version) => (
+                      <article key={version.id}>
+                        <div>
+                          <strong>Версия {version.versionNumber}</strong>
+                          <small>
+                            {version.actor?.fullName ?? "Система"} ·{" "}
+                            {new Intl.DateTimeFormat("ru", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(new Date(version.createdAt))}
+                          </small>
+                          <p>{version.reason}</p>
+                          {editorCanEdit ? (
+                            <div className="workflow-actions">
+                              <button
+                                type="button"
+                                onClick={() => void compareVersion(version)}
+                              >
+                                Сравнить с текущей
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void restoreVersion(version)}
+                              >
+                                Восстановить как новую
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <h4>Неизменяемые события</h4>
+                  <div className="activity-list">
+                    {contentEvents.map((item) => (
+                      <article key={item.id}>
+                        <div>
+                          <strong>{item.actor?.fullName ?? "Система"}</strong>
+                          <small>
+                            {new Intl.DateTimeFormat("ru", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(new Date(item.createdAt))}
+                          </small>
+                          <p>{item.reason ?? item.eventType}</p>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <h4>Обсуждение</h4>
                   <div className="comment-form">
                     <textarea
                       value={comment}
@@ -2760,15 +3590,24 @@ export function ContentView({
                 ) : null}
                 {editor !== "new" &&
                 canEdit &&
-                editor.status !== "published" ? (
-                  <button
-                    type="button"
-                    className="danger"
-                    disabled={statusBusy}
-                    onClick={() => void deleteArticle()}
-                  >
-                    Удалить статью
-                  </button>
+                editor.publicationState !== "published" ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={statusBusy}
+                      onClick={() => void duplicateArticle()}
+                    >
+                      Создать копию
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      disabled={statusBusy}
+                      onClick={() => void deleteArticle()}
+                    >
+                      В корзину
+                    </button>
+                  </>
                 ) : null}
                 <button
                   type="button"

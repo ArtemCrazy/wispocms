@@ -50,6 +50,66 @@ export enum ArticleStatus {
   HIDDEN = 'hidden',
 }
 
+export enum PublicationState {
+  DRAFT = 'draft',
+  PUBLISHED = 'published',
+  HIDDEN = 'hidden',
+  DISABLED = 'disabled',
+  ARCHIVE = 'archive',
+}
+
+export enum EditorialState {
+  DRAFT = 'draft',
+  REVIEW = 'review',
+  CHANGES = 'changes',
+  APPROVED = 'approved',
+}
+
+export enum ContentEntityType {
+  ARTICLE = 'article',
+  CATEGORY = 'category',
+}
+
+export enum ContentActorKind {
+  USER = 'user',
+  SYSTEM = 'system',
+}
+
+export enum ContentEventType {
+  CREATED = 'created',
+  CONTENT_UPDATED = 'content_updated',
+  PARAMETERS_UPDATED = 'parameters_updated',
+  SEO_UPDATED = 'seo_updated',
+  MOVED = 'moved',
+  PUBLICATION_CHANGED = 'publication_changed',
+  EDITORIAL_CHANGED = 'editorial_changed',
+  SCHEDULED = 'scheduled',
+  SCHEDULE_CANCELLED = 'schedule_cancelled',
+  SCHEDULE_EXECUTED = 'schedule_executed',
+  SCHEDULE_FAILED = 'schedule_failed',
+  VERSION_CREATED = 'version_created',
+  VERSION_RESTORED = 'version_restored',
+  DUPLICATED = 'duplicated',
+  DELETED = 'deleted',
+  RESTORED = 'restored',
+  REDIRECT_CREATED = 'redirect_created',
+  REDIRECT_REMOVED = 'redirect_removed',
+  RELATED_UPDATED = 'related_updated',
+}
+
+export enum ContentScheduleStatus {
+  PENDING = 'pending',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  FAILED = 'failed',
+}
+
+export enum ContentTemplateKind {
+  ARTICLES_LIST = 'articles_list',
+  ARTICLE = 'article',
+  CATEGORY = 'category',
+}
+
 export enum CategoryStatus {
   ACTIVE = 'active',
   HIDDEN = 'hidden',
@@ -477,6 +537,33 @@ export class CategoryEntity {
   @Column({ type: 'varchar', length: 24, default: CategoryStatus.ACTIVE })
   status!: CategoryStatus;
 
+  @Column({
+    name: 'publication_state',
+    type: 'varchar',
+    length: 24,
+    default: PublicationState.DRAFT,
+  })
+  publicationState!: PublicationState;
+
+  @Column({ name: 'display_template_key', type: 'varchar', length: 80 })
+  displayTemplateKey!: string;
+
+  @Column({ name: 'display_template_version', type: 'varchar', length: 40 })
+  displayTemplateVersion!: string;
+
+  @Column({
+    name: 'display_template_config',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  displayTemplateConfig!: Record<string, unknown>;
+
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
+
+  @Column({ name: 'deleted_by_user_id', type: 'uuid', nullable: true })
+  deletedByUserId!: string | null;
+
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
 
@@ -781,6 +868,41 @@ export class ArticleEntity {
   @Column({ type: 'varchar', length: 32, default: ArticleStatus.DRAFT })
   status!: ArticleStatus;
 
+  @Column({
+    name: 'publication_state',
+    type: 'varchar',
+    length: 24,
+    default: PublicationState.DRAFT,
+  })
+  publicationState!: PublicationState;
+
+  @Column({
+    name: 'editorial_state',
+    type: 'varchar',
+    length: 24,
+    default: EditorialState.DRAFT,
+  })
+  editorialState!: EditorialState;
+
+  @Column({ name: 'display_template_key', type: 'varchar', length: 80 })
+  displayTemplateKey!: string;
+
+  @Column({ name: 'display_template_version', type: 'varchar', length: 40 })
+  displayTemplateVersion!: string;
+
+  @Column({
+    name: 'display_template_config',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  displayTemplateConfig!: Record<string, unknown>;
+
+  @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
+
+  @Column({ name: 'deleted_by_user_id', type: 'uuid', nullable: true })
+  deletedByUserId!: string | null;
+
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
 
@@ -875,6 +997,221 @@ export class ArticleActivityEntity {
 
   @Column({ name: 'to_status', type: 'varchar', length: 32, nullable: true })
   toStatus!: ArticleStatus | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('site_content_templates')
+@Unique(['siteId', 'kind', 'key', 'version'])
+export class SiteContentTemplateEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ type: 'varchar', length: 32 })
+  kind!: ContentTemplateKind;
+
+  @Column({ type: 'varchar', length: 80 })
+  key!: string;
+
+  @Column({ type: 'varchar', length: 40 })
+  version!: string;
+
+  @Column({ type: 'varchar', length: 160 })
+  name!: string;
+
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  config!: Record<string, unknown>;
+
+  @Column({ name: 'is_active', type: 'boolean', default: true })
+  isActive!: boolean;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('article_section_settings')
+@Unique(['siteId'])
+export class ArticleSectionSettingsEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ name: 'list_template_key', type: 'varchar', length: 80 })
+  listTemplateKey!: string;
+
+  @Column({ name: 'list_template_version', type: 'varchar', length: 40 })
+  listTemplateVersion!: string;
+
+  @Column({
+    name: 'list_template_config',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  listTemplateConfig!: Record<string, unknown>;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+
+@Entity('article_related_items')
+@Unique(['articleId', 'relatedArticleId'])
+export class ArticleRelatedItemEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'article_id', type: 'uuid' })
+  articleId!: string;
+
+  @ManyToOne(() => ArticleEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'article_id' })
+  article!: ArticleEntity;
+
+  @Column({ name: 'related_article_id', type: 'uuid' })
+  relatedArticleId!: string;
+
+  @ManyToOne(() => ArticleEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'related_article_id' })
+  relatedArticle!: ArticleEntity;
+
+  @Column({ name: 'sort_order', type: 'integer', default: 0 })
+  sortOrder!: number;
+}
+
+@Entity('article_versions')
+@Unique(['articleId', 'versionNumber'])
+export class ArticleVersionEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'article_id', type: 'uuid' })
+  articleId!: string;
+
+  @ManyToOne(() => ArticleEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'article_id' })
+  article!: ArticleEntity;
+
+  @Column({ name: 'version_number', type: 'integer' })
+  versionNumber!: number;
+
+  @Column({ type: 'jsonb' })
+  snapshot!: Record<string, unknown>;
+
+  @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
+  actorUserId!: string | null;
+
+  @ManyToOne(() => UserEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'actor_user_id' })
+  actor!: UserEntity | null;
+
+  @Column({ type: 'text', nullable: true })
+  reason!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('content_events')
+@Index(['groupId'])
+export class ContentEventEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @Column({ name: 'entity_type', type: 'varchar', length: 24 })
+  entityType!: ContentEntityType;
+
+  @Column({ name: 'entity_id', type: 'uuid' })
+  entityId!: string;
+
+  @Column({ name: 'event_type', type: 'varchar', length: 40 })
+  eventType!: ContentEventType;
+
+  @Column({ name: 'actor_kind', type: 'varchar', length: 16 })
+  actorKind!: ContentActorKind;
+
+  @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
+  actorUserId!: string | null;
+
+  @ManyToOne(() => UserEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'actor_user_id' })
+  actor!: UserEntity | null;
+
+  @Column({ type: 'text', nullable: true })
+  reason!: string | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  before!: Record<string, unknown> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  after!: Record<string, unknown> | null;
+
+  @Column({ type: 'jsonb', nullable: true })
+  changes!: Record<string, unknown> | null;
+
+  @Column({ name: 'version_id', type: 'uuid', nullable: true })
+  versionId!: string | null;
+
+  @Column({ name: 'group_id', type: 'uuid', nullable: true })
+  groupId!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('content_status_schedules')
+export class ContentStatusScheduleEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @Column({ name: 'entity_type', type: 'varchar', length: 24 })
+  entityType!: ContentEntityType;
+
+  @Column({ name: 'entity_id', type: 'uuid' })
+  entityId!: string;
+
+  @Column({ name: 'target_publication_state', type: 'varchar', length: 24 })
+  targetPublicationState!: PublicationState;
+
+  @Column({ name: 'execute_at', type: 'timestamptz' })
+  executeAt!: Date;
+
+  @Column({
+    type: 'varchar',
+    length: 24,
+    default: ContentScheduleStatus.PENDING,
+  })
+  status!: ContentScheduleStatus;
+
+  @Column({ name: 'requested_by_user_id', type: 'uuid', nullable: true })
+  requestedByUserId!: string | null;
+
+  @Column({ name: 'attempt_count', type: 'integer', default: 0 })
+  attemptCount!: number;
+
+  @Column({ name: 'executed_at', type: 'timestamptz', nullable: true })
+  executedAt!: Date | null;
+
+  @Column({ name: 'last_error', type: 'text', nullable: true })
+  lastError!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
@@ -1234,6 +1571,12 @@ export const databaseEntities = [
   ArticleEntity,
   ArticleRedirectEntity,
   ArticleActivityEntity,
+  SiteContentTemplateEntity,
+  ArticleSectionSettingsEntity,
+  ArticleRelatedItemEntity,
+  ArticleVersionEntity,
+  ContentEventEntity,
+  ContentStatusScheduleEntity,
   PageEntity,
   PrivacyLegalModelEntity,
   PrivacyPolicyStateEntity,

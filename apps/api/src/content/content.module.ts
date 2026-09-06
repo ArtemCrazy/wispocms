@@ -4,19 +4,26 @@ import { AuthModule } from '../auth/auth.module';
 import {
   ArticleActivityEntity,
   ArticleEntity,
+  ArticleRelatedItemEntity,
   ArticleRedirectEntity,
+  ArticleSectionSettingsEntity,
+  ArticleVersionEntity,
   AuthorEntity,
   BannerEntity,
   CategoryEntity,
   CategoryActivityEntity,
   CategoryRedirectEntity,
+  ContentEventEntity,
+  ContentStatusScheduleEntity,
   MediaEntity,
   PageEntity,
   PrivacyPolicyStateEntity,
   SiteEntity,
+  SiteContentTemplateEntity,
   WorkspaceMembershipEntity,
 } from '../database/entities';
 import { ContentController } from './content.controller';
+import { ContentLifecycleService } from './content-lifecycle.service';
 import { ContentService } from './content.service';
 import { PublicSiteController } from './public-site.controller';
 
@@ -33,6 +40,12 @@ import { PublicSiteController } from './public-site.controller';
       ArticleEntity,
       ArticleRedirectEntity,
       ArticleActivityEntity,
+      ArticleRelatedItemEntity,
+      ArticleVersionEntity,
+      ArticleSectionSettingsEntity,
+      SiteContentTemplateEntity,
+      ContentEventEntity,
+      ContentStatusScheduleEntity,
       PageEntity,
       PrivacyPolicyStateEntity,
       BannerEntity,
@@ -40,6 +53,6 @@ import { PublicSiteController } from './public-site.controller';
     AuthModule,
   ],
   controllers: [ContentController, PublicSiteController],
-  providers: [ContentService],
+  providers: [ContentService, ContentLifecycleService],
 })
 export class ContentModule {}

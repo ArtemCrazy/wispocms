@@ -24,6 +24,14 @@ const publicCategory = await readFile(
   ),
   "utf8",
 );
+const articlesRoot = await readFile(
+  new URL("../src/app/media-articles-view.tsx", import.meta.url),
+  "utf8",
+);
+const appShell = await readFile(
+  new URL("../src/app/page.tsx", import.meta.url),
+  "utf8",
+);
 
 test("content tree searches article titles and category names without a fake root row", () => {
   assert.match(content, /placeholder="Поиск по рубрикам и статьям"/);
@@ -44,20 +52,22 @@ test("content tree searches article titles and category names without a fake roo
   );
 });
 
-test("category level has persistent URL state and five internal settings tabs", () => {
+test("category level has persistent URL state and three internal settings tabs", () => {
   assert.match(content, /searchParams\.set\("contentCategory", categoryId\)/);
   assert.match(content, /Настроить категорию/);
-  for (const label of [
-    "Основное",
-    "Положение",
-    "Отображение",
-    "SEO",
-    "История",
-  ])
+  for (const label of ["Параметры", "SEO", "История изменений"])
     assert.match(content, new RegExp(`\\["[a-z]+", "${label}"\\]`));
   assert.doesNotMatch(content, /category-panel-scrim/);
   assert.match(content, /delete-summary/);
-  assert.match(content, /moveToCategoryId/);
+  assert.match(content, /restoreFromTrash\(type: "articles" \| "categories"/);
+});
+
+test("articles root owns list template settings and Content is real child navigation", () => {
+  assert.doesNotMatch(articlesRoot, /type Section = "root" \| "template"/);
+  assert.match(articlesRoot, /content\/articles\/settings/);
+  assert.match(articlesRoot, /template\.kind === "articles_list"/);
+  assert.match(appShell, /navigateToArticlesSection\("content"\)/);
+  assert.match(appShell, />Контент</);
 });
 
 test("visual document supports required blocks, arbitrary insertion, ordering and undo", () => {
@@ -89,8 +99,23 @@ test("public render uses typed React elements and category routes redirect perma
   assert.match(publicCategory, /result\.data\.redirectTo/);
 });
 
-test("hidden article lifecycle is exposed in CMS but not treated as published", () => {
-  assert.match(content, /\["hidden", "Скрыто"\]/);
+test("publication and editorial lifecycles are independent", () => {
+  assert.match(content, /type PublicationState/);
+  assert.match(content, /type EditorialState/);
+  assert.match(content, /editorialNames\[editor\.editorialState\]/);
+  assert.match(content, /publicationNames\[editor\.publicationState\]/);
+  assert.match(content, /\/editorial/);
+  assert.match(content, /\/publication/);
   assert.match(content, /changeStatus\(\s*"hidden"/);
-  assert.match(content, /editor\.status === "hidden"/);
+  assert.match(content, /editor\.publicationState === "hidden"/);
+});
+
+test("article final page has four tabs, manual related order, versions, schedules and trash", () => {
+  for (const label of ["Редактор", "Параметры", "SEO", "История изменений"])
+    assert.match(content, new RegExp(`\\["[a-z]+", "${label}"\\]`));
+  assert.doesNotMatch(content, /\["publication", "Публикация"\]/);
+  assert.match(content, /\/related/);
+  assert.match(content, /Восстановить как новую/);
+  assert.match(content, /\/schedule/);
+  assert.match(content, /\/trash/);
 });

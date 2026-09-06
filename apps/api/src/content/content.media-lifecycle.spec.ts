@@ -1,6 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { ArticleStatus, PlatformRole, SiteType } from '../database/entities';
+import {
+  ArticleStatus,
+  PlatformRole,
+  PublicationState,
+  SiteType,
+} from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('ContentService media article lifecycle', () => {
@@ -19,6 +24,7 @@ describe('ContentService media article lifecycle', () => {
     const articles = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn(),
+      findOneByOrFail: jest.fn().mockResolvedValue({ revision: 8 }),
       existsBy: jest.fn().mockResolvedValue(false),
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
@@ -60,7 +66,7 @@ describe('ContentService media article lifecycle', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           siteId: 'site-id',
-          status: ArticleStatus.PUBLISHED,
+          publicationState: PublicationState.PUBLISHED,
           publishedAt: expect.anything(),
         }),
         order: {
@@ -79,6 +85,10 @@ describe('ContentService media article lifecycle', () => {
       siteId: 'site-id',
       slug: 'new-slug',
       status: ArticleStatus.PUBLISHED,
+      publicationState: PublicationState.PUBLISHED,
+      publishedAt: new Date('2026-01-01T00:00:00Z'),
+      deletedAt: null,
+      category: null,
     };
     articles.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(current);
     redirects.findOne.mockResolvedValue({ articleId: 'article-id' });
@@ -89,8 +99,44 @@ describe('ContentService media article lifecycle', () => {
     expect(articles.findOne.mock.calls[1][0].where).toEqual(
       expect.objectContaining({
         id: 'article-id',
-        status: ArticleStatus.PUBLISHED,
-        publishedAt: expect.anything(),
+      }),
+    );
+  });
+
+  it.each([PublicationState.DISABLED, PublicationState.ARCHIVE])(
+    'returns 404 for a directly requested %s article',
+    async (publicationState) => {
+      const { service, articles, redirects } = setup();
+      articles.findOne.mockResolvedValue({
+        id: 'article-id',
+        siteId: 'site-id',
+        slug: 'closed',
+        publicationState,
+        deletedAt: null,
+        category: null,
+      });
+      redirects.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.getPublicArticle('media', 'closed'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    },
+  );
+
+  it('keeps a hidden article reachable by its direct URL', async () => {
+    const { service, articles } = setup();
+    articles.findOne.mockResolvedValue({
+      id: 'article-id',
+      siteId: 'site-id',
+      slug: 'hidden',
+      publicationState: PublicationState.HIDDEN,
+      deletedAt: null,
+      category: null,
+    });
+
+    await expect(service.getPublicArticle('media', 'hidden')).resolves.toEqual(
+      expect.objectContaining({
+        article: expect.objectContaining({ id: 'article-id' }),
       }),
     );
   });

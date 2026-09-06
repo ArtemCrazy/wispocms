@@ -5,9 +5,11 @@ import {
   Delete,
   Get,
   Param,
+  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   StreamableFile,
@@ -28,27 +30,38 @@ import {
   CreateAuthorDto,
   CreateBannerDto,
   CreateCategoryDto,
-  DeleteCategoryDto,
+  DuplicateContentDto,
+  RestoreArticleVersionDto,
+  SchedulePublicationDto,
   UpdateArticleDto,
   UpdateArticleBodyDto,
   UpdateAuthorDto,
   UpdateBannerDto,
   UpdateCategoryDto,
+  UpdateArticleSectionSettingsDto,
+  UpdateEditorialStateDto,
   UpdateMediaDto,
   UpdatePageDto,
   UpdateNotFoundTemplateDto,
+  UpdatePublicationStateDto,
+  UpdateRelatedArticlesDto,
   UpdateSiteSettingsDto,
   UpdateSiteGlobalsDto,
   UpdateSiteLayoutDto,
   UpdateSiteSeoDto,
   UploadMediaDto,
 } from './content.dto';
+import { ContentEntityType, ContentEventType } from '../database/entities';
+import { ContentLifecycleService } from './content-lifecycle.service';
 import { ContentService } from './content.service';
 
 @Controller('sites/:siteId/content')
 @UseGuards(JwtAuthGuard)
 export class ContentController {
-  constructor(private readonly contentService: ContentService) {}
+  constructor(
+    private readonly contentService: ContentService,
+    private readonly lifecycleService: ContentLifecycleService,
+  ) {}
 
   @Get('settings')
   settings(
@@ -191,6 +204,46 @@ export class ContentController {
     return this.contentService.listArticles(siteId, request.auth!);
   }
 
+  @Get('templates')
+  templates(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.listTemplates(siteId, request.auth!);
+  }
+
+  @Get('articles/settings')
+  articleSectionSettings(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.getArticleSectionSettings(
+      siteId,
+      request.auth!,
+    );
+  }
+
+  @Patch('articles/settings')
+  updateArticleSectionSettings(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateArticleSectionSettingsDto,
+  ) {
+    return this.lifecycleService.updateArticleSectionSettings(
+      siteId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Get('trash')
+  trash(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.listTrash(siteId, request.auth!);
+  }
+
   @Get('articles/:articleId/preview')
   previewArticle(
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -257,7 +310,209 @@ export class ContentController {
     @Param('articleId', ParseUUIDPipe) articleId: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.contentService.deleteArticle(siteId, articleId, request.auth!);
+    return this.lifecycleService.softDeleteArticle(
+      siteId,
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Post('articles/:articleId/restore')
+  restoreArticle(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.restoreArticle(
+      siteId,
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Post('articles/:articleId/duplicate')
+  duplicateArticle(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: DuplicateContentDto,
+  ) {
+    return this.lifecycleService.duplicateArticle(
+      siteId,
+      articleId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Post('articles/:articleId/publication')
+  setArticlePublicationState(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdatePublicationStateDto,
+  ) {
+    return this.lifecycleService.setArticlePublicationState(
+      siteId,
+      articleId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Post('articles/:articleId/editorial')
+  setArticleEditorialState(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateEditorialStateDto,
+  ) {
+    return this.lifecycleService.setArticleEditorialState(
+      siteId,
+      articleId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Post('articles/:articleId/schedule')
+  scheduleArticle(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: SchedulePublicationDto,
+  ) {
+    return this.lifecycleService.schedulePublication(
+      siteId,
+      ContentEntityType.ARTICLE,
+      articleId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Delete('articles/:articleId/schedule')
+  cancelArticleSchedule(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.cancelSchedule(
+      siteId,
+      ContentEntityType.ARTICLE,
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Get('articles/:articleId/schedule')
+  articleSchedule(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.getPendingSchedule(
+      siteId,
+      ContentEntityType.ARTICLE,
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Get('articles/:articleId/events')
+  articleEvents(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Query('eventType') eventType?: ContentEventType,
+    @Query('actorUserId') actorUserId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('search') search?: string,
+    @Query('groupId') groupId?: string,
+  ) {
+    return this.lifecycleService.listEvents(
+      siteId,
+      ContentEntityType.ARTICLE,
+      articleId,
+      request.auth!,
+      { eventType, actorUserId, from, to, search, groupId },
+    );
+  }
+
+  @Get('articles/:articleId/versions')
+  articleVersions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.listArticleVersions(
+      siteId,
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Get('articles/:articleId/versions/compare')
+  compareArticleVersions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Query('from', ParseIntPipe) from: number,
+    @Query('to', ParseIntPipe) to: number,
+  ) {
+    return this.lifecycleService.compareArticleVersions(
+      siteId,
+      articleId,
+      request.auth!,
+      from,
+      to,
+    );
+  }
+
+  @Post('articles/:articleId/versions/:versionId/restore')
+  restoreArticleVersion(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestoreArticleVersionDto,
+  ) {
+    return this.lifecycleService.restoreArticleVersion(
+      siteId,
+      articleId,
+      versionId,
+      request.auth!,
+      dto.expectedRevision,
+    );
+  }
+
+  @Get('articles/:articleId/related')
+  relatedArticles(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.getRelatedArticles(
+      siteId,
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Patch('articles/:articleId/related')
+  updateRelatedArticles(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateRelatedArticlesDto,
+  ) {
+    return this.lifecycleService.updateRelatedArticles(
+      siteId,
+      articleId,
+      request.auth!,
+      dto,
+    );
   }
 
   @Get('articles/:articleId/redirects')
@@ -325,13 +580,119 @@ export class ContentController {
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Param('categoryId', ParseUUIDPipe) categoryId: string,
     @Req() request: AuthenticatedRequest,
-    @Body() dto: DeleteCategoryDto,
   ) {
-    return this.contentService.deleteCategory(
+    return this.lifecycleService.softDeleteCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+  }
+
+  @Post('categories/:categoryId/restore')
+  restoreCategory(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.restoreCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+  }
+
+  @Post('categories/:categoryId/duplicate')
+  duplicateCategory(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: DuplicateContentDto,
+  ) {
+    return this.lifecycleService.duplicateCategory(
       siteId,
       categoryId,
       request.auth!,
       dto,
+    );
+  }
+
+  @Post('categories/:categoryId/publication')
+  setCategoryPublicationState(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdatePublicationStateDto,
+  ) {
+    return this.lifecycleService.setCategoryPublicationState(
+      siteId,
+      categoryId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Post('categories/:categoryId/schedule')
+  scheduleCategory(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: SchedulePublicationDto,
+  ) {
+    return this.lifecycleService.schedulePublication(
+      siteId,
+      ContentEntityType.CATEGORY,
+      categoryId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Delete('categories/:categoryId/schedule')
+  cancelCategorySchedule(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.cancelSchedule(
+      siteId,
+      ContentEntityType.CATEGORY,
+      categoryId,
+      request.auth!,
+    );
+  }
+
+  @Get('categories/:categoryId/schedule')
+  categorySchedule(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.getPendingSchedule(
+      siteId,
+      ContentEntityType.CATEGORY,
+      categoryId,
+      request.auth!,
+    );
+  }
+
+  @Get('categories/:categoryId/events')
+  categoryEvents(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+    @Query('eventType') eventType?: ContentEventType,
+    @Query('actorUserId') actorUserId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('search') search?: string,
+    @Query('groupId') groupId?: string,
+  ) {
+    return this.lifecycleService.listEvents(
+      siteId,
+      ContentEntityType.CATEGORY,
+      categoryId,
+      request.auth!,
+      { eventType, actorUserId, from, to, search, groupId },
     );
   }
 

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import {
   ArticleStatus,
   PageKind,
@@ -61,7 +62,7 @@ describe('ContentService authenticated preview', () => {
     expect(result.site.noIndex).toBe(true);
     expect(articles.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'article-id', siteId: 'site-id' },
+        where: expect.objectContaining({ id: 'article-id', siteId: 'site-id' }),
       }),
     );
   });

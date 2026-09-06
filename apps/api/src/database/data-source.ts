@@ -16,6 +16,7 @@ import { AddNotFoundTemplateBinding1789070400000 } from './migrations/1789070400
 import { ExpandMediaArticleLifecycle1789156800000 } from './migrations/1789156800000-ExpandMediaArticleLifecycle';
 import { CompleteArticleCategoryLifecycle1789243200000 } from './migrations/1789243200000-CompleteArticleCategoryLifecycle';
 import { WorkspaceContentCenterAndDomains1789329600000 } from './migrations/1789329600000-WorkspaceContentCenterAndDomains';
+import { ArticlePublishingPlatform1789416000000 } from './migrations/1789416000000-ArticlePublishingPlatform';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -38,6 +39,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       ExpandMediaArticleLifecycle1789156800000,
       CompleteArticleCategoryLifecycle1789243200000,
       WorkspaceContentCenterAndDomains1789329600000,
+      ArticlePublishingPlatform1789416000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

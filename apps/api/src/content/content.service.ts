@@ -16,7 +16,7 @@ import { resolve4, resolve6, resolveCname } from 'node:dns/promises';
 import { mkdir, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
-import { In, LessThanOrEqual, Repository } from 'typeorm';
+import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { SlidingWindowRateLimiter } from '../common/sliding-window-rate-limiter';
 import {
   ArticleEntity,
@@ -31,12 +31,17 @@ import {
   CategoryEntity,
   CategoryRedirectEntity,
   CategoryStatus,
+  ContentEntityType,
+  ContentEventType,
+  ContentTemplateKind,
   DomainStatus,
   MediaEntity,
   PageEntity,
   PageKind,
   PageStatus,
   PlatformRole,
+  PublicationState,
+  EditorialState,
   PrivacyPolicyStateEntity,
   SiteEntity,
   SiteType,
@@ -78,17 +83,14 @@ import {
   UpdateNotFoundTemplateDto,
   DeleteCategoryDto,
 } from './content.dto';
+import { ContentLifecycleService } from './content-lifecycle.service';
 import {
   articleDocumentMediaIds,
   articleDocumentText,
   normalizeArticleDocument,
 } from './article-document';
 import { detectImageMimeType } from './image-signature';
-import {
-  hasSitePermission,
-  permissionForArticleTransition,
-  SitePermission,
-} from './content.permissions';
+import { hasSitePermission, SitePermission } from './content.permissions';
 import { privacyFingerprint } from '../privacy/privacy-generator';
 import {
   getNotFoundTemplate,
@@ -141,13 +143,33 @@ export class ContentService {
     @Optional()
     @InjectRepository(CategoryActivityEntity)
     private readonly categoryActivities?: Repository<CategoryActivityEntity>,
+    @Optional()
+    private readonly lifecycle?: ContentLifecycleService,
   ) {}
 
-  private categoryIsPublic(category: CategoryEntity | null | undefined) {
+  private categoryIsPublic(
+    category: CategoryEntity | null | undefined,
+    allowHidden = false,
+  ) {
     return (
       !category ||
-      (category.status === CategoryStatus.ACTIVE &&
+      (!category.deletedAt &&
+        (category.publicationState === PublicationState.PUBLISHED ||
+          (allowHidden &&
+            category.publicationState === PublicationState.HIDDEN)) &&
         (!category.publishedAt || category.publishedAt <= new Date()))
+    );
+  }
+
+  private articleIsPublic(article: ArticleEntity, allowHidden = false) {
+    return (
+      !article.deletedAt &&
+      (article.publicationState === PublicationState.PUBLISHED ||
+        (allowHidden &&
+          article.publicationState === PublicationState.HIDDEN)) &&
+      (article.publicationState === PublicationState.HIDDEN ||
+        !article.publishedAt ||
+        article.publishedAt <= new Date())
     );
   }
 
@@ -298,7 +320,8 @@ export class ContentService {
         ? this.articles.find({
             where: {
               siteId: site.id,
-              status: ArticleStatus.PUBLISHED,
+              publicationState: PublicationState.PUBLISHED,
+              deletedAt: IsNull(),
               publishedAt: LessThanOrEqual(new Date()),
             },
             relations: {
@@ -327,7 +350,11 @@ export class ContentService {
         : Promise.resolve([]),
       capabilities.categories
         ? this.categories.find({
-            where: { siteId: site.id },
+            where: {
+              siteId: site.id,
+              publicationState: PublicationState.PUBLISHED,
+              deletedAt: IsNull(),
+            },
             order: { sortOrder: 'ASC', createdAt: 'ASC' },
           })
         : Promise.resolve([]),
@@ -525,8 +552,11 @@ export class ContentService {
           ? this.articles.find({
               where: {
                 siteId: site.id,
-                status: ArticleStatus.PUBLISHED,
-                publishedAt: LessThanOrEqual(new Date()),
+                publicationState: In([
+                  PublicationState.PUBLISHED,
+                  PublicationState.HIDDEN,
+                ]),
+                deletedAt: IsNull(),
               },
               relations: { category: true },
             })
@@ -541,20 +571,20 @@ export class ContentService {
     const seoUses = site.seoImageMediaId === mediaId;
     const articleUses = publicArticles.some(
       (article) =>
-        this.categoryIsPublic(article.category) &&
+        this.categoryIsPublic(article.category, true) &&
         (article.coverMediaId === mediaId ||
           article.previewMediaId === mediaId),
     );
     const articleDocumentUses = publicArticles.some(
       (article) =>
-        this.categoryIsPublic(article.category) &&
+        this.categoryIsPublic(article.category, true) &&
         Boolean(
           article.bodyDocument &&
           articleDocumentMediaIds(article.bodyDocument).includes(mediaId),
         ),
     );
     const publicCategoryUses = categoryUses.some((category) =>
-      this.categoryIsPublic(category),
+      this.categoryIsPublic(category, true),
     );
     if (
       !articleUses &&
@@ -587,8 +617,7 @@ export class ContentService {
       where: {
         siteId: site.id,
         slug: normalizedArticleSlug,
-        status: ArticleStatus.PUBLISHED,
-        publishedAt: LessThanOrEqual(new Date()),
+        deletedAt: IsNull(),
       },
       relations: {
         category: true,
@@ -607,8 +636,7 @@ export class ContentService {
           where: {
             id: redirect.articleId,
             siteId: site.id,
-            status: ArticleStatus.PUBLISHED,
-            publishedAt: LessThanOrEqual(new Date()),
+            deletedAt: IsNull(),
           },
           relations: {
             category: true,
@@ -620,24 +648,13 @@ export class ContentService {
         redirectTo = article?.slug ?? null;
       }
     }
-    if (!article) throw new NotFoundException('Материал не найден');
-    if (!this.categoryIsPublic(article.category))
+    if (!article || !this.articleIsPublic(article, true))
+      throw new NotFoundException('Материал не найден');
+    if (!this.categoryIsPublic(article.category, true))
       throw new NotFoundException('Материал не найден');
     const [related, pages, banners] = await Promise.all([
-      this.articles.find({
-        where: {
-          siteId: site.id,
-          status: ArticleStatus.PUBLISHED,
-          publishedAt: LessThanOrEqual(new Date()),
-        },
-        relations: { category: true, coverMedia: true, previewMedia: true },
-        order: {
-          sortOrder: 'ASC',
-          publishedAt: 'DESC',
-          updatedAt: 'DESC',
-        },
-        take: 4,
-      }),
+      this.lifecycle?.resolveRelatedArticles(site.id, article.id, true) ??
+        Promise.resolve([]),
       this.pages.find({
         where: {
           siteId: site.id,
@@ -681,12 +698,7 @@ export class ContentService {
       redirectTo,
       pages,
       banners,
-      related: related
-        .filter(
-          (item) =>
-            item.id !== article.id && this.categoryIsPublic(item.category),
-        )
-        .slice(0, 3),
+      related,
     };
   }
 
@@ -697,12 +709,12 @@ export class ContentService {
     if (!site) throw new NotFoundException('Сайт не найден');
     const slug = categorySlug.trim().toLowerCase();
     let category = await this.categories.findOne({
-      where: { siteId: site.id, slug },
+      where: { siteId: site.id, slug, deletedAt: IsNull() },
       relations: { imageMedia: true },
     });
     let redirectTo: string | null = null;
     if (
-      (!category || !this.categoryIsPublic(category)) &&
+      (!category || !this.categoryIsPublic(category, true)) &&
       this.categoryRedirects
     ) {
       const redirect = await this.categoryRedirects.findOne({
@@ -710,21 +722,26 @@ export class ContentService {
       });
       if (redirect) {
         category = await this.categories.findOne({
-          where: { id: redirect.categoryId, siteId: site.id },
+          where: {
+            id: redirect.categoryId,
+            siteId: site.id,
+            deletedAt: IsNull(),
+          },
           relations: { imageMedia: true },
         });
-        if (category && this.categoryIsPublic(category))
+        if (category && this.categoryIsPublic(category, true))
           redirectTo = category.slug;
       }
     }
-    if (!category || !this.categoryIsPublic(category))
+    if (!category || !this.categoryIsPublic(category, true))
       throw new NotFoundException('Рубрика не найдена');
     const [articles, children, pages] = await Promise.all([
       this.articles.find({
         where: {
           siteId: site.id,
           categoryId: category.id,
-          status: ArticleStatus.PUBLISHED,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
           publishedAt: LessThanOrEqual(new Date()),
         },
         relations: { author: true, coverMedia: true, previewMedia: true },
@@ -735,7 +752,12 @@ export class ContentService {
         },
       }),
       this.categories.find({
-        where: { siteId: site.id, parentId: category.id },
+        where: {
+          siteId: site.id,
+          parentId: category.id,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
+        },
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
       this.pages.find({
@@ -862,7 +884,7 @@ export class ContentService {
   async getArticlePreview(siteId: string, articleId: string, actor: Actor) {
     const site = await this.requireSiteModule(siteId, actor, 'articles');
     const article = await this.articles.findOne({
-      where: { id: articleId, siteId },
+      where: { id: articleId, siteId, deletedAt: IsNull() },
       relations: {
         category: true,
         author: true,
@@ -874,20 +896,8 @@ export class ContentService {
     });
     if (!article) throw new NotFoundException('Материал не найден');
     const [related, pages, banners] = await Promise.all([
-      this.articles.find({
-        where: {
-          siteId,
-          status: ArticleStatus.PUBLISHED,
-          publishedAt: LessThanOrEqual(new Date()),
-        },
-        relations: { category: true, coverMedia: true, previewMedia: true },
-        order: {
-          sortOrder: 'ASC',
-          publishedAt: 'DESC',
-          updatedAt: 'DESC',
-        },
-        take: 4,
-      }),
+      this.lifecycle?.resolveRelatedArticles(siteId, article.id, false) ??
+        Promise.resolve([]),
       this.pages.find({
         where: {
           siteId,
@@ -930,7 +940,7 @@ export class ContentService {
           : article,
       pages,
       banners,
-      related: related.filter((item) => item.id !== article.id).slice(0, 3),
+      related,
     };
   }
 
@@ -950,7 +960,8 @@ export class ContentService {
       this.articles.find({
         where: {
           siteId,
-          status: ArticleStatus.PUBLISHED,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
           publishedAt: LessThanOrEqual(new Date()),
         },
         relations: {
@@ -1532,7 +1543,7 @@ export class ContentService {
   async listArticles(siteId: string, actor: Actor) {
     await this.requireSiteModule(siteId, actor, 'articles');
     const rows = await this.articles.find({
-      where: { siteId },
+      where: { siteId, deletedAt: IsNull() },
       relations: {
         category: true,
         author: true,
@@ -1596,7 +1607,12 @@ export class ContentService {
       );
     if (await this.articles.existsBy({ siteId, slug }))
       throw new ConflictException('Такой slug статьи уже используется');
-    if (dto.status && dto.status !== ArticleStatus.DRAFT)
+    if (
+      (dto.status && dto.status !== ArticleStatus.DRAFT) ||
+      (dto.publicationState &&
+        dto.publicationState !== PublicationState.DRAFT) ||
+      (dto.editorialState && dto.editorialState !== EditorialState.DRAFT)
+    )
       throw new BadRequestException(
         'Новый материал сначала нужно сохранить как черновик',
       );
@@ -1609,6 +1625,15 @@ export class ContentService {
     const body = dto.bodyDocument
       ? articleDocumentText(bodyDocument)
       : (dto.body ?? '');
+    const displayTemplateKey =
+      dto.displayTemplateKey?.trim() || 'standard-article';
+    const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
+    await this.lifecycle?.assertTemplate(
+      siteId,
+      ContentTemplateKind.ARTICLE,
+      displayTemplateKey,
+      displayTemplateVersion,
+    );
     const article = await this.articles.save(
       this.articles.create({
         siteId,
@@ -1619,6 +1644,13 @@ export class ContentService {
         bodyDocument,
         documentVersion: bodyDocument.version,
         status,
+        publicationState: PublicationState.DRAFT,
+        editorialState: EditorialState.DRAFT,
+        displayTemplateKey,
+        displayTemplateVersion,
+        displayTemplateConfig: dto.displayTemplateConfig ?? {},
+        deletedAt: null,
+        deletedByUserId: null,
         categoryId: dto.categoryId ?? null,
         authorId: dto.authorId ?? null,
         coverMediaId: dto.coverMediaId ?? null,
@@ -1628,7 +1660,7 @@ export class ContentService {
         seoDescription: dto.seoDescription?.trim() || null,
         canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
         noIndex: dto.noIndex ?? false,
-        publishedAt: dto.publishedAt ? new Date(dto.publishedAt) : null,
+        publishedAt: null,
         createdByUserId: actor.userId,
         updatedByUserId: actor.userId,
       }),
@@ -1643,6 +1675,14 @@ export class ContentService {
         toStatus: article.status,
       }),
     );
+    await this.lifecycle?.recordArticleChange(
+      null,
+      article,
+      actor.userId,
+      ContentEventType.CREATED,
+      'article created',
+      true,
+    );
     return article;
   }
 
@@ -1654,14 +1694,15 @@ export class ContentService {
   ) {
     await this.requireSiteModule(siteId, actor, 'articles');
     const article = await this.articles.findOne({
-      where: { id: articleId, siteId },
+      where: { id: articleId, siteId, deletedAt: IsNull() },
     });
     if (!article) throw new NotFoundException('Статья не найдена');
     await this.requireSiteModule(
       siteId,
       actor,
       'articles',
-      article.status === ArticleStatus.PUBLISHED
+      article.publicationState === PublicationState.PUBLISHED ||
+        article.publicationState === PublicationState.HIDDEN
         ? SitePermission.EDIT_PUBLISHED
         : SitePermission.EDIT_CONTENT,
     );
@@ -1672,14 +1713,30 @@ export class ContentService {
       dto.coverMediaId,
       dto.previewMediaId,
     );
+    const displayTemplateKey =
+      dto.displayTemplateKey?.trim() || article.displayTemplateKey;
+    const displayTemplateVersion =
+      dto.displayTemplateVersion?.trim() || article.displayTemplateVersion;
+    await this.lifecycle?.assertTemplate(
+      siteId,
+      ContentTemplateKind.ARTICLE,
+      displayTemplateKey,
+      displayTemplateVersion,
+    );
     const slug = dto.slug.trim().toLowerCase();
     const reservedSlugs = new Set(['404', 'privacy-policy', 'search']);
     if (reservedSlugs.has(slug))
       throw new ConflictException('Этот slug зарезервирован системой');
-    if (dto.status && dto.status !== article.status)
+    if (
+      (dto.status && dto.status !== article.status) ||
+      (dto.publicationState &&
+        dto.publicationState !== article.publicationState) ||
+      (dto.editorialState && dto.editorialState !== article.editorialState)
+    )
       throw new BadRequestException(
-        'Статус материала изменяется только через редакционный процесс',
+        'Статусы материала изменяются только через отдельные процессы',
       );
+    const before = Object.assign(new ArticleEntity(), article);
     const previousSlug = article.slug;
     const changes = {
       title: dto.title.trim(),
@@ -1694,6 +1751,10 @@ export class ContentService {
       seoDescription: dto.seoDescription?.trim() || null,
       canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
       noIndex: dto.noIndex ?? false,
+      displayTemplateKey,
+      displayTemplateVersion,
+      displayTemplateConfig:
+        dto.displayTemplateConfig ?? article.displayTemplateConfig,
       publishedAt:
         dto.publishedAt === undefined
           ? article.publishedAt
@@ -1736,7 +1797,7 @@ export class ContentService {
           await manager.update(
             ArticleEntity,
             { id: article.id, siteId },
-            changes,
+            changes as never,
           );
           await manager.upsert(
             ArticleRedirectEntity,
@@ -1746,7 +1807,7 @@ export class ContentService {
           return Object.assign(article, changes);
         })
       : await this.articles
-          .update({ id: article.id, siteId }, changes)
+          .update({ id: article.id, siteId }, changes as never)
           .then(() => Object.assign(article, changes));
     await this.articleActivities.save(
       this.articleActivities.create({
@@ -1758,6 +1819,25 @@ export class ContentService {
         toStatus: null,
       }),
     );
+    await this.lifecycle?.recordArticleChange(
+      before,
+      saved,
+      actor.userId,
+      ContentEventType.PARAMETERS_UPDATED,
+      'article parameters saved',
+      true,
+    );
+    if (slugChanged)
+      await this.lifecycle?.recordEvent({
+        siteId,
+        entityType: ContentEntityType.ARTICLE,
+        entityId: article.id,
+        eventType: ContentEventType.REDIRECT_CREATED,
+        actorUserId: actor.userId,
+        reason: 'slug changed',
+        before: { slug: previousSlug },
+        after: { slug },
+      });
     return saved;
   }
 
@@ -1769,19 +1849,21 @@ export class ContentService {
   ) {
     await this.requireSiteModule(siteId, actor, 'articles');
     const article = await this.articles.findOne({
-      where: { id: articleId, siteId },
+      where: { id: articleId, siteId, deletedAt: IsNull() },
     });
     if (!article) throw new NotFoundException('Статья не найдена');
     await this.requireSiteModule(
       siteId,
       actor,
       'articles',
-      article.status === ArticleStatus.PUBLISHED
+      article.publicationState === PublicationState.PUBLISHED ||
+        article.publicationState === PublicationState.HIDDEN
         ? SitePermission.EDIT_PUBLISHED
         : SitePermission.EDIT_CONTENT,
     );
     if (dto.body === undefined && dto.bodyDocument === undefined)
       throw new BadRequestException('Передайте текст или документ статьи');
+    const before = Object.assign(new ArticleEntity(), article);
     const bodyDocument = normalizeArticleDocument(
       dto.bodyDocument,
       dto.body ?? article.body,
@@ -1815,6 +1897,18 @@ export class ContentService {
         fromStatus: null,
         toStatus: null,
       }),
+    );
+    const savedArticle = await this.articles.findOneByOrFail({
+      id: articleId,
+      siteId,
+    });
+    await this.lifecycle?.recordArticleChange(
+      before,
+      savedArticle,
+      actor.userId,
+      ContentEventType.CONTENT_UPDATED,
+      'article content autosaved',
+      true,
     );
     return {
       id: article.id,
@@ -1874,21 +1968,34 @@ export class ContentService {
     });
     if (!redirect) throw new NotFoundException('Прежний адрес не найден');
     await this.articleRedirects!.remove(redirect);
+    await this.lifecycle?.recordEvent({
+      siteId,
+      entityType: ContentEntityType.ARTICLE,
+      entityId: articleId,
+      eventType: ContentEventType.REDIRECT_REMOVED,
+      actorUserId: actor.userId,
+      before: { fromSlug: redirect.fromSlug },
+      reason: 'article redirect removed',
+    });
     return { id: redirectId };
   }
 
   async listCategories(siteId: string, actor: Actor) {
     await this.requireSiteModule(siteId, actor, 'categories');
     const rows = await this.categories.find({
-      where: { siteId },
+      where: { siteId, deletedAt: IsNull() },
       relations: { imageMedia: true, createdBy: true, updatedBy: true },
       order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
     return Promise.all(
       rows.map(async (category) => {
         const [articleCount, childCount, redirects] = await Promise.all([
-          this.articles.count({ where: { siteId, categoryId: category.id } }),
-          this.categories.count({ where: { siteId, parentId: category.id } }),
+          this.articles.count({
+            where: { siteId, categoryId: category.id, deletedAt: IsNull() },
+          }),
+          this.categories.count({
+            where: { siteId, parentId: category.id, deletedAt: IsNull() },
+          }),
           this.categoryRedirects
             ? this.categoryRedirects.find({
                 where: { siteId, categoryId: category.id },
@@ -1970,14 +2077,24 @@ export class ContentService {
     const imageMediaId = dto.imageMediaId ?? null;
     await this.validateCategoryParent(siteId, parentId);
     await this.validateCategoryImage(siteId, imageMediaId);
+    const displayTemplateKey =
+      dto.displayTemplateKey?.trim() || 'standard-category';
+    const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
+    await this.lifecycle?.assertTemplate(
+      siteId,
+      ContentTemplateKind.CATEGORY,
+      displayTemplateKey,
+      displayTemplateVersion,
+    );
     const category = await this.categories.save(
       this.categories.create({
         siteId,
         name: dto.name.trim(),
         slug,
         description: dto.description?.trim() || null,
-        status: dto.status ?? CategoryStatus.ACTIVE,
-        publishedAt: dto.publishedAt ? new Date(dto.publishedAt) : null,
+        status: CategoryStatus.DRAFT,
+        publicationState: PublicationState.DRAFT,
+        publishedAt: null,
         sortOrder: dto.sortOrder ?? 0,
         color: dto.color ?? '#9f91ef',
         parentId,
@@ -1987,6 +2104,11 @@ export class ContentService {
         seoDescription: dto.seoDescription?.trim() || null,
         canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
         noIndex: dto.noIndex ?? false,
+        displayTemplateKey,
+        displayTemplateVersion,
+        displayTemplateConfig: dto.displayTemplateConfig ?? {},
+        deletedAt: null,
+        deletedByUserId: null,
         createdByUserId: actor.userId,
         updatedByUserId: actor.userId,
       }),
@@ -1998,6 +2120,13 @@ export class ContentService {
         action: 'created',
         message: 'Рубрика создана',
       }),
+    );
+    await this.lifecycle?.recordCategoryChange(
+      null,
+      category,
+      actor.userId,
+      ContentEventType.CREATED,
+      'category created',
     );
     return category;
   }
@@ -2015,9 +2144,28 @@ export class ContentService {
       SitePermission.EDIT_CONTENT,
     );
     const category = await this.categories.findOne({
-      where: { id: categoryId, siteId },
+      where: { id: categoryId, siteId, deletedAt: IsNull() },
     });
     if (!category) throw new NotFoundException('Рубрика не найдена');
+    if (
+      (dto.status && dto.status !== category.status) ||
+      (dto.publicationState &&
+        dto.publicationState !== category.publicationState)
+    )
+      throw new BadRequestException(
+        'Статус рубрики изменяется только через процесс публикации',
+      );
+    const before = Object.assign(new CategoryEntity(), category);
+    const displayTemplateKey =
+      dto.displayTemplateKey?.trim() || category.displayTemplateKey;
+    const displayTemplateVersion =
+      dto.displayTemplateVersion?.trim() || category.displayTemplateVersion;
+    await this.lifecycle?.assertTemplate(
+      siteId,
+      ContentTemplateKind.CATEGORY,
+      displayTemplateKey,
+      displayTemplateVersion,
+    );
     const slug = dto.slug.trim().toLowerCase();
     if (new Set(['404', 'privacy-policy', 'search']).has(slug))
       throw new ConflictException('Этот slug зарезервирован системой');
@@ -2041,7 +2189,7 @@ export class ContentService {
         dto.description === undefined
           ? category.description
           : dto.description?.trim() || null,
-      status: dto.status ?? category.status,
+      status: category.status,
       publishedAt:
         dto.publishedAt === undefined
           ? category.publishedAt
@@ -2069,6 +2217,10 @@ export class ContentService {
           ? (category.canonicalUrl ?? null)
           : dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
       noIndex: dto.noIndex ?? category.noIndex ?? false,
+      displayTemplateKey,
+      displayTemplateVersion,
+      displayTemplateConfig:
+        dto.displayTemplateConfig ?? category.displayTemplateConfig,
       updatedByUserId: actor.userId,
     };
     const previousSlug = category.slug;
@@ -2108,7 +2260,7 @@ export class ContentService {
             await manager.update(
               CategoryEntity,
               { id: categoryId, siteId },
-              changes,
+              changes as never,
             );
             await manager.upsert(
               CategoryRedirectEntity,
@@ -2128,6 +2280,24 @@ export class ContentService {
           : 'Настройки рубрики обновлены',
       }),
     );
+    await this.lifecycle?.recordCategoryChange(
+      before,
+      saved,
+      actor.userId,
+      ContentEventType.PARAMETERS_UPDATED,
+      'category parameters saved',
+    );
+    if (slugChanged)
+      await this.lifecycle?.recordEvent({
+        siteId,
+        entityType: ContentEntityType.CATEGORY,
+        entityId: categoryId,
+        eventType: ContentEventType.REDIRECT_CREATED,
+        actorUserId: actor.userId,
+        reason: 'slug changed',
+        before: { slug: previousSlug },
+        after: { slug },
+      });
     return saved;
   }
 
@@ -2138,15 +2308,24 @@ export class ContentService {
   ) {
     await this.requireSiteModule(siteId, actor, 'categories');
     const category = await this.categories.findOne({
-      where: { id: categoryId, siteId },
+      where: { id: categoryId, siteId, deletedAt: IsNull() },
     });
     if (!category) throw new NotFoundException('Рубрика не найдена');
     const [articleCount, childCount, publishedArticleCount] = await Promise.all(
       [
-        this.articles.count({ where: { siteId, categoryId } }),
-        this.categories.count({ where: { siteId, parentId: categoryId } }),
         this.articles.count({
-          where: { siteId, categoryId, status: ArticleStatus.PUBLISHED },
+          where: { siteId, categoryId, deletedAt: IsNull() },
+        }),
+        this.categories.count({
+          where: { siteId, parentId: categoryId, deletedAt: IsNull() },
+        }),
+        this.articles.count({
+          where: {
+            siteId,
+            categoryId,
+            publicationState: PublicationState.PUBLISHED,
+            deletedAt: IsNull(),
+          },
         }),
       ],
     );
@@ -2163,13 +2342,13 @@ export class ContentService {
   async getCategoryPreview(siteId: string, categoryId: string, actor: Actor) {
     const site = await this.requireSiteModule(siteId, actor, 'categories');
     const category = await this.categories.findOne({
-      where: { id: categoryId, siteId },
+      where: { id: categoryId, siteId, deletedAt: IsNull() },
       relations: { imageMedia: true },
     });
     if (!category) throw new NotFoundException('Рубрика не найдена');
     const [articles, children, pages] = await Promise.all([
       this.articles.find({
-        where: { siteId, categoryId },
+        where: { siteId, categoryId, deletedAt: IsNull() },
         relations: { author: true, coverMedia: true, previewMedia: true },
         order: {
           sortOrder: 'ASC',
@@ -2178,7 +2357,7 @@ export class ContentService {
         },
       }),
       this.categories.find({
-        where: { siteId, parentId: categoryId },
+        where: { siteId, parentId: categoryId, deletedAt: IsNull() },
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
       this.pages.find({
@@ -2285,6 +2464,15 @@ export class ContentService {
     });
     if (!redirect) throw new NotFoundException('Прежний адрес не найден');
     await this.categoryRedirects!.remove(redirect);
+    await this.lifecycle?.recordEvent({
+      siteId,
+      entityType: ContentEntityType.CATEGORY,
+      entityId: categoryId,
+      eventType: ContentEventType.REDIRECT_REMOVED,
+      actorUserId: actor.userId,
+      before: { fromSlug: redirect.fromSlug },
+      reason: 'category redirect removed',
+    });
     return { id: redirectId };
   }
 
@@ -2882,59 +3070,57 @@ export class ContentService {
     actor: Actor,
     dto: ChangeArticleStatusDto,
   ) {
-    await this.requireSiteModule(
-      siteId,
-      actor,
-      'articles',
-      permissionForArticleTransition(dto.status),
-    );
-    const article = await this.articles.findOne({
-      where: { id: articleId, siteId },
-    });
-    if (!article) throw new NotFoundException('Статья не найдена');
-    const allowed: Record<ArticleStatus, ArticleStatus[]> = {
-      [ArticleStatus.DRAFT]: [ArticleStatus.REVIEW, ArticleStatus.HIDDEN],
-      [ArticleStatus.CHANGES]: [ArticleStatus.REVIEW, ArticleStatus.HIDDEN],
-      [ArticleStatus.REVIEW]: [
-        ArticleStatus.CHANGES,
-        ArticleStatus.PUBLISHED,
-        ArticleStatus.HIDDEN,
-      ],
-      [ArticleStatus.PUBLISHED]: [ArticleStatus.DRAFT, ArticleStatus.HIDDEN],
-      [ArticleStatus.HIDDEN]: [
-        ArticleStatus.DRAFT,
-        ArticleStatus.REVIEW,
-        ArticleStatus.PUBLISHED,
-      ],
-    };
-    if (!allowed[article.status].includes(dto.status))
-      throw new BadRequestException('Недопустимый переход статуса');
-    if (
-      dto.status === ArticleStatus.PUBLISHED &&
-      !article.body.trim() &&
-      !article.bodyDocument?.blocks.length
-    )
-      throw new BadRequestException('Перед публикацией заполните текст статьи');
-    const previous = article.status;
-    article.status = dto.status;
-    article.publishedAt =
-      dto.status === ArticleStatus.PUBLISHED
-        ? (article.publishedAt ?? new Date())
-        : dto.status === ArticleStatus.HIDDEN
-          ? article.publishedAt
-          : null;
-    article.updatedByUserId = actor.userId;
-    const saved = await this.articles.save(article);
-    await this.articleActivities.save(
-      this.articleActivities.create({
+    if (!this.lifecycle)
+      throw new ServiceUnavailableException('Сервис публикации недоступен');
+    if (dto.status === ArticleStatus.REVIEW)
+      return this.lifecycle.setArticleEditorialState(siteId, articleId, actor, {
+        state: EditorialState.REVIEW,
+        reason: 'legacy status endpoint',
+      });
+    if (dto.status === ArticleStatus.CHANGES)
+      return this.lifecycle.setArticleEditorialState(siteId, articleId, actor, {
+        state: EditorialState.CHANGES,
+        reason: 'legacy status endpoint',
+      });
+    if (dto.status === ArticleStatus.PUBLISHED) {
+      let article = await this.articles.findOne({
+        where: { id: articleId, siteId, deletedAt: IsNull() },
+      });
+      if (!article) throw new NotFoundException('Статья не найдена');
+      if (
+        article.editorialState === EditorialState.DRAFT ||
+        article.editorialState === EditorialState.CHANGES
+      )
+        article = await this.lifecycle.setArticleEditorialState(
+          siteId,
+          articleId,
+          actor,
+          { state: EditorialState.REVIEW, reason: 'legacy status endpoint' },
+        );
+      if (article.editorialState === EditorialState.REVIEW)
+        await this.lifecycle.setArticleEditorialState(
+          siteId,
+          articleId,
+          actor,
+          { state: EditorialState.APPROVED, reason: 'legacy status endpoint' },
+        );
+      return this.lifecycle.setArticlePublicationState(
+        siteId,
         articleId,
-        userId: actor.userId,
-        type: ArticleActivityType.STATUS_CHANGED,
-        message: null,
-        fromStatus: previous,
-        toStatus: dto.status,
-      }),
-    );
-    return saved;
+        actor,
+        {
+          state: PublicationState.PUBLISHED,
+          reason: 'legacy status endpoint',
+        },
+      );
+    }
+    const state =
+      dto.status === ArticleStatus.HIDDEN
+        ? PublicationState.HIDDEN
+        : PublicationState.DRAFT;
+    return this.lifecycle.setArticlePublicationState(siteId, articleId, actor, {
+      state,
+      reason: 'legacy status endpoint',
+    });
   }
 }

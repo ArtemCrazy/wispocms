@@ -1,9 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
-import { ConflictException, NotFoundException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
+import { ConflictException } from '@nestjs/common';
 import {
   CategoryEntity,
   CategoryStatus,
   PlatformRole,
+  PublicationState,
   SiteType,
 } from '../database/entities';
 import { ContentService } from './content.service';
@@ -127,18 +128,22 @@ describe('ContentService category lifecycle', () => {
     });
   });
 
-  it('does not expose hidden categories through the public route', async () => {
+  it('keeps hidden categories reachable by their direct public URL', async () => {
     const { service, categories, redirects } = setup();
     categories.findOne.mockResolvedValue({
       id: 'category-id',
       siteId: 'site-id',
       slug: 'hidden',
       status: CategoryStatus.HIDDEN,
+      publicationState: PublicationState.HIDDEN,
+      deletedAt: null,
       publishedAt: null,
     });
     redirects.findOne.mockResolvedValue(null);
-    await expect(
-      service.getPublicCategory('media', 'hidden'),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.getPublicCategory('media', 'hidden')).resolves.toEqual(
+      expect.objectContaining({
+        category: expect.objectContaining({ id: 'category-id' }),
+      }),
+    );
   });
 });
