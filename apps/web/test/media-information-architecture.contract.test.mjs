@@ -39,26 +39,22 @@ test("Media Home owns only Template, Banners, and homepage SEO", () => {
   assert.match(home, /kind: "homepage"/);
 });
 
-test("Articles starts with Template and Content and preserves the nested URL", () => {
+test("Articles owns its inline template and Content preserves the nested URL", () => {
   assert.match(shell, /<MediaArticlesView/);
-  assert.match(articles, /<strong>Шаблон<\/strong>/);
+  assert.match(articles, />Шаблон списка<\/span>/);
   assert.match(articles, /<strong>Контент<\/strong>/);
   assert.match(articles, /searchParams\.set\("subview", next\)/);
   assert.match(articles, /window\.addEventListener\("popstate", restore\)/);
-  assert.match(
-    articles,
-    /Детальная настройка шаблона будет добавлена\s+отдельной спецификацией/,
-  );
+  assert.match(articles, /content\/templates/);
+  assert.match(articles, /content\/articles\/settings/);
 });
 
 test("article settings are internal tabs and editor text autosaves safely", () => {
   for (const label of [
     "Редактор",
-    "Главное",
-    "Публикация",
-    "Отображение",
+    "Параметры",
     "SEO",
-    "История",
+    "История изменений",
   ])
     assert.match(editor, new RegExp(`\\["[a-z]+", "${label}"\\]`));
   assert.match(editor, /setTimeout\(\(\) =>/);
