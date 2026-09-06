@@ -27,6 +27,7 @@ import {
   ArticleVersionEntity,
   AuthorEntity,
   CategoryEntity,
+  CategoryRedirectEntity,
   CategoryStatus,
   ContentActorKind,
   ContentEntityType,
@@ -319,17 +320,21 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actorUserId: string | null,
     eventType: ContentEventType,
     reason: string,
+    manager?: EntityManager,
   ) {
-    return this.recordEvent({
-      siteId: after.siteId,
-      entityType: ContentEntityType.CATEGORY,
-      entityId: after.id,
-      eventType,
-      actorUserId,
-      reason,
-      before: before ? this.categorySnapshot(before) : null,
-      after: this.categorySnapshot(after),
-    });
+    return this.recordEvent(
+      {
+        siteId: after.siteId,
+        entityType: ContentEntityType.CATEGORY,
+        entityId: after.id,
+        eventType,
+        actorUserId,
+        reason,
+        before: before ? this.categorySnapshot(before) : null,
+        after: this.categorySnapshot(after),
+      },
+      manager,
+    );
   }
 
   async listEvents(
@@ -682,29 +687,33 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         ? SitePermission.APPROVE
         : SitePermission.EDIT_CONTENT,
     );
-    const category = await this.categories.findOne({
-      where: { id: categoryId, siteId, deletedAt: IsNull() },
+    return this.dataSource.transaction(async (manager) => {
+      const category = await manager.findOne(CategoryEntity, {
+        where: { id: categoryId, siteId, deletedAt: IsNull() },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!category) throw new NotFoundException('Рубрика не найдена');
+      const before = Object.assign(new CategoryEntity(), category);
+      category.publicationState = dto.state;
+      category.status = this.legacyCategoryStatus(dto.state);
+      category.publishedAt =
+        dto.state === PublicationState.PUBLISHED
+          ? (category.publishedAt ?? new Date())
+          : dto.state === PublicationState.HIDDEN
+            ? category.publishedAt
+            : null;
+      category.updatedByUserId = actor.userId;
+      const saved = await manager.save(category);
+      await this.recordCategoryChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.PUBLICATION_CHANGED,
+        dto.reason ?? 'publication state changed',
+        manager,
+      );
+      return saved;
     });
-    if (!category) throw new NotFoundException('Рубрика не найдена');
-    const before = Object.assign(new CategoryEntity(), category);
-    category.publicationState = dto.state;
-    category.status = this.legacyCategoryStatus(dto.state);
-    category.publishedAt =
-      dto.state === PublicationState.PUBLISHED
-        ? (category.publishedAt ?? new Date())
-        : dto.state === PublicationState.HIDDEN
-          ? category.publishedAt
-          : null;
-    category.updatedByUserId = actor.userId;
-    const saved = await this.categories.save(category);
-    await this.recordCategoryChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.PUBLICATION_CHANGED,
-      dto.reason ?? 'publication state changed',
-    );
-    return saved;
   }
 
   async schedulePublication(
@@ -1276,36 +1285,51 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     dto: DuplicateContentDto,
   ) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
-    const source = await this.categories.findOne({
-      where: { id: categoryId, siteId, deletedAt: IsNull() },
+    return this.dataSource.transaction(async (manager) => {
+      const source = await manager.findOne(CategoryEntity, {
+        where: { id: categoryId, siteId, deletedAt: IsNull() },
+      });
+      if (!source) throw new NotFoundException('Рубрика не найдена');
+      if (
+        await manager.exists(CategoryEntity, {
+          where: { siteId, slug: dto.slug },
+        })
+      )
+        throw new ConflictException('Такая рубрика уже существует');
+      if (
+        await manager.exists(CategoryRedirectEntity, {
+          where: { siteId, fromSlug: dto.slug },
+        })
+      )
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой рубрики',
+        );
+      const duplicate = await manager.save(
+        manager.create(CategoryEntity, {
+          ...this.categorySnapshot(source),
+          id: undefined,
+          siteId,
+          name: dto.title?.trim() || `${source.name} — копия`,
+          slug: dto.slug,
+          status: CategoryStatus.DRAFT,
+          publicationState: PublicationState.DRAFT,
+          publishedAt: null,
+          deletedAt: null,
+          deletedByUserId: null,
+          createdByUserId: actor.userId,
+          updatedByUserId: actor.userId,
+        }),
+      );
+      await this.recordCategoryChange(
+        null,
+        duplicate,
+        actor.userId,
+        ContentEventType.CREATED,
+        `duplicated from ${source.id}`,
+        manager,
+      );
+      return duplicate;
     });
-    if (!source) throw new NotFoundException('Рубрика не найдена');
-    if (await this.categories.existsBy({ siteId, slug: dto.slug }))
-      throw new ConflictException('Такая рубрика уже существует');
-    const duplicate = await this.categories.save(
-      this.categories.create({
-        ...this.categorySnapshot(source),
-        id: undefined,
-        siteId,
-        name: dto.title?.trim() || `${source.name} — копия`,
-        slug: dto.slug,
-        status: CategoryStatus.DRAFT,
-        publicationState: PublicationState.DRAFT,
-        publishedAt: null,
-        deletedAt: null,
-        deletedByUserId: null,
-        createdByUserId: actor.userId,
-        updatedByUserId: actor.userId,
-      }),
-    );
-    await this.recordCategoryChange(
-      null,
-      duplicate,
-      actor.userId,
-      ContentEventType.CREATED,
-      `duplicated from ${source.id}`,
-    );
-    return duplicate;
   }
 
   async softDeleteArticle(

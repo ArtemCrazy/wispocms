@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
 import { ConflictException } from '@nestjs/common';
 import {
   CategoryEntity,
@@ -12,7 +12,11 @@ import { ContentService } from './content.service';
 describe('ContentService category lifecycle', () => {
   const actor = { userId: 'admin-id', platformRole: PlatformRole.WISPO_ADMIN };
 
-  function setup() {
+  function setup(lifecycle?: {
+    assertTemplate: jest.Mock;
+    recordCategoryChange: jest.Mock;
+    recordEvent: jest.Mock;
+  }) {
     const site = {
       id: 'site-id',
       workspaceId: 'workspace-id',
@@ -23,6 +27,10 @@ describe('ContentService category lifecycle', () => {
     };
     const manager = {
       findOne: jest.fn(),
+      exists: jest.fn().mockResolvedValue(false),
+      create: jest.fn((entity, value) => value),
+      save: jest.fn(async (value) => value),
+      remove: jest.fn(async (value) => value),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
       upsert: jest.fn().mockResolvedValue(undefined),
@@ -62,28 +70,31 @@ describe('ContentService category lifecycle', () => {
       undefined,
       redirects as never,
       categoryActivities as never,
+      lifecycle as never,
     );
     return { service, categories, articles, redirects, manager };
   }
 
   it('rejects a slug owned by another category redirect before mutation', async () => {
     const { service, categories, redirects, manager } = setup();
+    const category = {
+      id: 'category-id',
+      siteId: 'site-id',
+      name: 'Old',
+      slug: 'old',
+      status: CategoryStatus.ACTIVE,
+      parentId: null,
+      color: '#000000',
+    };
     categories.findOne
-      .mockResolvedValueOnce({
-        id: 'category-id',
-        siteId: 'site-id',
-        name: 'Old',
-        slug: 'old',
-        status: CategoryStatus.ACTIVE,
-        parentId: null,
-        color: '#000000',
-      })
+      .mockResolvedValueOnce(category)
       .mockResolvedValueOnce(null);
     redirects.findOne.mockResolvedValue({
       categoryId: 'foreign-category',
       fromSlug: 'new',
     });
     manager.findOne
+      .mockResolvedValueOnce(category)
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ categoryId: 'foreign-category' });
 
@@ -95,6 +106,47 @@ describe('ContentService category lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(manager.update).not.toHaveBeenCalled();
     expect(manager.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rolls back a category mutation when its append-only event fails', async () => {
+    const lifecycle = {
+      assertTemplate: jest.fn().mockResolvedValue(undefined),
+      recordCategoryChange: jest
+        .fn()
+        .mockRejectedValue(new Error('event insert failed')),
+      recordEvent: jest.fn(),
+    };
+    const { categories, manager, service } = setup(lifecycle);
+    let persisted = false;
+    manager.save.mockImplementation(async (value) => {
+      if (value.slug) persisted = true;
+      return value.slug ? { id: 'category-id', ...value } : value;
+    });
+    categories.manager.transaction.mockImplementation(async (work) => {
+      try {
+        return await work(manager);
+      } catch (error) {
+        persisted = false;
+        throw error;
+      }
+    });
+
+    await expect(
+      service.createCategory('site-id', actor, {
+        name: 'Новая рубрика',
+        slug: 'new-category',
+      }),
+    ).rejects.toThrow('event insert failed');
+
+    expect(persisted).toBe(false);
+    expect(lifecycle.recordCategoryChange).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ slug: 'new-category' }),
+      actor.userId,
+      expect.anything(),
+      'category created',
+      manager,
+    );
   });
 
   it('moves children and articles explicitly before deleting a category', async () => {

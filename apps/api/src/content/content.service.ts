@@ -2113,49 +2113,63 @@ export class ContentService {
       displayTemplateKey,
       displayTemplateVersion,
     );
-    const category = await this.categories.save(
-      this.categories.create({
-        siteId,
-        name: dto.name.trim(),
-        slug,
-        description: dto.description?.trim() || null,
-        status: CategoryStatus.DRAFT,
-        publicationState: PublicationState.DRAFT,
-        publishedAt: null,
-        sortOrder: dto.sortOrder ?? 0,
-        color: dto.color ?? '#9f91ef',
-        parentId,
-        icon: dto.icon?.trim() || null,
-        imageMediaId,
-        seoTitle: dto.seoTitle?.trim() || null,
-        seoDescription: dto.seoDescription?.trim() || null,
-        canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
-        noIndex: dto.noIndex ?? false,
-        displayTemplateKey,
-        displayTemplateVersion,
-        displayTemplateConfig: dto.displayTemplateConfig ?? {},
-        deletedAt: null,
-        deletedByUserId: null,
-        createdByUserId: actor.userId,
-        updatedByUserId: actor.userId,
-      }),
-    );
-    await this.categoryActivities?.save(
-      this.categoryActivities.create({
-        categoryId: category.id,
-        userId: actor.userId,
-        action: 'created',
-        message: 'Рубрика создана',
-      }),
-    );
-    await this.lifecycle?.recordCategoryChange(
-      null,
-      category,
-      actor.userId,
-      ContentEventType.CREATED,
-      'category created',
-    );
-    return category;
+    return this.categories.manager.transaction(async (manager) => {
+      if (await manager.exists(CategoryEntity, { where: { siteId, slug } }))
+        throw new ConflictException('Такая категория уже существует');
+      if (
+        await manager.exists(CategoryRedirectEntity, {
+          where: { siteId, fromSlug: slug },
+        })
+      )
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой рубрики',
+        );
+      const category = await manager.save(
+        manager.create(CategoryEntity, {
+          siteId,
+          name: dto.name.trim(),
+          slug,
+          description: dto.description?.trim() || null,
+          status: CategoryStatus.DRAFT,
+          publicationState: PublicationState.DRAFT,
+          publishedAt: null,
+          sortOrder: dto.sortOrder ?? 0,
+          color: dto.color ?? '#9f91ef',
+          parentId,
+          icon: dto.icon?.trim() || null,
+          imageMediaId,
+          seoTitle: dto.seoTitle?.trim() || null,
+          seoDescription: dto.seoDescription?.trim() || null,
+          canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
+          noIndex: dto.noIndex ?? false,
+          displayTemplateKey,
+          displayTemplateVersion,
+          displayTemplateConfig: dto.displayTemplateConfig ?? {},
+          deletedAt: null,
+          deletedByUserId: null,
+          createdByUserId: actor.userId,
+          updatedByUserId: actor.userId,
+        }),
+      );
+      if (this.categoryActivities)
+        await manager.save(
+          manager.create(CategoryActivityEntity, {
+            categoryId: category.id,
+            userId: actor.userId,
+            action: 'created',
+            message: 'Рубрика создана',
+          }),
+        );
+      await this.lifecycle?.recordCategoryChange(
+        null,
+        category,
+        actor.userId,
+        ContentEventType.CREATED,
+        'category created',
+        manager,
+      );
+      return category;
+    });
   }
 
   async updateCategory(
@@ -2182,7 +2196,6 @@ export class ContentService {
       throw new BadRequestException(
         'Статус рубрики изменяется только через процесс публикации',
       );
-    const before = Object.assign(new CategoryEntity(), category);
     const displayTemplateKey =
       dto.displayTemplateKey?.trim() || category.displayTemplateKey;
     const displayTemplateVersion =
@@ -2250,82 +2263,90 @@ export class ContentService {
         dto.displayTemplateConfig ?? category.displayTemplateConfig,
       updatedByUserId: actor.userId,
     };
-    const previousSlug = category.slug;
-    const slugChanged = previousSlug !== slug;
-    const saved =
-      slugChanged && this.categoryRedirects
-        ? await this.categories.manager.transaction(async (manager) => {
-            const duplicateInTransaction = await manager.findOne(
-              CategoryEntity,
-              { where: { siteId, slug } },
-            );
-            if (
-              duplicateInTransaction &&
-              duplicateInTransaction.id !== categoryId
-            )
-              throw new ConflictException('Такая рубрика уже существует');
-            const targetRedirect = await manager.findOne(
-              CategoryRedirectEntity,
-              { where: { siteId, fromSlug: slug } },
-            );
-            if (targetRedirect && targetRedirect.categoryId !== categoryId)
-              throw new ConflictException(
-                'Этот slug уже сохранён как прежний адрес другой рубрики',
-              );
-            const previousRedirect = await manager.findOne(
-              CategoryRedirectEntity,
-              { where: { siteId, fromSlug: previousSlug } },
-            );
-            if (previousRedirect && previousRedirect.categoryId !== categoryId)
-              throw new ConflictException(
-                'Прежний адрес принадлежит другой рубрике',
-              );
-            if (targetRedirect)
-              await manager.delete(CategoryRedirectEntity, {
-                id: targetRedirect.id,
-              });
-            await manager.update(
-              CategoryEntity,
-              { id: categoryId, siteId },
-              changes as never,
-            );
-            await manager.upsert(
-              CategoryRedirectEntity,
-              { siteId, categoryId, fromSlug: previousSlug },
-              ['siteId', 'fromSlug'],
-            );
-            return Object.assign(category, changes);
-          })
-        : await this.categories.save(Object.assign(category, changes));
-    await this.categoryActivities?.save(
-      this.categoryActivities.create({
-        categoryId,
-        userId: actor.userId,
-        action: slugChanged ? 'slug_changed' : 'updated',
-        message: slugChanged
-          ? `Адрес изменён: ${previousSlug} → ${slug}`
-          : 'Настройки рубрики обновлены',
-      }),
-    );
-    await this.lifecycle?.recordCategoryChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.PARAMETERS_UPDATED,
-      'category parameters saved',
-    );
-    if (slugChanged)
-      await this.lifecycle?.recordEvent({
-        siteId,
-        entityType: ContentEntityType.CATEGORY,
-        entityId: categoryId,
-        eventType: ContentEventType.REDIRECT_CREATED,
-        actorUserId: actor.userId,
-        reason: 'slug changed',
-        before: { slug: previousSlug },
-        after: { slug },
+    return this.categories.manager.transaction(async (manager) => {
+      const locked = await manager.findOne(CategoryEntity, {
+        where: { id: categoryId, siteId, deletedAt: IsNull() },
+        lock: { mode: 'pessimistic_write' },
       });
-    return saved;
+      if (!locked) throw new NotFoundException('Рубрика не найдена');
+      const before = Object.assign(new CategoryEntity(), locked);
+      const previousSlug = locked.slug;
+      const slugChanged = previousSlug !== slug;
+      const duplicateInTransaction = await manager.findOne(CategoryEntity, {
+        where: { siteId, slug },
+      });
+      if (duplicateInTransaction && duplicateInTransaction.id !== categoryId)
+        throw new ConflictException('Такая рубрика уже существует');
+      const targetRedirect = await manager.findOne(CategoryRedirectEntity, {
+        where: { siteId, fromSlug: slug },
+      });
+      if (targetRedirect && targetRedirect.categoryId !== categoryId)
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой рубрики',
+        );
+      if (slugChanged) {
+        const previousRedirect = await manager.findOne(CategoryRedirectEntity, {
+          where: { siteId, fromSlug: previousSlug },
+        });
+        if (previousRedirect && previousRedirect.categoryId !== categoryId)
+          throw new ConflictException(
+            'Прежний адрес принадлежит другой рубрике',
+          );
+        if (targetRedirect)
+          await manager.delete(CategoryRedirectEntity, {
+            id: targetRedirect.id,
+          });
+      }
+      changes.status = locked.status;
+      if (dto.publishedAt === undefined)
+        changes.publishedAt = locked.publishedAt;
+      await manager.update(
+        CategoryEntity,
+        { id: categoryId, siteId },
+        changes as never,
+      );
+      const saved = Object.assign(locked, changes);
+      if (slugChanged)
+        await manager.upsert(
+          CategoryRedirectEntity,
+          { siteId, categoryId, fromSlug: previousSlug },
+          ['siteId', 'fromSlug'],
+        );
+      if (this.categoryActivities)
+        await manager.save(
+          manager.create(CategoryActivityEntity, {
+            categoryId,
+            userId: actor.userId,
+            action: slugChanged ? 'slug_changed' : 'updated',
+            message: slugChanged
+              ? `Адрес изменён: ${previousSlug} → ${slug}`
+              : 'Настройки рубрики обновлены',
+          }),
+        );
+      await this.lifecycle?.recordCategoryChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.PARAMETERS_UPDATED,
+        'category parameters saved',
+        manager,
+      );
+      if (slugChanged)
+        await this.lifecycle?.recordEvent(
+          {
+            siteId,
+            entityType: ContentEntityType.CATEGORY,
+            entityId: categoryId,
+            eventType: ContentEventType.REDIRECT_CREATED,
+            actorUserId: actor.userId,
+            reason: 'slug changed',
+            before: { slug: previousSlug },
+            after: { slug },
+          },
+          manager,
+        );
+      return saved;
+    });
   }
 
   async getCategoryDeleteSummary(
@@ -2457,6 +2478,18 @@ export class ContentService {
         );
       }
       await manager.delete(CategoryEntity, { id: categoryId, siteId });
+      await this.lifecycle?.recordEvent(
+        {
+          siteId,
+          entityType: ContentEntityType.CATEGORY,
+          entityId: categoryId,
+          eventType: ContentEventType.DELETED,
+          actorUserId: actor.userId,
+          reason: 'category permanently deleted after content move',
+          before: this.lifecycle.categorySnapshot(category),
+        },
+        manager,
+      );
     });
     return { id: categoryId };
   }
@@ -2486,21 +2519,27 @@ export class ContentService {
       'categories',
       SitePermission.EDIT_CONTENT,
     );
-    const redirect = await this.categoryRedirects?.findOne({
-      where: { id: redirectId, siteId, categoryId },
+    return this.categories.manager.transaction(async (manager) => {
+      const redirect = await manager.findOne(CategoryRedirectEntity, {
+        where: { id: redirectId, siteId, categoryId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!redirect) throw new NotFoundException('Прежний адрес не найден');
+      await manager.remove(redirect);
+      await this.lifecycle?.recordEvent(
+        {
+          siteId,
+          entityType: ContentEntityType.CATEGORY,
+          entityId: categoryId,
+          eventType: ContentEventType.REDIRECT_REMOVED,
+          actorUserId: actor.userId,
+          before: { fromSlug: redirect.fromSlug },
+          reason: 'category redirect removed',
+        },
+        manager,
+      );
+      return { id: redirectId };
     });
-    if (!redirect) throw new NotFoundException('Прежний адрес не найден');
-    await this.categoryRedirects!.remove(redirect);
-    await this.lifecycle?.recordEvent({
-      siteId,
-      entityType: ContentEntityType.CATEGORY,
-      entityId: categoryId,
-      eventType: ContentEventType.REDIRECT_REMOVED,
-      actorUserId: actor.userId,
-      before: { fromSlug: redirect.fromSlug },
-      reason: 'category redirect removed',
-    });
-    return { id: redirectId };
   }
 
   async listAuthors(siteId: string, actor: Actor) {
