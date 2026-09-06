@@ -38,6 +38,27 @@ describe('ContentService item SEO', () => {
         .mockImplementation((value: Record<string, unknown>) => ({ ...value })),
       save: jest.fn().mockResolvedValue(undefined),
     };
+    const manager = {
+      exists: jest.fn().mockResolvedValue(false),
+      create: jest
+        .fn()
+        .mockImplementation((entity, value: Record<string, unknown>) => ({
+          ...value,
+        })),
+      save: jest
+        .fn()
+        .mockImplementation((value: Record<string, unknown>) =>
+          Promise.resolve({ ...value }),
+        ),
+    };
+    Object.assign(articles, {
+      manager: {
+        transaction: jest.fn(
+          (work: (transactionManager: typeof manager) => Promise<unknown>) =>
+            work(manager),
+        ),
+      },
+    });
     const pages = {
       existsBy: jest.fn().mockResolvedValue(false),
       findOne: jest.fn(),
@@ -61,11 +82,11 @@ describe('ContentService item SEO', () => {
       pages as never,
       {} as never,
     );
-    return { service, articles, pages };
+    return { manager, service, articles, pages };
   }
 
   it('normalizes SEO fields while creating an article', async () => {
-    const { service, articles } = setup();
+    const { manager, service } = setup();
 
     await service.createArticle('site-id', actor, {
       title: 'Материал',
@@ -77,7 +98,8 @@ describe('ContentService item SEO', () => {
       noIndex: true,
     });
 
-    expect(articles.create).toHaveBeenCalledWith(
+    expect(manager.create).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
         seoTitle: 'Заголовок для поиска',
         seoDescription: 'Описание для поиска',

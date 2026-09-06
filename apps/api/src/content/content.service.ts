@@ -1634,56 +1634,69 @@ export class ContentService {
       displayTemplateKey,
       displayTemplateVersion,
     );
-    const article = await this.articles.save(
-      this.articles.create({
-        siteId,
-        title: dto.title.trim(),
-        slug,
-        excerpt: dto.excerpt?.trim() || null,
-        body,
-        bodyDocument,
-        documentVersion: bodyDocument.version,
-        status,
-        publicationState: PublicationState.DRAFT,
-        editorialState: EditorialState.DRAFT,
-        displayTemplateKey,
-        displayTemplateVersion,
-        displayTemplateConfig: dto.displayTemplateConfig ?? {},
-        deletedAt: null,
-        deletedByUserId: null,
-        categoryId: dto.categoryId ?? null,
-        authorId: dto.authorId ?? null,
-        coverMediaId: dto.coverMediaId ?? null,
-        previewMediaId: dto.previewMediaId ?? null,
-        sortOrder: dto.sortOrder ?? 0,
-        seoTitle: dto.seoTitle?.trim() || null,
-        seoDescription: dto.seoDescription?.trim() || null,
-        canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
-        noIndex: dto.noIndex ?? false,
-        publishedAt: null,
-        createdByUserId: actor.userId,
-        updatedByUserId: actor.userId,
-      }),
-    );
-    await this.articleActivities.save(
-      this.articleActivities.create({
-        articleId: article.id,
-        userId: actor.userId,
-        type: ArticleActivityType.UPDATED,
-        message: 'Материал создан',
-        fromStatus: null,
-        toStatus: article.status,
-      }),
-    );
-    await this.lifecycle?.recordArticleChange(
-      null,
-      article,
-      actor.userId,
-      ContentEventType.CREATED,
-      'article created',
-      true,
-    );
-    return article;
+    return this.articles.manager.transaction(async (manager) => {
+      if (await manager.exists(ArticleEntity, { where: { siteId, slug } }))
+        throw new ConflictException('Такой slug статьи уже используется');
+      if (
+        await manager.exists(ArticleRedirectEntity, {
+          where: { siteId, fromSlug: slug },
+        })
+      )
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой статьи',
+        );
+      const article = await manager.save(
+        manager.create(ArticleEntity, {
+          siteId,
+          title: dto.title.trim(),
+          slug,
+          excerpt: dto.excerpt?.trim() || null,
+          body,
+          bodyDocument,
+          documentVersion: bodyDocument.version,
+          status,
+          publicationState: PublicationState.DRAFT,
+          editorialState: EditorialState.DRAFT,
+          displayTemplateKey,
+          displayTemplateVersion,
+          displayTemplateConfig: dto.displayTemplateConfig ?? {},
+          deletedAt: null,
+          deletedByUserId: null,
+          categoryId: dto.categoryId ?? null,
+          authorId: dto.authorId ?? null,
+          coverMediaId: dto.coverMediaId ?? null,
+          previewMediaId: dto.previewMediaId ?? null,
+          sortOrder: dto.sortOrder ?? 0,
+          seoTitle: dto.seoTitle?.trim() || null,
+          seoDescription: dto.seoDescription?.trim() || null,
+          canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
+          noIndex: dto.noIndex ?? false,
+          publishedAt: null,
+          createdByUserId: actor.userId,
+          updatedByUserId: actor.userId,
+        }),
+      );
+      await manager.save(
+        manager.create(ArticleActivityEntity, {
+          articleId: article.id,
+          userId: actor.userId,
+          type: ArticleActivityType.UPDATED,
+          message: 'Материал создан',
+          fromStatus: null,
+          toStatus: article.status,
+        }),
+      );
+      await this.lifecycle?.recordArticleChange(
+        null,
+        article,
+        actor.userId,
+        ContentEventType.CREATED,
+        'article created',
+        true,
+        manager,
+      );
+      return article;
+    });
   }
 
   async updateArticle(
@@ -1736,8 +1749,6 @@ export class ContentService {
       throw new BadRequestException(
         'Статусы материала изменяются только через отдельные процессы',
       );
-    const before = Object.assign(new ArticleEntity(), article);
-    const previousSlug = article.slug;
     const changes = {
       title: dto.title.trim(),
       slug,
@@ -1763,82 +1774,88 @@ export class ContentService {
             : null,
       updatedByUserId: actor.userId,
     };
-    const slugChanged = previousSlug !== slug;
-    const saved = slugChanged
-      ? await this.articles.manager.transaction(async (manager) => {
-          const transactionalDuplicate = await manager.findOne(ArticleEntity, {
-            where: { siteId, slug },
-          });
-          if (
-            transactionalDuplicate &&
-            transactionalDuplicate.id !== article.id
-          )
-            throw new ConflictException('Такой slug статьи уже используется');
-          const targetRedirect = await manager.findOne(ArticleRedirectEntity, {
-            where: { siteId, fromSlug: slug },
-          });
-          if (targetRedirect && targetRedirect.articleId !== article.id)
-            throw new ConflictException(
-              'Этот slug уже сохранён как прежний адрес другой статьи',
-            );
-          const previousRedirect = await manager.findOne(
-            ArticleRedirectEntity,
-            { where: { siteId, fromSlug: previousSlug } },
-          );
-          if (previousRedirect && previousRedirect.articleId !== article.id)
-            throw new ConflictException(
-              'Прежний адрес принадлежит другой статье',
-            );
-          if (targetRedirect)
-            await manager.delete(ArticleRedirectEntity, {
-              siteId,
-              fromSlug: slug,
-            });
-          await manager.update(
-            ArticleEntity,
-            { id: article.id, siteId },
-            changes as never,
-          );
-          await manager.upsert(
-            ArticleRedirectEntity,
-            { siteId, articleId: article.id, fromSlug: previousSlug },
-            ['siteId', 'fromSlug'],
-          );
-          return Object.assign(article, changes);
-        })
-      : await this.articles
-          .update({ id: article.id, siteId }, changes as never)
-          .then(() => Object.assign(article, changes));
-    await this.articleActivities.save(
-      this.articleActivities.create({
-        articleId: article.id,
-        userId: actor.userId,
-        type: ArticleActivityType.UPDATED,
-        message: 'Содержимое материала обновлено',
-        fromStatus: null,
-        toStatus: null,
-      }),
-    );
-    await this.lifecycle?.recordArticleChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.PARAMETERS_UPDATED,
-      'article parameters saved',
-      true,
-    );
-    if (slugChanged)
-      await this.lifecycle?.recordEvent({
-        siteId,
-        entityType: ContentEntityType.ARTICLE,
-        entityId: article.id,
-        eventType: ContentEventType.REDIRECT_CREATED,
-        actorUserId: actor.userId,
-        reason: 'slug changed',
-        before: { slug: previousSlug },
-        after: { slug },
+    return this.articles.manager.transaction(async (manager) => {
+      const locked = await manager.findOne(ArticleEntity, {
+        where: { id: articleId, siteId, deletedAt: IsNull() },
+        lock: { mode: 'pessimistic_write' },
       });
-    return saved;
+      if (!locked) throw new NotFoundException('Статья не найдена');
+      const before = Object.assign(new ArticleEntity(), locked);
+      const previousSlug = locked.slug;
+      const slugChanged = previousSlug !== slug;
+      const transactionalDuplicate = await manager.findOne(ArticleEntity, {
+        where: { siteId, slug },
+      });
+      if (transactionalDuplicate && transactionalDuplicate.id !== locked.id)
+        throw new ConflictException('Такой slug статьи уже используется');
+      const targetRedirect = await manager.findOne(ArticleRedirectEntity, {
+        where: { siteId, fromSlug: slug },
+      });
+      if (targetRedirect && targetRedirect.articleId !== locked.id)
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой статьи',
+        );
+      if (slugChanged) {
+        const previousRedirect = await manager.findOne(ArticleRedirectEntity, {
+          where: { siteId, fromSlug: previousSlug },
+        });
+        if (previousRedirect && previousRedirect.articleId !== locked.id)
+          throw new ConflictException(
+            'Прежний адрес принадлежит другой статье',
+          );
+        if (targetRedirect)
+          await manager.delete(ArticleRedirectEntity, {
+            siteId,
+            fromSlug: slug,
+          });
+      }
+      await manager.update(
+        ArticleEntity,
+        { id: locked.id, siteId },
+        changes as never,
+      );
+      const saved = Object.assign(locked, changes);
+      if (slugChanged)
+        await manager.upsert(
+          ArticleRedirectEntity,
+          { siteId, articleId: locked.id, fromSlug: previousSlug },
+          ['siteId', 'fromSlug'],
+        );
+      await manager.save(
+        manager.create(ArticleActivityEntity, {
+          articleId: locked.id,
+          userId: actor.userId,
+          type: ArticleActivityType.UPDATED,
+          message: 'Содержимое материала обновлено',
+          fromStatus: null,
+          toStatus: null,
+        }),
+      );
+      await this.lifecycle?.recordArticleChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.PARAMETERS_UPDATED,
+        'article parameters saved',
+        true,
+        manager,
+      );
+      if (slugChanged)
+        await this.lifecycle?.recordEvent(
+          {
+            siteId,
+            entityType: ContentEntityType.ARTICLE,
+            entityId: locked.id,
+            eventType: ContentEventType.REDIRECT_CREATED,
+            actorUserId: actor.userId,
+            reason: 'slug changed',
+            before: { slug: previousSlug },
+            after: { slug },
+          },
+          manager,
+        );
+      return saved;
+    });
   }
 
   async updateArticleBody(
@@ -1873,51 +1890,55 @@ export class ContentService {
       ? articleDocumentText(bodyDocument)
       : (dto.body ?? article.body);
     const nextUpdatedAt = new Date();
-    const result = await this.articles.update(
-      { id: articleId, siteId, revision: dto.expectedRevision },
-      {
+    return this.articles.manager.transaction(async (manager) => {
+      const result = await manager.update(
+        ArticleEntity,
+        { id: articleId, siteId, revision: dto.expectedRevision },
+        {
+          body,
+          bodyDocument,
+          documentVersion: bodyDocument.version,
+          revision: dto.expectedRevision + 1,
+          updatedAt: nextUpdatedAt,
+          updatedByUserId: actor.userId,
+        },
+      );
+      if (result.affected !== 1)
+        throw new ConflictException(
+          'Материал уже изменён. Обновите данные и повторите сохранение',
+        );
+      await manager.save(
+        manager.create(ArticleActivityEntity, {
+          articleId,
+          userId: actor.userId,
+          type: ArticleActivityType.UPDATED,
+          message: 'Текст материала сохранён автоматически',
+          fromStatus: null,
+          toStatus: null,
+        }),
+      );
+      const savedArticle = await manager.findOneByOrFail(ArticleEntity, {
+        id: articleId,
+        siteId,
+      });
+      await this.lifecycle?.recordArticleChange(
+        before,
+        savedArticle,
+        actor.userId,
+        ContentEventType.CONTENT_UPDATED,
+        'article content autosaved',
+        true,
+        manager,
+      );
+      return {
+        id: article.id,
         body,
         bodyDocument,
         documentVersion: bodyDocument.version,
         revision: dto.expectedRevision + 1,
         updatedAt: nextUpdatedAt,
-        updatedByUserId: actor.userId,
-      },
-    );
-    if (result.affected !== 1)
-      throw new ConflictException(
-        'Материал уже изменён. Обновите данные и повторите сохранение',
-      );
-    await this.articleActivities.save(
-      this.articleActivities.create({
-        articleId,
-        userId: actor.userId,
-        type: ArticleActivityType.UPDATED,
-        message: 'Текст материала сохранён автоматически',
-        fromStatus: null,
-        toStatus: null,
-      }),
-    );
-    const savedArticle = await this.articles.findOneByOrFail({
-      id: articleId,
-      siteId,
+      };
     });
-    await this.lifecycle?.recordArticleChange(
-      before,
-      savedArticle,
-      actor.userId,
-      ContentEventType.CONTENT_UPDATED,
-      'article content autosaved',
-      true,
-    );
-    return {
-      id: article.id,
-      body,
-      bodyDocument,
-      documentVersion: bodyDocument.version,
-      revision: dto.expectedRevision + 1,
-      updatedAt: nextUpdatedAt,
-    };
   }
 
   async deleteArticle(siteId: string, articleId: string, actor: Actor) {
@@ -1963,21 +1984,27 @@ export class ContentService {
       'articles',
       SitePermission.EDIT_CONTENT,
     );
-    const redirect = await this.articleRedirects?.findOne({
-      where: { id: redirectId, siteId, articleId },
+    return this.articles.manager.transaction(async (manager) => {
+      const redirect = await manager.findOne(ArticleRedirectEntity, {
+        where: { id: redirectId, siteId, articleId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!redirect) throw new NotFoundException('Прежний адрес не найден');
+      await manager.remove(redirect);
+      await this.lifecycle?.recordEvent(
+        {
+          siteId,
+          entityType: ContentEntityType.ARTICLE,
+          entityId: articleId,
+          eventType: ContentEventType.REDIRECT_REMOVED,
+          actorUserId: actor.userId,
+          before: { fromSlug: redirect.fromSlug },
+          reason: 'article redirect removed',
+        },
+        manager,
+      );
+      return { id: redirectId };
     });
-    if (!redirect) throw new NotFoundException('Прежний адрес не найден');
-    await this.articleRedirects!.remove(redirect);
-    await this.lifecycle?.recordEvent({
-      siteId,
-      entityType: ContentEntityType.ARTICLE,
-      entityId: articleId,
-      eventType: ContentEventType.REDIRECT_REMOVED,
-      actorUserId: actor.userId,
-      before: { fromSlug: redirect.fromSlug },
-      reason: 'article redirect removed',
-    });
-    return { id: redirectId };
   }
 
   async listCategories(siteId: string, actor: Actor) {

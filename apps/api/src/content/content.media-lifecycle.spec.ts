@@ -35,6 +35,21 @@ describe('ContentService media article lifecycle', () => {
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
     };
+    const manager = {
+      findOne: jest.fn(),
+      findOneByOrFail: jest.fn((entity, where) =>
+        articles.findOneByOrFail(where),
+      ),
+      exists: jest.fn().mockResolvedValue(false),
+      create: jest.fn((entity, value) => value),
+      save: jest.fn(async (value) => value),
+      update: jest.fn((entity, where, value) => articles.update(where, value)),
+      delete: jest.fn().mockResolvedValue(undefined),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+    articles.manager.transaction.mockImplementation(async (work) =>
+      work(manager),
+    );
     const media = { existsBy: jest.fn().mockResolvedValue(true) };
     const pages = { find: jest.fn().mockResolvedValue([]) };
     const banners = { find: jest.fn().mockResolvedValue([]) };
@@ -55,7 +70,7 @@ describe('ContentService media article lifecycle', () => {
       undefined,
       redirects as never,
     );
-    return { service, articles, media, redirects };
+    return { service, articles, manager, media, redirects };
   }
 
   it('uses scheduled visibility and deterministic public ordering', async () => {
@@ -155,10 +170,12 @@ describe('ContentService media article lifecycle', () => {
     };
     articles.findOne.mockResolvedValueOnce(article).mockResolvedValueOnce(null);
     const manager = {
-      findOne: jest.fn().mockResolvedValue(null),
+      findOne: jest.fn().mockResolvedValueOnce(article).mockResolvedValue(null),
       delete: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       upsert: jest.fn().mockResolvedValue(undefined),
+      create: jest.fn((entity, value) => value),
+      save: jest.fn(async (value) => value),
     };
     articles.manager.transaction.mockImplementation(async (work) =>
       work(manager),
@@ -215,11 +232,14 @@ describe('ContentService media article lifecycle', () => {
     const manager = {
       findOne: jest
         .fn()
+        .mockResolvedValueOnce(article)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({ articleId: 'foreign-id' }),
       delete: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
+      create: jest.fn((entity, value) => value),
+      save: jest.fn(async (value) => value),
     };
     articles.manager.transaction.mockImplementation(async (work) =>
       work(manager),
@@ -252,12 +272,15 @@ describe('ContentService media article lifecycle', () => {
     const manager = {
       findOne: jest
         .fn()
+        .mockResolvedValueOnce(article)
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({ articleId: 'article-id' })
         .mockResolvedValueOnce(null),
       delete: jest.fn().mockResolvedValue(undefined),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       upsert: jest.fn().mockResolvedValue(undefined),
+      create: jest.fn((entity, value) => value),
+      save: jest.fn(async (value) => value),
     };
     articles.manager.transaction.mockImplementation(async (work) =>
       work(manager),
@@ -281,7 +304,7 @@ describe('ContentService media article lifecycle', () => {
   });
 
   it('rejects a stale body autosave without changing the article', async () => {
-    const { service, articles } = setup();
+    const { service, articles, manager } = setup();
     articles.findOne.mockResolvedValue({
       id: 'article-id',
       siteId: 'site-id',
@@ -295,7 +318,8 @@ describe('ContentService media article lifecycle', () => {
         expectedRevision: 4,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect(articles.update).toHaveBeenCalledWith(
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
         id: 'article-id',
         siteId: 'site-id',
@@ -307,7 +331,7 @@ describe('ContentService media article lifecycle', () => {
   });
 
   it('autosaves a validated structured document under the same revision guard', async () => {
-    const { service, articles } = setup();
+    const { service, articles, manager } = setup();
     articles.findOne.mockResolvedValue({
       id: 'article-id',
       siteId: 'site-id',
@@ -333,7 +357,8 @@ describe('ContentService media article lifecycle', () => {
       { bodyDocument, expectedRevision: 7 },
     );
 
-    expect(articles.update).toHaveBeenCalledWith(
+    expect(manager.update).toHaveBeenCalledWith(
+      expect.anything(),
       { id: 'article-id', siteId: 'site-id', revision: 7 },
       expect.objectContaining({
         bodyDocument: expect.objectContaining({

@@ -10,13 +10,22 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
+import {
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  Not,
+  Repository,
+} from 'typeorm';
 import {
   ArticleEntity,
+  ArticleRedirectEntity,
   ArticleRelatedItemEntity,
   ArticleSectionSettingsEntity,
   ArticleStatus,
   ArticleVersionEntity,
+  AuthorEntity,
   CategoryEntity,
   CategoryStatus,
   ContentActorKind,
@@ -27,12 +36,18 @@ import {
   ContentStatusScheduleEntity,
   ContentTemplateKind,
   EditorialState,
+  MediaEntity,
   PlatformRole,
   PublicationState,
   SiteContentTemplateEntity,
   SiteEntity,
   WorkspaceMembershipEntity,
 } from '../database/entities';
+import {
+  articleDocumentMediaIds,
+  articleDocumentText,
+  normalizeArticleDocument,
+} from './article-document';
 import { hasSitePermission, SitePermission } from './content.permissions';
 import {
   DuplicateContentDto,
@@ -186,23 +201,29 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  async recordEvent(input: {
-    siteId: string;
-    entityType: ContentEntityType;
-    entityId: string;
-    eventType: ContentEventType;
-    actorUserId?: string | null;
-    actorKind?: ContentActorKind;
-    reason?: string | null;
-    before?: Record<string, unknown> | null;
-    after?: Record<string, unknown> | null;
-    versionId?: string | null;
-    groupId?: string | null;
-  }) {
+  async recordEvent(
+    input: {
+      siteId: string;
+      entityType: ContentEntityType;
+      entityId: string;
+      eventType: ContentEventType;
+      actorUserId?: string | null;
+      actorKind?: ContentActorKind;
+      reason?: string | null;
+      before?: Record<string, unknown> | null;
+      after?: Record<string, unknown> | null;
+      versionId?: string | null;
+      groupId?: string | null;
+    },
+    manager?: EntityManager,
+  ) {
     const before = input.before ?? null;
     const after = input.after ?? null;
-    return this.events.save(
-      this.events.create({
+    const repository = manager
+      ? manager.getRepository(ContentEventEntity)
+      : this.events;
+    return repository.save(
+      repository.create({
         siteId: input.siteId,
         entityType: input.entityType,
         entityId: input.entityId,
@@ -225,14 +246,24 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     article: ArticleEntity,
     actorUserId: string | null,
     reason: string,
-  ) {
-    const row = await this.articleVersions
+    manager?: EntityManager,
+  ): Promise<ArticleVersionEntity> {
+    if (!manager)
+      return this.dataSource.transaction((transactionManager) =>
+        this.createVersion(article, actorUserId, reason, transactionManager),
+      );
+    await manager.findOneOrFail(ArticleEntity, {
+      where: { id: article.id },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const repository = manager.getRepository(ArticleVersionEntity);
+    const row = await repository
       .createQueryBuilder('version')
       .select('COALESCE(MAX(version.versionNumber), 0)', 'maximum')
       .where('version.articleId = :articleId', { articleId: article.id })
       .getRawOne<{ maximum: string }>();
-    return this.articleVersions.save(
-      this.articleVersions.create({
+    return repository.save(
+      repository.create({
         articleId: article.id,
         versionNumber: Number(row?.maximum ?? 0) + 1,
         snapshot: this.articleSnapshot(article),
@@ -249,21 +280,37 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     eventType: ContentEventType,
     reason: string,
     createVersion = false,
-  ) {
+    manager?: EntityManager,
+  ): Promise<ContentEventEntity> {
+    if (!manager && createVersion)
+      return this.dataSource.transaction((transactionManager) =>
+        this.recordArticleChange(
+          before,
+          after,
+          actorUserId,
+          eventType,
+          reason,
+          createVersion,
+          transactionManager,
+        ),
+      );
     const version = createVersion
-      ? await this.createVersion(after, actorUserId, reason)
+      ? await this.createVersion(after, actorUserId, reason, manager)
       : null;
-    return this.recordEvent({
-      siteId: after.siteId,
-      entityType: ContentEntityType.ARTICLE,
-      entityId: after.id,
-      eventType,
-      actorUserId,
-      reason,
-      before: before ? this.articleSnapshot(before) : null,
-      after: this.articleSnapshot(after),
-      versionId: version?.id ?? null,
-    });
+    return this.recordEvent(
+      {
+        siteId: after.siteId,
+        entityType: ContentEntityType.ARTICLE,
+        entityId: after.id,
+        eventType,
+        actorUserId,
+        reason,
+        before: before ? this.articleSnapshot(before) : null,
+        after: this.articleSnapshot(after),
+        versionId: version?.id ?? null,
+      },
+      manager,
+    );
   }
 
   async recordCategoryChange(
@@ -361,6 +408,165 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     return CategoryStatus.DRAFT;
   }
 
+  private articlePublishFailure(article: ArticleEntity) {
+    if (article.editorialState !== EditorialState.APPROVED)
+      return {
+        code: 'editorial_not_approved',
+        message:
+          'Публикация доступна только для одобренной редакционной версии',
+      };
+    if (!(article.body ?? '').trim() && !article.bodyDocument?.blocks.length)
+      return {
+        code: 'article_body_empty',
+        message: 'Перед публикацией заполните текст статьи',
+      };
+    return null;
+  }
+
+  private assertArticleCanPublish(article: ArticleEntity) {
+    const failure = this.articlePublishFailure(article);
+    if (failure) throw new BadRequestException(failure.message);
+  }
+
+  private async restoredArticleValues(
+    manager: EntityManager,
+    site: SiteEntity,
+    article: ArticleEntity,
+    snapshot: Record<string, unknown>,
+  ) {
+    const stringValue = (key: string, fallback: string) =>
+      typeof snapshot[key] === 'string' ? snapshot[key] : fallback;
+    const nullableId = (key: string, fallback: string | null) => {
+      const value = snapshot[key];
+      if (value === undefined) return fallback;
+      if (value === null || typeof value === 'string') return value;
+      throw new BadRequestException(`Повреждено поле ${key} в версии статьи`);
+    };
+    const title = stringValue('title', article.title).trim();
+    const slug = stringValue('slug', article.slug).trim().toLowerCase();
+    if (title.length < 2 || title.length > 240)
+      throw new BadRequestException('Повреждён заголовок версии статьи');
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))
+      throw new BadRequestException('Повреждён slug версии статьи');
+    if (new Set(['404', 'privacy-policy', 'search']).has(slug))
+      throw new ConflictException('Этот slug зарезервирован системой');
+
+    const conflictingArticle = await manager.findOne(ArticleEntity, {
+      where: { siteId: site.id, slug },
+      select: { id: true },
+    });
+    if (conflictingArticle && conflictingArticle.id !== article.id)
+      throw new ConflictException('Такой slug статьи уже используется');
+    const targetRedirect = await manager.findOne(ArticleRedirectEntity, {
+      where: { siteId: site.id, fromSlug: slug },
+    });
+    if (targetRedirect && targetRedirect.articleId !== article.id)
+      throw new ConflictException(
+        'Этот slug уже сохранён как прежний адрес другой статьи',
+      );
+
+    const categoryId = nullableId('categoryId', article.categoryId);
+    const authorId = nullableId('authorId', article.authorId);
+    const coverMediaId = nullableId('coverMediaId', article.coverMediaId);
+    const previewMediaId = nullableId('previewMediaId', article.previewMediaId);
+    if (
+      categoryId &&
+      !(await manager.exists(CategoryEntity, {
+        where: { id: categoryId, siteId: site.id, deletedAt: IsNull() },
+      }))
+    )
+      throw new NotFoundException('Категория этого сайта не найдена');
+    if (
+      authorId &&
+      !(await manager.exists(AuthorEntity, {
+        where: { id: authorId, siteId: site.id },
+      }))
+    )
+      throw new NotFoundException('Автор этого сайта не найден');
+
+    const body = stringValue('body', article.body);
+    const bodyDocument = normalizeArticleDocument(snapshot.bodyDocument, body);
+    const mediaIds = [
+      coverMediaId,
+      previewMediaId,
+      ...articleDocumentMediaIds(bodyDocument),
+    ].filter((id): id is string => Boolean(id));
+    for (const mediaId of new Set(mediaIds))
+      if (
+        !(await manager.exists(MediaEntity, {
+          where: { id: mediaId, workspaceId: site.workspaceId },
+        }))
+      )
+        throw new NotFoundException('Изображение версии статьи не найдено');
+
+    const displayTemplateKey = stringValue(
+      'displayTemplateKey',
+      article.displayTemplateKey,
+    );
+    const displayTemplateVersion = stringValue(
+      'displayTemplateVersion',
+      article.displayTemplateVersion,
+    );
+    if (
+      !(await manager.exists(SiteContentTemplateEntity, {
+        where: {
+          siteId: site.id,
+          kind: ContentTemplateKind.ARTICLE,
+          key: displayTemplateKey,
+          version: displayTemplateVersion,
+          isActive: true,
+        },
+      }))
+    )
+      throw new BadRequestException('Шаблон статьи недоступен для этого сайта');
+
+    return {
+      title,
+      slug,
+      excerpt:
+        snapshot.excerpt === null || typeof snapshot.excerpt === 'string'
+          ? snapshot.excerpt
+          : article.excerpt,
+      body: articleDocumentText(bodyDocument),
+      bodyDocument,
+      documentVersion: bodyDocument.version,
+      categoryId,
+      authorId,
+      coverMediaId,
+      previewMediaId,
+      sortOrder:
+        typeof snapshot.sortOrder === 'number'
+          ? snapshot.sortOrder
+          : article.sortOrder,
+      displayTemplateKey,
+      displayTemplateVersion,
+      displayTemplateConfig:
+        snapshot.displayTemplateConfig !== null &&
+        typeof snapshot.displayTemplateConfig === 'object' &&
+        !Array.isArray(snapshot.displayTemplateConfig)
+          ? snapshot.displayTemplateConfig
+          : article.displayTemplateConfig,
+      seoTitle:
+        snapshot.seoTitle === null || typeof snapshot.seoTitle === 'string'
+          ? snapshot.seoTitle
+          : article.seoTitle,
+      seoDescription:
+        snapshot.seoDescription === null ||
+        typeof snapshot.seoDescription === 'string'
+          ? snapshot.seoDescription
+          : article.seoDescription,
+      canonicalUrl:
+        snapshot.canonicalUrl === null ||
+        typeof snapshot.canonicalUrl === 'string'
+          ? snapshot.canonicalUrl
+          : article.canonicalUrl,
+      noIndex:
+        typeof snapshot.noIndex === 'boolean'
+          ? snapshot.noIndex
+          : article.noIndex,
+    };
+  }
+
   async setArticlePublicationState(
     siteId: string,
     articleId: string,
@@ -374,46 +580,39 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         ? SitePermission.APPROVE
         : SitePermission.EDIT_CONTENT,
     );
-    const article = await this.articles.findOne({
-      where: { id: articleId, siteId, deletedAt: IsNull() },
-    });
-    if (!article) throw new NotFoundException('Статья не найдена');
-    if (
-      dto.state === PublicationState.PUBLISHED &&
-      article.editorialState !== EditorialState.APPROVED
-    )
-      throw new BadRequestException(
-        'Публикация доступна только для одобренной редакционной версии',
+    return this.dataSource.transaction(async (manager) => {
+      const article = await manager.findOne(ArticleEntity, {
+        where: { id: articleId, siteId, deletedAt: IsNull() },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!article) throw new NotFoundException('Статья не найдена');
+      if (dto.state === PublicationState.PUBLISHED)
+        this.assertArticleCanPublish(article);
+      const before = Object.assign(new ArticleEntity(), article);
+      article.publicationState = dto.state;
+      article.status = this.legacyArticleStatus(
+        dto.state,
+        article.editorialState,
       );
-    if (
-      dto.state === PublicationState.PUBLISHED &&
-      !article.body.trim() &&
-      !article.bodyDocument?.blocks.length
-    )
-      throw new BadRequestException('Перед публикацией заполните текст статьи');
-    const before = Object.assign(new ArticleEntity(), article);
-    article.publicationState = dto.state;
-    article.status = this.legacyArticleStatus(
-      dto.state,
-      article.editorialState,
-    );
-    article.publishedAt =
-      dto.state === PublicationState.PUBLISHED
-        ? (article.publishedAt ?? new Date())
-        : dto.state === PublicationState.HIDDEN
-          ? article.publishedAt
-          : null;
-    article.updatedByUserId = actor.userId;
-    const saved = await this.articles.save(article);
-    await this.recordArticleChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.PUBLICATION_CHANGED,
-      dto.reason ?? 'publication state changed',
-      true,
-    );
-    return saved;
+      article.publishedAt =
+        dto.state === PublicationState.PUBLISHED
+          ? (article.publishedAt ?? new Date())
+          : dto.state === PublicationState.HIDDEN
+            ? article.publishedAt
+            : null;
+      article.updatedByUserId = actor.userId;
+      const saved = await manager.save(article);
+      await this.recordArticleChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.PUBLICATION_CHANGED,
+        dto.reason ?? 'publication state changed',
+        true,
+        manager,
+      );
+      return saved;
+    });
   }
 
   async setArticleEditorialState(
@@ -429,37 +628,45 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         ? SitePermission.APPROVE
         : SitePermission.EDIT_CONTENT,
     );
-    const article = await this.articles.findOne({
-      where: { id: articleId, siteId, deletedAt: IsNull() },
+    return this.dataSource.transaction(async (manager) => {
+      const article = await manager.findOne(ArticleEntity, {
+        where: { id: articleId, siteId, deletedAt: IsNull() },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!article) throw new NotFoundException('Статья не найдена');
+      const allowed: Record<EditorialState, EditorialState[]> = {
+        [EditorialState.DRAFT]: [EditorialState.REVIEW],
+        [EditorialState.REVIEW]: [
+          EditorialState.CHANGES,
+          EditorialState.APPROVED,
+        ],
+        [EditorialState.CHANGES]: [EditorialState.REVIEW],
+        [EditorialState.APPROVED]: [
+          EditorialState.DRAFT,
+          EditorialState.CHANGES,
+        ],
+      };
+      if (!allowed[article.editorialState].includes(dto.state))
+        throw new BadRequestException('Недопустимый редакционный переход');
+      const before = Object.assign(new ArticleEntity(), article);
+      article.editorialState = dto.state;
+      article.status = this.legacyArticleStatus(
+        article.publicationState,
+        dto.state,
+      );
+      article.updatedByUserId = actor.userId;
+      const saved = await manager.save(article);
+      await this.recordArticleChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.EDITORIAL_CHANGED,
+        dto.reason ?? 'editorial state changed',
+        false,
+        manager,
+      );
+      return saved;
     });
-    if (!article) throw new NotFoundException('Статья не найдена');
-    const allowed: Record<EditorialState, EditorialState[]> = {
-      [EditorialState.DRAFT]: [EditorialState.REVIEW],
-      [EditorialState.REVIEW]: [
-        EditorialState.CHANGES,
-        EditorialState.APPROVED,
-      ],
-      [EditorialState.CHANGES]: [EditorialState.REVIEW],
-      [EditorialState.APPROVED]: [EditorialState.DRAFT, EditorialState.CHANGES],
-    };
-    if (!allowed[article.editorialState].includes(dto.state))
-      throw new BadRequestException('Недопустимый редакционный переход');
-    const before = Object.assign(new ArticleEntity(), article);
-    article.editorialState = dto.state;
-    article.status = this.legacyArticleStatus(
-      article.publicationState,
-      dto.state,
-    );
-    article.updatedByUserId = actor.userId;
-    const saved = await this.articles.save(article);
-    await this.recordArticleChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.EDITORIAL_CHANGED,
-      dto.reason ?? 'editorial state changed',
-    );
-    return saved;
   }
 
   async setCategoryPublicationState(
@@ -530,13 +737,13 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
             deletedAt: IsNull(),
           });
     if (!exists) throw new NotFoundException('Материал не найден');
-    const schedule = await this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       await manager.update(
         ContentStatusScheduleEntity,
         { entityType, entityId, status: ContentScheduleStatus.PENDING },
         { status: ContentScheduleStatus.CANCELLED },
       );
-      return manager.save(
+      const schedule = await manager.save(
         ContentStatusScheduleEntity,
         manager.create(ContentStatusScheduleEntity, {
           siteId,
@@ -548,18 +755,21 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           requestedByUserId: actor.userId,
         }),
       );
+      await this.recordEvent(
+        {
+          siteId,
+          entityType,
+          entityId,
+          eventType: ContentEventType.SCHEDULED,
+          actorUserId: actor.userId,
+          reason: dto.reason ?? 'publication scheduled',
+          after: { state: dto.state, executeAt: executeAt.toISOString() },
+          groupId: schedule.id,
+        },
+        manager,
+      );
+      return schedule;
     });
-    await this.recordEvent({
-      siteId,
-      entityType,
-      entityId,
-      eventType: ContentEventType.SCHEDULED,
-      actorUserId: actor.userId,
-      reason: dto.reason ?? 'publication scheduled',
-      after: { state: dto.state, executeAt: executeAt.toISOString() },
-      groupId: schedule.id,
-    });
-    return schedule;
   }
 
   async cancelSchedule(
@@ -569,30 +779,37 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actor: ContentActor,
   ) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
-    const pending = await this.schedules.findOne({
-      where: {
-        siteId,
-        entityType,
-        entityId,
-        status: ContentScheduleStatus.PENDING,
-      },
+    return this.dataSource.transaction(async (manager) => {
+      const pending = await manager.findOne(ContentStatusScheduleEntity, {
+        where: {
+          siteId,
+          entityType,
+          entityId,
+          status: ContentScheduleStatus.PENDING,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!pending)
+        throw new NotFoundException('Активное расписание не найдено');
+      pending.status = ContentScheduleStatus.CANCELLED;
+      await manager.save(pending);
+      await this.recordEvent(
+        {
+          siteId,
+          entityType,
+          entityId,
+          eventType: ContentEventType.SCHEDULE_CANCELLED,
+          actorUserId: actor.userId,
+          before: {
+            state: pending.targetPublicationState,
+            executeAt: pending.executeAt.toISOString(),
+          },
+          groupId: pending.id,
+        },
+        manager,
+      );
+      return { id: pending.id };
     });
-    if (!pending) throw new NotFoundException('Активное расписание не найдено');
-    pending.status = ContentScheduleStatus.CANCELLED;
-    await this.schedules.save(pending);
-    await this.recordEvent({
-      siteId,
-      entityType,
-      entityId,
-      eventType: ContentEventType.SCHEDULE_CANCELLED,
-      actorUserId: actor.userId,
-      before: {
-        state: pending.targetPublicationState,
-        executeAt: pending.executeAt.toISOString(),
-      },
-      groupId: pending.id,
-    });
-    return { id: pending.id };
   }
 
   async getPendingSchedule(
@@ -663,13 +880,14 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           });
           continue;
         }
-        if (
+        const publishFailure =
           schedule.entityType === ContentEntityType.ARTICLE &&
-          schedule.targetPublicationState === PublicationState.PUBLISHED &&
-          (entity as ArticleEntity).editorialState !== EditorialState.APPROVED
-        ) {
+          schedule.targetPublicationState === PublicationState.PUBLISHED
+            ? this.articlePublishFailure(entity as ArticleEntity)
+            : null;
+        if (publishFailure) {
           schedule.status = ContentScheduleStatus.FAILED;
-          schedule.lastError = 'editorial_not_approved';
+          schedule.lastError = publishFailure.code;
           await manager.save(schedule);
           await manager.insert(ContentEventEntity, {
             siteId: schedule.siteId,
@@ -687,6 +905,10 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           });
           continue;
         }
+        const articleBefore =
+          schedule.entityType === ContentEntityType.ARTICLE
+            ? Object.assign(new ArticleEntity(), entity)
+            : null;
         const previous = entity.publicationState;
         entity.publicationState = schedule.targetPublicationState;
         entity.publishedAt =
@@ -702,6 +924,14 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           );
         else entity.status = this.legacyCategoryStatus(entity.publicationState);
         await manager.save(entity);
+        const version = articleBefore
+          ? await this.createVersion(
+              entity as ArticleEntity,
+              null,
+              'scheduled publication state changed',
+              manager,
+            )
+          : null;
         schedule.status = ContentScheduleStatus.COMPLETED;
         schedule.executedAt = now;
         schedule.lastError = null;
@@ -722,7 +952,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
               after: schedule.targetPublicationState,
             },
           },
-          versionId: null,
+          versionId: version?.id ?? null,
           groupId: schedule.id,
         });
       }
@@ -770,62 +1000,93 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actor: ContentActor,
     expectedRevision: number,
   ) {
-    await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
-    const [article, version] = await Promise.all([
-      this.articles.findOne({
+    const site = await this.requireSite(
+      siteId,
+      actor,
+      SitePermission.EDIT_CONTENT,
+    );
+    return this.dataSource.transaction(async (manager) => {
+      const article = await manager.findOne(ArticleEntity, {
         where: { id: articleId, siteId, deletedAt: IsNull() },
-      }),
-      this.articleVersions.findOne({ where: { id: versionId, articleId } }),
-    ]);
-    if (!article || !version) throw new NotFoundException('Версия не найдена');
-    if (article.revision !== expectedRevision)
-      throw new ConflictException(
-        'Материал уже изменён. Обновите данные и повторите восстановление',
+        lock: { mode: 'pessimistic_write' },
+      });
+      const version = await manager.findOne(ArticleVersionEntity, {
+        where: { id: versionId, articleId },
+      });
+      if (!article || !version)
+        throw new NotFoundException('Версия не найдена');
+      if (article.revision !== expectedRevision)
+        throw new ConflictException(
+          'Материал уже изменён. Обновите данные и повторите восстановление',
+        );
+      const before = Object.assign(new ArticleEntity(), article);
+      const restored = await this.restoredArticleValues(
+        manager,
+        site,
+        article,
+        version.snapshot,
       );
-    const before = Object.assign(new ArticleEntity(), article);
-    await this.createVersion(article, actor.userId, 'before version restore');
-    const snapshot = version.snapshot;
-    const assignable = [
-      'title',
-      'slug',
-      'excerpt',
-      'body',
-      'bodyDocument',
-      'documentVersion',
-      'categoryId',
-      'authorId',
-      'coverMediaId',
-      'previewMediaId',
-      'sortOrder',
-      'publicationState',
-      'editorialState',
-      'displayTemplateKey',
-      'displayTemplateVersion',
-      'displayTemplateConfig',
-      'seoTitle',
-      'seoDescription',
-      'canonicalUrl',
-      'noIndex',
-    ] as const;
-    for (const key of assignable)
-      if (Object.prototype.hasOwnProperty.call(snapshot, key))
-        (article as unknown as Record<string, unknown>)[key] = snapshot[key];
-    article.revision = expectedRevision + 1;
-    article.status = this.legacyArticleStatus(
-      article.publicationState,
-      article.editorialState,
-    );
-    article.updatedByUserId = actor.userId;
-    const saved = await this.articles.save(article);
-    await this.recordArticleChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.VERSION_RESTORED,
-      `restored version ${version.versionNumber}`,
-      true,
-    );
-    return saved;
+      const slugChanged = restored.slug !== article.slug;
+      if (slugChanged) {
+        const previousRedirect = await manager.findOne(ArticleRedirectEntity, {
+          where: { siteId, fromSlug: article.slug },
+        });
+        if (previousRedirect && previousRedirect.articleId !== article.id)
+          throw new ConflictException(
+            'Текущий адрес принадлежит другой статье в истории перенаправлений',
+          );
+      }
+
+      await this.createVersion(
+        article,
+        actor.userId,
+        'before version restore',
+        manager,
+      );
+      Object.assign(article, restored, {
+        revision: expectedRevision + 1,
+        updatedByUserId: actor.userId,
+      });
+      if (article.publicationState === PublicationState.PUBLISHED)
+        this.assertArticleCanPublish(article);
+      if (slugChanged) {
+        await manager.delete(ArticleRedirectEntity, {
+          siteId,
+          articleId,
+          fromSlug: restored.slug,
+        });
+        await manager.upsert(
+          ArticleRedirectEntity,
+          { siteId, articleId, fromSlug: before.slug },
+          ['siteId', 'fromSlug'],
+        );
+      }
+      const saved = await manager.save(article);
+      await this.recordArticleChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.VERSION_RESTORED,
+        `restored version ${version.versionNumber}`,
+        true,
+        manager,
+      );
+      if (slugChanged)
+        await this.recordEvent(
+          {
+            siteId,
+            entityType: ContentEntityType.ARTICLE,
+            entityId: article.id,
+            eventType: ContentEventType.REDIRECT_CREATED,
+            actorUserId: actor.userId,
+            reason: 'slug restored from article version',
+            before: { slug: before.slug },
+            after: { slug: restored.slug },
+          },
+          manager,
+        );
+      return saved;
+    });
   }
 
   async getRelatedArticles(
@@ -912,15 +1173,18 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
             sortOrder,
           })),
         );
-    });
-    await this.recordEvent({
-      siteId,
-      entityType: ContentEntityType.ARTICLE,
-      entityId: articleId,
-      eventType: ContentEventType.RELATED_UPDATED,
-      actorUserId: actor.userId,
-      before: { articleIds: beforeRows.map((row) => row.relatedArticleId) },
-      after: { articleIds: dto.articleIds },
+      await this.recordEvent(
+        {
+          siteId,
+          entityType: ContentEntityType.ARTICLE,
+          entityId: articleId,
+          eventType: ContentEventType.RELATED_UPDATED,
+          actorUserId: actor.userId,
+          before: { articleIds: beforeRows.map((row) => row.relatedArticleId) },
+          after: { articleIds: dto.articleIds },
+        },
+        manager,
+      );
     });
     return this.getRelatedArticles(siteId, articleId, actor);
   }
@@ -932,56 +1196,77 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     dto: DuplicateContentDto,
   ) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
-    const source = await this.articles.findOne({
-      where: { id: articleId, siteId, deletedAt: IsNull() },
-    });
-    if (!source) throw new NotFoundException('Статья не найдена');
-    if (await this.articles.existsBy({ siteId, slug: dto.slug }))
-      throw new ConflictException('Такой slug статьи уже используется');
-    const duplicate = await this.articles.save(
-      this.articles.create({
-        ...this.articleSnapshot(source),
-        id: undefined,
-        siteId,
-        title: dto.title?.trim() || `${source.title} — копия`,
-        slug: dto.slug,
-        status: ArticleStatus.DRAFT,
-        publicationState: PublicationState.DRAFT,
-        editorialState: EditorialState.DRAFT,
-        publishedAt: null,
-        revision: 0,
-        deletedAt: null,
-        deletedByUserId: null,
-        createdByUserId: actor.userId,
-        updatedByUserId: actor.userId,
-      }),
-    );
-    const related = await this.relatedItems.find({ where: { articleId } });
-    if (related.length)
-      await this.relatedItems.insert(
-        related.map((row) => ({
-          articleId: duplicate.id,
-          relatedArticleId: row.relatedArticleId,
-          sortOrder: row.sortOrder,
-        })),
+    return this.dataSource.transaction(async (manager) => {
+      const source = await manager.findOne(ArticleEntity, {
+        where: { id: articleId, siteId, deletedAt: IsNull() },
+      });
+      if (!source) throw new NotFoundException('Статья не найдена');
+      if (
+        await manager.exists(ArticleEntity, {
+          where: { siteId, slug: dto.slug },
+        })
+      )
+        throw new ConflictException('Такой slug статьи уже используется');
+      if (
+        await manager.exists(ArticleRedirectEntity, {
+          where: { siteId, fromSlug: dto.slug },
+        })
+      )
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой статьи',
+        );
+      const duplicate = await manager.save(
+        manager.create(ArticleEntity, {
+          ...this.articleSnapshot(source),
+          id: undefined,
+          siteId,
+          title: dto.title?.trim() || `${source.title} — копия`,
+          slug: dto.slug,
+          status: ArticleStatus.DRAFT,
+          publicationState: PublicationState.DRAFT,
+          editorialState: EditorialState.DRAFT,
+          publishedAt: null,
+          revision: 0,
+          deletedAt: null,
+          deletedByUserId: null,
+          createdByUserId: actor.userId,
+          updatedByUserId: actor.userId,
+        }),
       );
-    await this.recordArticleChange(
-      null,
-      duplicate,
-      actor.userId,
-      ContentEventType.CREATED,
-      `duplicated from ${source.id}`,
-      true,
-    );
-    await this.recordEvent({
-      siteId,
-      entityType: ContentEntityType.ARTICLE,
-      entityId: source.id,
-      eventType: ContentEventType.DUPLICATED,
-      actorUserId: actor.userId,
-      after: { duplicateId: duplicate.id },
+      const related = await manager.find(ArticleRelatedItemEntity, {
+        where: { articleId },
+      });
+      if (related.length)
+        await manager.insert(
+          ArticleRelatedItemEntity,
+          related.map((row) => ({
+            articleId: duplicate.id,
+            relatedArticleId: row.relatedArticleId,
+            sortOrder: row.sortOrder,
+          })),
+        );
+      await this.recordArticleChange(
+        null,
+        duplicate,
+        actor.userId,
+        ContentEventType.CREATED,
+        `duplicated from ${source.id}`,
+        true,
+        manager,
+      );
+      await this.recordEvent(
+        {
+          siteId,
+          entityType: ContentEntityType.ARTICLE,
+          entityId: source.id,
+          eventType: ContentEventType.DUPLICATED,
+          actorUserId: actor.userId,
+          after: { duplicateId: duplicate.id },
+        },
+        manager,
+      );
+      return duplicate;
     });
-    return duplicate;
   }
 
   async duplicateCategory(
@@ -1029,53 +1314,61 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actor: ContentActor,
   ) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
-    const article = await this.articles.findOne({
-      where: { id: articleId, siteId, deletedAt: IsNull() },
+    return this.dataSource.transaction(async (manager) => {
+      const article = await manager.findOne(ArticleEntity, {
+        where: { id: articleId, siteId, deletedAt: IsNull() },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!article) throw new NotFoundException('Статья не найдена');
+      const before = Object.assign(new ArticleEntity(), article);
+      article.deletedAt = new Date();
+      article.deletedByUserId = actor.userId;
+      article.publicationState = PublicationState.DISABLED;
+      article.status = ArticleStatus.DRAFT;
+      const saved = await manager.save(article);
+      await this.recordArticleChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.DELETED,
+        'moved to trash',
+        true,
+        manager,
+      );
+      return { id: articleId, deletedAt: saved.deletedAt };
     });
-    if (!article) throw new NotFoundException('Статья не найдена');
-    const before = Object.assign(new ArticleEntity(), article);
-    article.deletedAt = new Date();
-    article.deletedByUserId = actor.userId;
-    article.publicationState = PublicationState.DISABLED;
-    article.status = ArticleStatus.DRAFT;
-    const saved = await this.articles.save(article);
-    await this.recordArticleChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.DELETED,
-      'moved to trash',
-      true,
-    );
-    return { id: articleId, deletedAt: saved.deletedAt };
   }
 
   async restoreArticle(siteId: string, articleId: string, actor: ContentActor) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
-    const article = await this.articles.findOne({
-      where: { id: articleId, siteId },
+    return this.dataSource.transaction(async (manager) => {
+      const article = await manager.findOne(ArticleEntity, {
+        where: { id: articleId, siteId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!article?.deletedAt)
+        throw new NotFoundException('Удалённая статья не найдена');
+      const before = Object.assign(new ArticleEntity(), article);
+      article.deletedAt = null;
+      article.deletedByUserId = null;
+      article.publicationState = PublicationState.DRAFT;
+      article.status = this.legacyArticleStatus(
+        article.publicationState,
+        article.editorialState,
+      );
+      article.updatedByUserId = actor.userId;
+      const saved = await manager.save(article);
+      await this.recordArticleChange(
+        before,
+        saved,
+        actor.userId,
+        ContentEventType.RESTORED,
+        'restored from trash',
+        true,
+        manager,
+      );
+      return saved;
     });
-    if (!article?.deletedAt)
-      throw new NotFoundException('Удалённая статья не найдена');
-    const before = Object.assign(new ArticleEntity(), article);
-    article.deletedAt = null;
-    article.deletedByUserId = null;
-    article.publicationState = PublicationState.DRAFT;
-    article.status = this.legacyArticleStatus(
-      article.publicationState,
-      article.editorialState,
-    );
-    article.updatedByUserId = actor.userId;
-    const saved = await this.articles.save(article);
-    await this.recordArticleChange(
-      before,
-      saved,
-      actor.userId,
-      ContentEventType.RESTORED,
-      'restored from trash',
-      true,
-    );
-    return saved;
   }
 
   async softDeleteCategory(
@@ -1100,6 +1393,10 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         [categoryId, siteId],
       );
       const ids = rows.map((row) => row.id);
+      const categoryRows = await manager.find(CategoryEntity, {
+        where: { id: In(ids), siteId, deletedAt: IsNull() },
+        select: { id: true },
+      });
       const articleRows = await manager.find(ArticleEntity, {
         where: { siteId, categoryId: In(ids), deletedAt: IsNull() },
         select: { id: true },
@@ -1125,7 +1422,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         },
       );
       await manager.insert(ContentEventEntity, [
-        ...ids.map((id) => ({
+        ...categoryRows.map(({ id }) => ({
           siteId,
           entityType: ContentEntityType.CATEGORY,
           entityId: id,
@@ -1181,6 +1478,10 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         [categoryId, siteId],
       );
       const ids = rows.map((row) => row.id);
+      const categoryRows = await manager.find(CategoryEntity, {
+        where: { id: In(ids), siteId, deletedAt },
+        select: { id: true },
+      });
       const articleRows = await manager.find(ArticleEntity, {
         where: { siteId, categoryId: In(ids), deletedAt },
         select: { id: true },
@@ -1212,7 +1513,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         .andWhere('deleted_at = :deletedAt', { deletedAt })
         .execute();
       await manager.insert(ContentEventEntity, [
-        ...ids.map((id) => ({
+        ...categoryRows.map(({ id }) => ({
           siteId,
           entityType: ContentEntityType.CATEGORY,
           entityId: id,
