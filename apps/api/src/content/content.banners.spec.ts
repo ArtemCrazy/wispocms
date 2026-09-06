@@ -3,6 +3,7 @@ import {
   BannerPlacement,
   PageKind,
   PageStatus,
+  PublicationState,
   SiteType,
 } from '../database/entities';
 import { ContentService } from './content.service';
@@ -20,6 +21,7 @@ describe('ContentService public article banners', () => {
       siteId: site.id,
       slug: 'story',
       status: ArticleStatus.PUBLISHED,
+      publicationState: PublicationState.PUBLISHED,
     };
     const sidebarBanners = [
       {

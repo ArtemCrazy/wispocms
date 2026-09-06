@@ -34,6 +34,23 @@ describe('ContentService directories', () => {
       save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
       remove: jest.fn().mockResolvedValue(undefined),
     };
+    const categoryManager = {
+      findOne: jest.fn(),
+      exists: jest.fn().mockResolvedValue(false),
+      create: jest.fn((entity: unknown, value: unknown) => value),
+      save: jest.fn((value: unknown) => Promise.resolve(value)),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      upsert: jest.fn().mockResolvedValue(undefined),
+    };
+    Object.assign(categories, {
+      manager: {
+        transaction: jest.fn(
+          (work: (manager: typeof categoryManager) => Promise<unknown>) =>
+            work(categoryManager),
+        ),
+      },
+    });
     const authors = {
       findOne: jest.fn(),
       save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
@@ -61,11 +78,12 @@ describe('ContentService directories', () => {
       authors,
       articles,
       media,
+      categoryManager,
     };
   }
 
   it('normalizes and updates a category', async () => {
-    const { service, categories } = setup();
+    const { service, categories, categoryManager } = setup();
     const category = {
       id: 'category-id',
       siteId: 'site-id',
@@ -76,6 +94,9 @@ describe('ContentService directories', () => {
     categories.findOne
       .mockResolvedValueOnce(category)
       .mockResolvedValueOnce(null);
+    categoryManager.findOne
+      .mockResolvedValueOnce(category)
+      .mockResolvedValue(null);
 
     await expect(
       service.updateCategory('site-id', 'category-id', admin, {
