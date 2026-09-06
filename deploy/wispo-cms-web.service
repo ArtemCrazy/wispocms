@@ -1,0 +1,19 @@
+[Unit]
+Description=Wispo CMS preview web
+After=network.target
+
+[Service]
+Type=simple
+User=wispo-cms
+Group=wispo-cms
+WorkingDirectory=/opt/wispo-cms/apps/web
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/pnpm exec next start -H 127.0.0.1 -p 3300
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

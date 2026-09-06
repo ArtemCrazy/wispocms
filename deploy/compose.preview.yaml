@@ -1,0 +1,101 @@
+name: wispo-cms-preview
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wispo_cms
+      POSTGRES_USER: wispo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - wispo_preview_postgres18:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wispo -d wispo_cms"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: wispo-cms-api:preview
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      API_PORT: 4000
+      DATABASE_URL: postgresql://wispo:${POSTGRES_PASSWORD}@postgres:5432/wispo_cms
+      DB_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECURE: "true"
+      WEB_ORIGIN: https://wispo-cms.45.12.74.66.nip.io
+      PUBLIC_DOMAIN_TARGETS: ${PUBLIC_DOMAIN_TARGETS:-45.12.74.66}
+      WISPO_RESERVED_HOSTS: ${WISPO_RESERVED_HOSTS:-wispo-cms.45.12.74.66.nip.io}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME}
+      MEDIA_ROOT: /data/media
+      SMTP_HOST: ${SMTP_HOST:-172.20.0.1}
+      SMTP_PORT: ${SMTP_PORT:-25}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-Wispo CMS <noreply@crazy.studio>}
+    volumes:
+      - wispo_preview_media:/data/media
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    ports:
+      - "127.0.0.1:4300:4000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:4000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 25s
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        WISPO_ASSET_VERSION: ${WISPO_ASSET_VERSION:-preview}
+    image: wispo-cms-web:preview
+    restart: unless-stopped
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_PROXY_URL: http://api:4000
+      PUBLIC_APP_URL: https://wispo-cms.45.12.74.66.nip.io
+      WISPO_RESERVED_HOSTS: ${WISPO_RESERVED_HOSTS:-wispo-cms.45.12.74.66.nip.io}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+      - /app/apps/web/.next/cache:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    ports:
+      - "127.0.0.1:3300:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  wispo_preview_postgres18:
+  wispo_preview_media:

@@ -1,0 +1,13 @@
+{
+  "name": "wispo-cms",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev:web": "pnpm --dir apps/web dev",
+    "dev:api": "pnpm --dir apps/api start:dev",
+    "build": "pnpm --dir apps/web build && pnpm --dir apps/api build",
+    "lint": "pnpm --dir apps/web lint && pnpm --dir apps/api lint",
+    "test": "pnpm --dir apps/api test --runInBand"
+  }
+}

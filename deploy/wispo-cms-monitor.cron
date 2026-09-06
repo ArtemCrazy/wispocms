@@ -1,0 +1,5 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Wispo CMS: passive production checks every five minutes.
+*/5 * * * * root /usr/bin/flock -n /run/lock/wispo-cms-monitor.lock /opt/wispo-cms/deploy/monitor-preview.sh >> /var/log/wispo-cms-monitor.log 2>&1
