@@ -129,7 +129,7 @@ export function MediaArticlesView({
 
   if (section === "content")
     return (
-      <section className="media-module-shell">
+      <section className="media-module-shell media-articles-content-shell">
         <button
           className="media-back-button"
           type="button"

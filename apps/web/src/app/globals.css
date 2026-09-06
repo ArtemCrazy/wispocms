@@ -14,6 +14,10 @@
   margin-left: 0;
 }
 
+.media-articles-content-shell {
+  width: calc(100% - 48px);
+}
+
 .media-home-module-shell .media-module-tabs {
   flex: 0 0 auto;
   flex-direction: row;
