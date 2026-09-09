@@ -99,6 +99,7 @@ import {
 import {
   ARMATUREX_HOME_TEMPLATE_KEY,
   ARMATUREX_HOME_TEMPLATE_VERSION,
+  armaturexPageBlockMediaIds,
   validateArmaturexPageBlocks,
   validateGenericPageBlocks,
 } from './armaturex-home-validation';
@@ -2773,16 +2774,26 @@ export class ContentService {
       }),
       this.pages.find({
         where: { siteId: In(workspaceSiteIds) },
-        select: { blocks: true },
+        select: {
+          blocks: true,
+          systemTemplateKey: true,
+          systemTemplateVersion: true,
+        },
       }),
       this.articles.find({
         where: { siteId: In(workspaceSiteIds) },
         select: { bodyDocument: true },
       }),
     ]);
-    const usedInPage = sitePages.some((page) =>
-      page.blocks.some((block) => block.mediaId === mediaId),
-    );
+    const usedInPage = sitePages.some((page) => {
+      const blocks = Array.isArray(page.blocks) ? page.blocks : [];
+      return (
+        blocks.some((block) => block?.mediaId === mediaId) ||
+        (page.systemTemplateKey === ARMATUREX_HOME_TEMPLATE_KEY &&
+          page.systemTemplateVersion === ARMATUREX_HOME_TEMPLATE_VERSION &&
+          armaturexPageBlockMediaIds(blocks).includes(mediaId))
+      );
+    });
     const usedInArticleDocument = siteArticles.some((article) =>
       article.bodyDocument
         ? articleDocumentMediaIds(article.bodyDocument).includes(mediaId)

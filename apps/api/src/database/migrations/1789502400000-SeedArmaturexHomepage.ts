@@ -320,28 +320,10 @@ export class SeedArmaturexHomepage1789502400000 implements MigrationInterface {
     );
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `DELETE FROM "privacy_policy_states"
-       WHERE "id" = $1 AND "site_id" = $2 AND "page_id" = $3`,
-      [IDS.privacyState, IDS.site, IDS.privacy],
-    );
-    await queryRunner.query(
-      `DELETE FROM "pages"
-       WHERE "site_id" = $1
-         AND "id" = ANY($2::uuid[])`,
-      [
-        IDS.site,
-        [
-          IDS.homepage,
-          IDS.privacy,
-          IDS.notFound,
-          IDS.thankYou,
-          IDS.captureForm,
-        ],
-      ],
-    );
-    // The site row is deliberately retained: deleting it could cascade content
-    // added after provisioning. Fixed child IDs make this rollback data-safe.
+  public down(queryRunner: QueryRunner): Promise<void> {
+    void queryRunner;
+    // Provisioned content becomes user-owned immediately. A data no-op is the
+    // only rollback that cannot erase edits made after this migration ran.
+    return Promise.resolve();
   }
 }

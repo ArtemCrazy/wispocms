@@ -9,6 +9,8 @@ describe('ContentService media management', () => {
     articleUsed?: boolean;
     bannerUsed?: boolean;
     pageUsed?: boolean;
+    nestedPageSection?: 'catalog' | 'terms';
+    corruptArmaturexPage?: boolean;
   }) {
     const sites = {
       findOne: jest
@@ -24,11 +26,46 @@ describe('ContentService media management', () => {
     const banners = {
       existsBy: jest.fn().mockResolvedValue(overrides?.bannerUsed ?? false),
     };
+    const nestedPage = overrides?.nestedPageSection
+      ? [
+          {
+            systemTemplateKey: 'armaturex-home-v1',
+            systemTemplateVersion: '1',
+            blocks: [
+              null,
+              {
+                id: `armaturex-home-v1-${overrides.nestedPageSection}`,
+                type: 'text',
+                data: { items: [{ imageMediaId: 'media-id' }] },
+              },
+            ],
+          },
+        ]
+      : [];
+    const corruptPage = overrides?.corruptArmaturexPage
+      ? [
+          {
+            systemTemplateKey: 'armaturex-home-v1',
+            systemTemplateVersion: '1',
+            blocks: [
+              {
+                id: 'armaturex-home-v1-catalog',
+                type: 'text',
+                data: { items: [null, 'damaged', { imageMediaId: 42 }] },
+              },
+            ],
+          },
+        ]
+      : [];
     const pages = {
       find: jest
         .fn()
         .mockResolvedValue(
-          overrides?.pageUsed ? [{ blocks: [{ mediaId: 'media-id' }] }] : [],
+          overrides?.pageUsed
+            ? [{ blocks: [{ mediaId: 'media-id' }] }]
+            : nestedPage.length
+              ? nestedPage
+              : corruptPage,
         ),
     };
     const mediaItem = {
@@ -122,6 +159,18 @@ describe('ContentService media management', () => {
     expect(media.remove).not.toHaveBeenCalled();
   });
 
+  it.each(['catalog', 'terms'] as const)(
+    'refuses to delete an image used only by Armaturex %s data',
+    async (nestedPageSection) => {
+      const { service, media } = setup({ nestedPageSection });
+
+      await expect(
+        service.deleteMedia('site-id', 'media-id', actor),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(media.remove).not.toHaveBeenCalled();
+    },
+  );
+
   it('deletes an unused image record', async () => {
     const { service, media } = setup();
 
@@ -131,6 +180,15 @@ describe('ContentService media management', () => {
       id: 'media-id',
       deleted: true,
     });
+    expect(media.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let damaged historical Armaturex JSON break media deletion', async () => {
+    const { service, media } = setup({ corruptArmaturexPage: true });
+
+    await expect(
+      service.deleteMedia('site-id', 'media-id', actor),
+    ).resolves.toMatchObject({ deleted: true });
     expect(media.remove).toHaveBeenCalledTimes(1);
   });
 });

@@ -81,25 +81,12 @@ describe('SeedArmaturexHomepage1789502400000', () => {
     expect(sql).not.toContain('DELETE FROM');
   });
 
-  it('rolls back only fixed-ID child rows and never deletes a site', async () => {
+  it('keeps every provisioned site, page and privacy row on rollback', async () => {
     const query = jest.fn().mockResolvedValue(undefined);
     await new SeedArmaturexHomepage1789502400000().down({
       query,
     } as unknown as QueryRunner);
 
-    const calls = query.mock.calls as unknown as QueryCall[];
-    const sql = calls.map(([statement]) => statement).join('\n');
-    expect(query).toHaveBeenCalledTimes(2);
-    expect(sql).toContain('DELETE FROM "privacy_policy_states"');
-    expect(sql).toContain('DELETE FROM "pages"');
-    expect(sql).toContain('"id" = ANY($2::uuid[])');
-    expect(sql).not.toContain('DELETE FROM "sites"');
-    expect(calls[0][1]).toContain('a8100000-0000-4000-8000-000000000007');
-    expect(calls[1][1]?.[1]).toEqual(
-      expect.arrayContaining([
-        'a8100000-0000-4000-8000-000000000002',
-        'a8100000-0000-4000-8000-000000000006',
-      ]),
-    );
+    expect(query).not.toHaveBeenCalled();
   });
 });

@@ -238,3 +238,32 @@ export function validateGenericPageBlocks(blocks: PageBlock[]) {
   if (blocks.some((block) => block.data !== undefined))
     fail('structured data разрешены только зарегистрированным шаблонам');
 }
+
+export function armaturexPageBlockMediaIds(blocks: unknown) {
+  const result = new Set<string>();
+  try {
+    if (!Array.isArray(blocks)) return [];
+    for (const rawBlock of blocks) {
+      if (!rawBlock || typeof rawBlock !== 'object' || Array.isArray(rawBlock))
+        continue;
+      const block = rawBlock as Record<string, unknown>;
+      if (
+        block.id !== 'armaturex-home-v1-catalog' &&
+        block.id !== 'armaturex-home-v1-terms'
+      )
+        continue;
+      const data = block.data;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) continue;
+      const items = (data as Record<string, unknown>).items;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const candidate = (item as Record<string, unknown>).imageMediaId;
+        if (typeof candidate === 'string') result.add(candidate);
+      }
+    }
+  } catch {
+    // Historical or manually repaired JSON must never break media management.
+  }
+  return [...result];
+}
