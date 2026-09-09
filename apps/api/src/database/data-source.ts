@@ -20,6 +20,7 @@ import { ArticlePublishingPlatform1789416000000 } from './migrations/17894160000
 import { SeedArmaturexHomepage1789502400000 } from './migrations/1789502400000-SeedArmaturexHomepage';
 import { MoveArmaturexToPakWorkspace1789588800000 } from './migrations/1789588800000-MoveArmaturexToPakWorkspace';
 import { SetArmaturexEcommerceSiteType1789675200000 } from './migrations/1789675200000-SetArmaturexEcommerceSiteType';
+import { ExpandMediaSiteToolkit1789761600000 } from './migrations/1789761600000-ExpandMediaSiteToolkit';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -46,6 +47,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       SeedArmaturexHomepage1789502400000,
       MoveArmaturexToPakWorkspace1789588800000,
       SetArmaturexEcommerceSiteType1789675200000,
+      ExpandMediaSiteToolkit1789761600000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

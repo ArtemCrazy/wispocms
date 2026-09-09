@@ -210,6 +210,22 @@ export type SiteLayoutSettings = {
   showSocials?: boolean;
 };
 
+export type PageRedirect = {
+  fromPath: string;
+  statusCode: 301 | 302;
+};
+
+export type PopularSearchQuery = {
+  id: string;
+  query: string;
+};
+
+export type RecommendedSearchQuery = {
+  id: string;
+  query: string;
+  hits: number;
+};
+
 @Entity('users')
 export class UserEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -621,6 +637,27 @@ export class CategoryEntity {
   @Column({ name: 'no_index', type: 'boolean', default: false })
   noIndex!: boolean;
 
+  @Column({ name: 'og_title', type: 'varchar', length: 240, nullable: true })
+  ogTitle!: string | null;
+
+  @Column({
+    name: 'og_description',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  ogDescription!: string | null;
+
+  @Column({ name: 'og_image_media_id', type: 'uuid', nullable: true })
+  ogImageMediaId!: string | null;
+
+  @ManyToOne(() => MediaEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'og_image_media_id' })
+  ogImageMedia!: MediaEntity | null;
+
+  @Column({ name: 'structured_data', type: 'jsonb', nullable: true })
+  structuredData!: Record<string, unknown> | null;
+
   @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
   createdByUserId!: string | null;
 
@@ -867,6 +904,27 @@ export class ArticleEntity {
 
   @Column({ name: 'no_index', type: 'boolean', default: false })
   noIndex!: boolean;
+
+  @Column({ name: 'og_title', type: 'varchar', length: 240, nullable: true })
+  ogTitle!: string | null;
+
+  @Column({
+    name: 'og_description',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  ogDescription!: string | null;
+
+  @Column({ name: 'og_image_media_id', type: 'uuid', nullable: true })
+  ogImageMediaId!: string | null;
+
+  @ManyToOne(() => MediaEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'og_image_media_id' })
+  ogImageMedia!: MediaEntity | null;
+
+  @Column({ name: 'structured_data', type: 'jsonb', nullable: true })
+  structuredData!: Record<string, unknown> | null;
 
   @Column({ type: 'varchar', length: 32, default: ArticleStatus.DRAFT })
   status!: ArticleStatus;
@@ -1270,6 +1328,30 @@ export class PageEntity {
   @Column({ name: 'no_index', type: 'boolean', default: false })
   noIndex!: boolean;
 
+  @Column({ name: 'og_title', type: 'varchar', length: 240, nullable: true })
+  ogTitle!: string | null;
+
+  @Column({
+    name: 'og_description',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  ogDescription!: string | null;
+
+  @Column({ name: 'og_image_media_id', type: 'uuid', nullable: true })
+  ogImageMediaId!: string | null;
+
+  @ManyToOne(() => MediaEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'og_image_media_id' })
+  ogImageMedia!: MediaEntity | null;
+
+  @Column({ name: 'structured_data', type: 'jsonb', nullable: true })
+  structuredData!: Record<string, unknown> | null;
+
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  redirects!: PageRedirect[];
+
   @Column({
     name: 'system_template_key',
     type: 'varchar',
@@ -1536,14 +1618,27 @@ export class BannerEntity {
   @JoinColumn({ name: 'media_id' })
   media!: MediaEntity | null;
 
+  @Column({ name: 'mobile_media_id', type: 'uuid', nullable: true })
+  mobileMediaId!: string | null;
+
+  @ManyToOne(() => MediaEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'mobile_media_id' })
+  mobileMedia!: MediaEntity | null;
+
   @Column({ type: 'varchar', length: 160 })
   name!: string;
 
-  @Column({ type: 'varchar', length: 40 })
-  placement!: BannerPlacement;
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  placement!: BannerPlacement | null;
 
   @Column({ type: 'varchar', length: 200, nullable: true })
   title!: string | null;
+
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  subtitle!: string | null;
+
+  @Column({ name: 'button_text', type: 'varchar', length: 80, nullable: true })
+  buttonText!: string | null;
 
   @Column({ name: 'link_url', type: 'varchar', length: 500, nullable: true })
   linkUrl!: string | null;
@@ -1559,6 +1654,149 @@ export class BannerEntity {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;
+}
+
+@Entity('page_banner_assignments')
+@Unique(['pageId', 'zone'])
+export class PageBannerAssignmentEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ name: 'page_id', type: 'uuid' })
+  pageId!: string;
+
+  @ManyToOne(() => PageEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'page_id' })
+  page!: PageEntity;
+
+  @Column({ name: 'banner_id', type: 'uuid' })
+  bannerId!: string;
+
+  @ManyToOne(() => BannerEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'banner_id' })
+  banner!: BannerEntity;
+
+  @Column({ type: 'varchar', length: 80 })
+  zone!: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+
+@Entity('site_variables')
+@Unique(['siteId', 'identifier'])
+@Check('CHK_site_variables_identifier', `"identifier" ~ '^[a-z][a-z0-9_]*$'`)
+export class SiteVariableEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ type: 'varchar', length: 160 })
+  name!: string;
+
+  @Column({ type: 'varchar', length: 100 })
+  identifier!: string;
+
+  @Column({ type: 'text', default: '' })
+  value!: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+
+@Entity('site_search_settings')
+@Unique(['siteId'])
+export class SiteSearchSettingsEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({
+    name: 'searchable_sections',
+    type: 'jsonb',
+    default: () => '\'["articles"]\'::jsonb',
+  })
+  searchableSections!: string[];
+
+  @Column({
+    name: 'popular_queries',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  popularQueries!: PopularSearchQuery[];
+
+  @Column({
+    name: 'recommended_queries',
+    type: 'jsonb',
+    default: () => "'[]'::jsonb",
+  })
+  recommendedQueries!: RecommendedSearchQuery[];
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+
+@Entity('page_activities')
+export class PageActivityEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @Column({ name: 'page_id', type: 'uuid' })
+  pageId!: string;
+
+  @ManyToOne(() => PageEntity, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'page_id' })
+  page!: PageEntity;
+
+  @Column({ name: 'user_id', type: 'uuid', nullable: true })
+  userId!: string | null;
+
+  @ManyToOne(() => UserEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'user_id' })
+  user!: UserEntity | null;
+
+  @Column({ type: 'varchar', length: 60 })
+  action!: string;
+
+  @Column({ type: 'varchar', length: 500 })
+  description!: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  changes!: Record<string, unknown> | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
 }
 
 export const databaseEntities = [
@@ -1584,5 +1822,9 @@ export const databaseEntities = [
   PrivacyLegalModelEntity,
   PrivacyPolicyStateEntity,
   BannerEntity,
+  PageBannerAssignmentEntity,
+  SiteVariableEntity,
+  SiteSearchSettingsEntity,
+  PageActivityEntity,
   AuditLogEntity,
 ];

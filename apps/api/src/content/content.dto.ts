@@ -106,6 +106,24 @@ export class CreateCategoryDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(240)
+  ogTitle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  ogDescription?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  ogImageMediaId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  structuredData?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(80)
   displayTemplateKey?: string;
 
@@ -225,6 +243,24 @@ export class CreateArticleDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(240)
+  ogTitle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  ogDescription?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  ogImageMediaId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  structuredData?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(80)
   displayTemplateKey?: string;
 
@@ -296,6 +332,19 @@ export class PageBlockDto {
   data?: Record<string, unknown>;
 }
 
+export class PageRedirectDto {
+  @IsString()
+  @Matches(/^\/(?!\/)[^\s]*$/)
+  @MaxLength(500)
+  fromPath!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(301)
+  @Max(302)
+  statusCode!: 301 | 302;
+}
+
 export class CreatePageDto {
   @IsString()
   @MinLength(2)
@@ -336,6 +385,31 @@ export class CreatePageDto {
   @IsOptional()
   @IsBoolean()
   noIndex?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  ogTitle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  ogDescription?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  ogImageMediaId?: string | null;
+
+  @IsOptional()
+  @IsObject()
+  structuredData?: Record<string, unknown> | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => PageRedirectDto)
+  redirects?: PageRedirectDto[];
 }
 
 export class UpdatePageDto extends CreatePageDto {}
@@ -572,13 +646,24 @@ export class CreateBannerDto {
   @MaxLength(160)
   name!: string;
 
+  @IsOptional()
   @IsEnum(BannerPlacement)
-  placement!: BannerPlacement;
+  placement?: BannerPlacement | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(200)
   title?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  subtitle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  buttonText?: string | null;
 
   @IsOptional()
   @IsString()
@@ -589,13 +674,19 @@ export class CreateBannerDto {
   @IsUUID()
   mediaId?: string | null;
 
+  @IsOptional()
+  @IsUUID()
+  mobileMediaId?: string | null;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(9999)
-  sortOrder!: number;
+  sortOrder?: number;
 
+  @IsOptional()
   @IsBoolean()
-  isActive!: boolean;
+  isActive?: boolean;
 }
 
 export class UpdateBannerDto {
@@ -616,12 +707,26 @@ export class UpdateBannerDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
+  subtitle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  buttonText?: string | null;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   linkUrl?: string | null;
 
   @IsOptional()
   @IsUUID()
   mediaId?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  mobileMediaId?: string | null;
 
   @IsOptional()
   @IsInt()
@@ -632,6 +737,74 @@ export class UpdateBannerDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+}
+
+export class CreateSiteVariableDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  name!: string;
+
+  @IsString()
+  @Matches(/^[a-z][a-z0-9_]*$/)
+  @MaxLength(100)
+  identifier!: string;
+
+  @IsString()
+  @MaxLength(10000)
+  value!: string;
+}
+
+export class UpdateSiteVariableDto extends CreateSiteVariableDto {}
+
+export class AssignPageBannerDto {
+  @IsString()
+  @Matches(/^[a-z][a-z0-9_]*$/)
+  @MaxLength(80)
+  zone!: string;
+
+  @IsUUID()
+  bannerId!: string;
+}
+
+export class PopularSearchQueryDto {
+  @IsUUID()
+  id!: string;
+
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  query!: string;
+}
+
+export class UpdateSearchSettingsDto {
+  @IsArray()
+  @ArrayUnique()
+  @Matches(/^(articles|pages|categories)$/, { each: true })
+  searchableSections!: string[];
+
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => PopularSearchQueryDto)
+  popularQueries!: PopularSearchQueryDto[];
+}
+
+export class ConfirmRecommendedSearchDto {
+  @IsUUID()
+  recommendationId!: string;
+}
+
+export class UpdateNotFoundSeoDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  seoTitle?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  seoDescription?: string | null;
 }
 
 export class AddArticleCommentDto {

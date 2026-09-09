@@ -35,6 +35,10 @@ type Category = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageMediaId: string | null;
+  structuredData: Record<string, unknown> | null;
   displayTemplateKey: string;
   displayTemplateVersion: string;
   displayTemplateConfig: Record<string, unknown>;
@@ -70,6 +74,10 @@ type Article = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageMediaId: string | null;
+  structuredData: Record<string, unknown> | null;
   status: ArticleStatus;
   publicationState: PublicationState;
   editorialState: EditorialState;
@@ -1124,6 +1132,9 @@ export function ContentView({
     const [displayTemplateKey, displayTemplateVersion] = String(
       data.get("displayTemplateSelection") ?? "standard-article@1",
     ).split("@");
+    const structuredDataSource = String(
+      data.get("structuredData") ?? "",
+    ).trim();
     return {
       ...Object.fromEntries(
         [...data.entries()].filter(
@@ -1133,12 +1144,16 @@ export function ContentView({
               "scheduleAt",
               "scheduleState",
               "displayTemplateSelection",
+              "structuredData",
             ].includes(name) && value !== "",
         ),
       ),
       noIndex: data.get("noIndex") === "on",
       displayTemplateKey,
       displayTemplateVersion,
+      structuredData: structuredDataSource
+        ? JSON.parse(structuredDataSource)
+        : null,
       body: articleBody,
       bodyDocument: articleDocument,
       publishedAt:
@@ -1489,6 +1504,18 @@ export function ContentView({
     const [displayTemplateKey, displayTemplateVersion] = String(
       data.get("displayTemplateSelection") ?? "standard-category@1",
     ).split("@");
+    const categoryStructuredDataSource = String(
+      data.get("structuredData") ?? "",
+    ).trim();
+    let categoryStructuredData: Record<string, unknown> | null = null;
+    try {
+      categoryStructuredData = categoryStructuredDataSource
+        ? JSON.parse(categoryStructuredDataSource)
+        : null;
+    } catch {
+      setMessage("Проверьте JSON структурированных данных рубрики");
+      return;
+    }
     const payload = {
       name: String(data.get("name") ?? ""),
       slug: String(data.get("slug") ?? ""),
@@ -1502,6 +1529,10 @@ export function ContentView({
       seoDescription: String(data.get("seoDescription") ?? "").trim() || null,
       canonicalUrl: String(data.get("canonicalUrl") ?? "").trim() || null,
       noIndex: data.get("noIndex") === "on",
+      ogTitle: String(data.get("ogTitle") ?? "").trim() || null,
+      ogDescription: String(data.get("ogDescription") ?? "").trim() || null,
+      ogImageMediaId: String(data.get("ogImageMediaId") ?? "") || null,
+      structuredData: categoryStructuredData,
       displayTemplateKey,
       displayTemplateVersion,
     };
@@ -2605,6 +2636,63 @@ export function ContentView({
                   }
                 />
               </label>
+              <label>
+                <span>OG-заголовок</span>
+                <input
+                  name="ogTitle"
+                  maxLength={240}
+                  defaultValue={
+                    categoryEditor === "new"
+                      ? ""
+                      : (categoryEditor.ogTitle ?? "")
+                  }
+                />
+              </label>
+              <label>
+                <span>OG-описание</span>
+                <textarea
+                  name="ogDescription"
+                  maxLength={500}
+                  rows={3}
+                  defaultValue={
+                    categoryEditor === "new"
+                      ? ""
+                      : (categoryEditor.ogDescription ?? "")
+                  }
+                />
+              </label>
+              <label>
+                <span>OG-изображение</span>
+                <select
+                  name="ogImageMediaId"
+                  defaultValue={
+                    categoryEditor === "new"
+                      ? ""
+                      : (categoryEditor.ogImageMediaId ?? "")
+                  }
+                >
+                  <option value="">Не выбрано</option>
+                  {media
+                    .filter((item) => item.mimeType.startsWith("image/"))
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.originalName}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                <span>Структурированные данные (JSON)</span>
+                <textarea
+                  name="structuredData"
+                  rows={6}
+                  defaultValue={
+                    categoryEditor === "new" || !categoryEditor.structuredData
+                      ? ""
+                      : JSON.stringify(categoryEditor.structuredData, null, 2)
+                  }
+                />
+              </label>
               <label className="category-checkbox">
                 <input
                   name="noIndex"
@@ -3096,6 +3184,61 @@ export function ContentView({
                       editor === "new" ? "" : (editor.canonicalUrl ?? "")
                     }
                     placeholder="https://example.ru/articles/material"
+                  />
+                </label>
+                <label>
+                  OG-заголовок
+                  <input
+                    name="ogTitle"
+                    readOnly={!editorCanEdit}
+                    maxLength={240}
+                    defaultValue={
+                      editor === "new" ? "" : (editor.ogTitle ?? "")
+                    }
+                  />
+                </label>
+                <label>
+                  OG-описание
+                  <textarea
+                    name="ogDescription"
+                    readOnly={!editorCanEdit}
+                    rows={3}
+                    maxLength={500}
+                    defaultValue={
+                      editor === "new" ? "" : (editor.ogDescription ?? "")
+                    }
+                  />
+                </label>
+                <label>
+                  OG-изображение
+                  <select
+                    name="ogImageMediaId"
+                    disabled={!editorCanEdit}
+                    defaultValue={
+                      editor === "new" ? "" : (editor.ogImageMediaId ?? "")
+                    }
+                  >
+                    <option value="">Не выбрано</option>
+                    {media
+                      .filter((item) => item.mimeType.startsWith("image/"))
+                      .map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.originalName}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Структурированные данные (JSON)
+                  <textarea
+                    name="structuredData"
+                    readOnly={!editorCanEdit}
+                    rows={6}
+                    defaultValue={
+                      editor === "new" || !editor.structuredData
+                        ? ""
+                        : JSON.stringify(editor.structuredData, null, 2)
+                    }
                   />
                 </label>
                 <label className="item-seo-checkbox">

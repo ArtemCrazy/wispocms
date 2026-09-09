@@ -10,6 +10,9 @@ type NotFoundState = {
     name: string;
     status: "draft" | "published";
     updatedAt: string;
+    seoTitle: string | null;
+    seoDescription: string | null;
+    noIndex: true;
   };
   template: NotFoundTemplateData;
   publishedTemplate: NotFoundTemplateData | null;
@@ -46,6 +49,8 @@ export function NotFoundPageView({
   const [selectedKey, setSelectedKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [seoTitle, setSeoTitle] = useState("");
+  const [seoDescription, setSeoDescription] = useState("");
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -54,6 +59,8 @@ export function NotFoundPageView({
     );
     setState(next);
     setSelectedKey(next.template.key);
+    setSeoTitle(next.page.seoTitle ?? "");
+    setSeoDescription(next.page.seoDescription ?? "");
   }, [siteId]);
 
   useEffect(() => {
@@ -72,6 +79,8 @@ export function NotFoundPageView({
       const next = await request<NotFoundState>(url, init);
       setState(next);
       setSelectedKey(next.template.key);
+      setSeoTitle(next.page.seoTitle ?? "");
+      setSeoDescription(next.page.seoDescription ?? "");
       setMessage("Изменения сохранены");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка запроса");
@@ -99,7 +108,8 @@ export function NotFoundPageView({
           <small>ТЕХНИЧЕСКАЯ СТРАНИЦА</small>
           <h1>{state.page.name}</h1>
           <p>
-            Показывается автоматически, когда посетитель открывает несуществующий адрес.
+            Показывается автоматически, когда посетитель открывает
+            несуществующий адрес.
           </p>
         </div>
         <span className={`not-found-status ${state.page.status}`}>
@@ -142,10 +152,13 @@ export function NotFoundPageView({
                 type="button"
                 disabled={!canEdit || busy}
                 onClick={() =>
-                  void perform(`/api/sites/${siteId}/content/not-found/template`, {
-                    method: "PATCH",
-                    body: JSON.stringify({ templateKey: selectedKey }),
-                  })
+                  void perform(
+                    `/api/sites/${siteId}/content/not-found/template`,
+                    {
+                      method: "PATCH",
+                      body: JSON.stringify({ templateKey: selectedKey }),
+                    },
+                  )
                 }
               >
                 Подключить шаблон
@@ -157,22 +170,29 @@ export function NotFoundPageView({
                 className="secondary"
                 disabled={!canApprove || busy}
                 onClick={() =>
-                  void perform(`/api/sites/${siteId}/content/not-found/deactivate`, {
-                    method: "POST",
-                  })
+                  void perform(
+                    `/api/sites/${siteId}/content/not-found/deactivate`,
+                    {
+                      method: "POST",
+                    },
+                  )
                 }
               >
                 Отключить
               </button>
             ) : null}
-            {state.page.status !== "published" || state.hasPendingTemplateChanges ? (
+            {state.page.status !== "published" ||
+            state.hasPendingTemplateChanges ? (
               <button
                 type="button"
                 disabled={!canApprove || busy || dirty}
                 onClick={() =>
-                  void perform(`/api/sites/${siteId}/content/not-found/activate`, {
-                    method: "POST",
-                  })
+                  void perform(
+                    `/api/sites/${siteId}/content/not-found/activate`,
+                    {
+                      method: "POST",
+                    },
+                  )
                 }
               >
                 Активировать
@@ -181,10 +201,50 @@ export function NotFoundPageView({
           </div>
           {state.hasPendingTemplateChanges ? (
             <p className="not-found-admin-notice">
-              Новый шаблон сохранён. Активируйте его, чтобы обновить публичную 404.
+              Новый шаблон сохранён. Активируйте его, чтобы обновить публичную
+              404.
             </p>
           ) : null}
-          {message ? <p className="not-found-admin-message">{message}</p> : null}
+          {message ? (
+            <p className="not-found-admin-message">{message}</p>
+          ) : null}
+          <form
+            className="not-found-seo"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void perform(`/api/sites/${siteId}/content/not-found/seo`, {
+                method: "PATCH",
+                body: JSON.stringify({ seoTitle, seoDescription }),
+              });
+            }}
+          >
+            <div>
+              <span>SEO страницы 404</span>
+              <small>
+                Ответ всегда остаётся HTTP 404 с автоматическим noindex.
+              </small>
+            </div>
+            <label>
+              SEO-заголовок
+              <input
+                value={seoTitle}
+                maxLength={240}
+                readOnly={!canEdit}
+                onChange={(event) => setSeoTitle(event.target.value)}
+              />
+            </label>
+            <label>
+              SEO-описание
+              <textarea
+                value={seoDescription}
+                rows={4}
+                maxLength={500}
+                readOnly={!canEdit}
+                onChange={(event) => setSeoDescription(event.target.value)}
+              />
+            </label>
+            {canEdit ? <button disabled={busy}>Сохранить SEO</button> : null}
+          </form>
         </div>
 
         <div className="not-found-admin-preview">

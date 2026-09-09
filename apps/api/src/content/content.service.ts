@@ -37,6 +37,8 @@ import {
   DomainStatus,
   MediaEntity,
   PageEntity,
+  PageActivityEntity,
+  PageBannerAssignmentEntity,
   PageKind,
   PageStatus,
   PlatformRole,
@@ -44,7 +46,9 @@ import {
   EditorialState,
   PrivacyPolicyStateEntity,
   SiteEntity,
+  SiteSearchSettingsEntity,
   SiteType,
+  SiteVariableEntity,
   WorkspaceMembershipEntity,
 } from '../database/entities';
 import {
@@ -82,6 +86,12 @@ import {
   UpdatePageDto,
   UpdateNotFoundTemplateDto,
   DeleteCategoryDto,
+  AssignPageBannerDto,
+  ConfirmRecommendedSearchDto,
+  CreateSiteVariableDto,
+  UpdateNotFoundSeoDto,
+  UpdateSearchSettingsDto,
+  UpdateSiteVariableDto,
 } from './content.dto';
 import { ContentLifecycleService } from './content-lifecycle.service';
 import {
@@ -152,6 +162,18 @@ export class ContentService {
     private readonly categoryActivities?: Repository<CategoryActivityEntity>,
     @Optional()
     private readonly lifecycle?: ContentLifecycleService,
+    @Optional()
+    @InjectRepository(PageBannerAssignmentEntity)
+    private readonly bannerAssignments?: Repository<PageBannerAssignmentEntity>,
+    @Optional()
+    @InjectRepository(SiteVariableEntity)
+    private readonly siteVariables?: Repository<SiteVariableEntity>,
+    @Optional()
+    @InjectRepository(SiteSearchSettingsEntity)
+    private readonly searchSettings?: Repository<SiteSearchSettingsEntity>,
+    @Optional()
+    @InjectRepository(PageActivityEntity)
+    private readonly pageActivities?: Repository<PageActivityEntity>,
   ) {}
 
   private categoryIsPublic(
@@ -268,6 +290,85 @@ export class ContentService {
     return site;
   }
 
+  private async requireMediaToolkit(
+    siteId: string,
+    actor: Actor,
+    permission = SitePermission.READ,
+  ) {
+    const site = await this.requireSite(siteId, actor, permission);
+    if (site.siteType !== SiteType.MEDIA)
+      throw new BadRequestException(
+        'Этот раздел доступен только для сайта типа Media',
+      );
+    return site;
+  }
+
+  private resolveVariables<T>(
+    value: T,
+    variables: Array<{ identifier: string; value: string }>,
+  ): T {
+    if (!variables.length) return value;
+    const replacements = new Map(
+      variables.map((variable) => [
+        `{{${variable.identifier}}}`,
+        variable.value,
+      ]),
+    );
+    const walk = (entry: unknown): unknown => {
+      if (typeof entry === 'string') {
+        let result = entry;
+        for (const [token, replacement] of replacements)
+          result = result.split(token).join(replacement);
+        return result;
+      }
+      if (Array.isArray(entry)) return entry.map(walk);
+      if (entry && typeof entry === 'object')
+        return Object.fromEntries(
+          Object.entries(entry).map(([key, nested]) => [key, walk(nested)]),
+        );
+      return entry;
+    };
+    return walk(value) as T;
+  }
+
+  private async resolvePublicVariables<T>(siteId: string, value: T) {
+    if (!this.siteVariables) return value;
+    const variables = await this.siteVariables.find({
+      where: { siteId },
+      select: { identifier: true, value: true },
+    });
+    return this.resolveVariables(value, variables);
+  }
+
+  private async pageBannerData(
+    site: SiteEntity,
+    page: PageEntity | undefined,
+    legacyBanners: BannerEntity[],
+  ) {
+    if (site.siteType !== SiteType.MEDIA || !page || !this.bannerAssignments)
+      return { banners: legacyBanners, bannerAssignments: [] };
+    const assignments = await this.bannerAssignments.find({
+      where: { siteId: site.id, pageId: page.id },
+      relations: { banner: { media: true, mobileMedia: true } },
+      order: { zone: 'ASC' },
+    });
+    const assignedBanners = assignments
+      .filter((assignment) => assignment.banner.isActive)
+      .map((assignment) => ({
+        ...assignment.banner,
+        placement: assignment.zone,
+      }));
+    return {
+      banners: [
+        ...legacyBanners.filter(
+          (banner) => banner.placement === BannerPlacement.ARTICLE_SIDEBAR,
+        ),
+        ...assignedBanners,
+      ],
+      bannerAssignments: assignments,
+    };
+  }
+
   private async workspaceMedia(
     siteId: string,
     mediaId: string,
@@ -322,89 +423,106 @@ export class ContentService {
     });
     if (!site) throw new NotFoundException('Сайт не найден');
     const capabilities = getSiteContentCapabilities(site.siteType);
-    const [articles, pages, banners, categories] = await Promise.all([
-      capabilities.articles
-        ? this.articles.find({
-            where: {
-              siteId: site.id,
-              publicationState: PublicationState.PUBLISHED,
-              deletedAt: IsNull(),
-              publishedAt: LessThanOrEqual(new Date()),
-            },
-            relations: {
-              category: true,
-              author: true,
-              coverMedia: true,
-              previewMedia: true,
-            },
-            order: {
-              sortOrder: 'ASC',
-              publishedAt: 'DESC',
-              updatedAt: 'DESC',
-            },
-          })
-        : Promise.resolve([]),
-      this.pages.find({
-        where: { siteId: site.id, status: PageStatus.PUBLISHED },
-        order: { kind: 'ASC', title: 'ASC' },
-      }),
-      capabilities.banners
-        ? this.banners.find({
-            where: { siteId: site.id, isActive: true },
-            relations: { media: true },
-            order: { placement: 'ASC', sortOrder: 'ASC' },
-          })
-        : Promise.resolve([]),
-      capabilities.categories
-        ? this.categories.find({
-            where: {
-              siteId: site.id,
-              publicationState: PublicationState.PUBLISHED,
-              deletedAt: IsNull(),
-            },
-            order: { sortOrder: 'ASC', createdAt: 'ASC' },
-          })
-        : Promise.resolve([]),
-    ]);
-    return {
-      site: {
-        name: site.name,
-        slug: site.slug,
-        domain: site.domain,
-        siteType: site.siteType,
-        seoTitle: site.seoTitle,
-        seoDescription: site.seoDescription,
-        canonicalUrl: this.publicCanonicalBase(site),
-        seoImageMediaId: site.seoImageMediaId,
-        noIndex: site.noIndex,
-        globalData: site.globalData,
-        layoutSettings: site.layoutSettings,
-        linkedCommercialSite:
-          site.siteType === SiteType.MEDIA &&
-          site.linkedCommercialSite?.isActive
-            ? {
-                id: site.linkedCommercialSite.id,
-                name: site.linkedCommercialSite.name,
-                slug: site.linkedCommercialSite.slug,
-                domain: site.linkedCommercialSite.domain,
-                publicUrl:
-                  site.linkedCommercialSite.domain &&
-                  site.linkedCommercialSite.domainStatus ===
-                    DomainStatus.VERIFIED
-                    ? `https://${site.linkedCommercialSite.domain}`
-                    : `/preview/${encodeURIComponent(site.linkedCommercialSite.slug)}`,
-              }
-            : null,
-      },
-      articles: articles.filter((article) =>
-        this.categoryIsPublic(article.category),
-      ),
-      pages,
+    const [articles, pages, banners, categories, variables] = await Promise.all(
+      [
+        capabilities.articles
+          ? this.articles.find({
+              where: {
+                siteId: site.id,
+                publicationState: PublicationState.PUBLISHED,
+                deletedAt: IsNull(),
+                publishedAt: LessThanOrEqual(new Date()),
+              },
+              relations: {
+                category: true,
+                author: true,
+                coverMedia: true,
+                previewMedia: true,
+              },
+              order: {
+                sortOrder: 'ASC',
+                publishedAt: 'DESC',
+                updatedAt: 'DESC',
+              },
+            })
+          : Promise.resolve([]),
+        this.pages.find({
+          where: { siteId: site.id, status: PageStatus.PUBLISHED },
+          order: { kind: 'ASC', title: 'ASC' },
+        }),
+        capabilities.banners
+          ? this.banners.find({
+              where: { siteId: site.id, isActive: true },
+              relations: { media: true, mobileMedia: true },
+              order: { placement: 'ASC', sortOrder: 'ASC' },
+            })
+          : Promise.resolve([]),
+        capabilities.categories
+          ? this.categories.find({
+              where: {
+                siteId: site.id,
+                publicationState: PublicationState.PUBLISHED,
+                deletedAt: IsNull(),
+              },
+              order: { sortOrder: 'ASC', createdAt: 'ASC' },
+            })
+          : Promise.resolve([]),
+        this.siteVariables
+          ? this.siteVariables.find({
+              where: { siteId: site.id },
+              select: { identifier: true, value: true },
+            })
+          : Promise.resolve([]),
+      ],
+    );
+    const pageBanners = await this.pageBannerData(
+      site,
+      pages.find((page) => page.kind === PageKind.HOMEPAGE),
       banners,
-      categories: categories.filter((category) =>
-        this.categoryIsPublic(category),
-      ),
-    };
+    );
+    return this.resolveVariables(
+      {
+        site: {
+          name: site.name,
+          slug: site.slug,
+          domain: site.domain,
+          siteType: site.siteType,
+          seoTitle: site.seoTitle,
+          seoDescription: site.seoDescription,
+          canonicalUrl: this.publicCanonicalBase(site),
+          seoImageMediaId: site.seoImageMediaId,
+          noIndex: site.noIndex,
+          globalData: site.globalData,
+          layoutSettings: site.layoutSettings,
+          linkedCommercialSite:
+            site.siteType === SiteType.MEDIA &&
+            site.linkedCommercialSite?.isActive
+              ? {
+                  id: site.linkedCommercialSite.id,
+                  name: site.linkedCommercialSite.name,
+                  slug: site.linkedCommercialSite.slug,
+                  domain: site.linkedCommercialSite.domain,
+                  publicUrl:
+                    site.linkedCommercialSite.domain &&
+                    site.linkedCommercialSite.domainStatus ===
+                      DomainStatus.VERIFIED
+                      ? `https://${site.linkedCommercialSite.domain}`
+                      : `/preview/${encodeURIComponent(site.linkedCommercialSite.slug)}`,
+                }
+              : null,
+        },
+        articles: articles.filter((article) =>
+          this.categoryIsPublic(article.category),
+        ),
+        pages,
+        banners: pageBanners.banners,
+        bannerAssignments: pageBanners.bannerAssignments,
+        categories: categories.filter((category) =>
+          this.categoryIsPublic(category),
+        ),
+      },
+      variables,
+    );
   }
 
   async getPublicIntegrationManifest(siteSlug: string) {
@@ -439,11 +557,19 @@ export class ContentService {
     });
     if (!site) throw new NotFoundException('Сайт не найден');
     const capabilities = getSiteContentCapabilities(site.siteType);
+    const mediaSearchSettings =
+      site.siteType === SiteType.MEDIA && this.searchSettings
+        ? await this.searchSettings.findOneBy({ siteId: site.id })
+        : null;
+    const searchableSections =
+      site.siteType === SiteType.MEDIA
+        ? (mediaSearchSettings?.searchableSections ?? ['articles'])
+        : ['articles', 'pages'];
 
     const escapedQuery = query.replace(/[\\%_]/g, '\\$&');
     const pattern = `%${escapedQuery}%`;
-    const [articles, pages] = await Promise.all([
-      capabilities.articles
+    const [articles, pages, categories] = await Promise.all([
+      capabilities.articles && searchableSections.includes('articles')
         ? this.articles
             .createQueryBuilder('article')
             .where('article.siteId = :siteId', { siteId: site.id })
@@ -468,19 +594,37 @@ export class ContentService {
             .limit(10)
             .getMany()
         : Promise.resolve([]),
-      this.pages
-        .createQueryBuilder('page')
-        .where('page.siteId = :siteId', { siteId: site.id })
-        .andWhere('page.status = :pageStatus', {
-          pageStatus: PageStatus.PUBLISHED,
-        })
-        .andWhere(
-          `(page.title ILIKE :pattern ESCAPE '\\' OR CAST(page.blocks AS text) ILIKE :pattern ESCAPE '\\')`,
-          { pattern },
-        )
-        .orderBy('page.updatedAt', 'DESC')
-        .limit(10)
-        .getMany(),
+      searchableSections.includes('pages')
+        ? this.pages
+            .createQueryBuilder('page')
+            .where('page.siteId = :siteId', { siteId: site.id })
+            .andWhere('page.status = :pageStatus', {
+              pageStatus: PageStatus.PUBLISHED,
+            })
+            .andWhere(
+              `(page.title ILIKE :pattern ESCAPE '\\' OR CAST(page.blocks AS text) ILIKE :pattern ESCAPE '\\')`,
+              { pattern },
+            )
+            .orderBy('page.updatedAt', 'DESC')
+            .limit(10)
+            .getMany()
+        : Promise.resolve([]),
+      searchableSections.includes('categories')
+        ? this.categories
+            .createQueryBuilder('category')
+            .where('category.siteId = :siteId', { siteId: site.id })
+            .andWhere('category.publicationState = :publicationState', {
+              publicationState: PublicationState.PUBLISHED,
+            })
+            .andWhere('category.deletedAt IS NULL')
+            .andWhere(
+              `(category.name ILIKE :pattern ESCAPE '\\' OR COALESCE(category.description, '') ILIKE :pattern ESCAPE '\\')`,
+              { pattern },
+            )
+            .orderBy('category.updatedAt', 'DESC')
+            .limit(10)
+            .getMany()
+        : Promise.resolve([]),
     ]);
 
     const cleanExcerpt = (value: string) =>
@@ -497,7 +641,7 @@ export class ContentService {
           .join(' '),
       );
 
-    return {
+    return this.resolvePublicVariables(site.id, {
       query,
       results: [
         ...articles.map((article) => ({
@@ -518,6 +662,15 @@ export class ContentService {
           path: page.kind === PageKind.HOMEPAGE ? '/' : `/pages/${page.slug}`,
           updatedAt: page.updatedAt,
         })),
+        ...categories.map((category) => ({
+          id: category.id,
+          type: 'category' as const,
+          title: category.name,
+          slug: category.slug,
+          excerpt: cleanExcerpt(category.description ?? ''),
+          path: `/categories/${category.slug}`,
+          updatedAt: category.updatedAt,
+        })),
       ]
         .sort(
           (left, right) =>
@@ -533,7 +686,7 @@ export class ContentService {
           excerpt: result.excerpt,
           path: result.path,
         })),
-    };
+    });
   }
 
   async getPublicMedia(siteSlug: string, mediaId: string) {
@@ -550,10 +703,15 @@ export class ContentService {
       await Promise.all([
         this.pages.find({
           where: { siteId: site.id, status: PageStatus.PUBLISHED },
-          select: { blocks: true },
+          select: { blocks: true, ogImageMediaId: true },
         }),
         capabilities.banners
-          ? this.banners.existsBy({ siteId: site.id, isActive: true, mediaId })
+          ? this.banners.exists({
+              where: [
+                { siteId: site.id, isActive: true, mediaId },
+                { siteId: site.id, isActive: true, mobileMediaId: mediaId },
+              ],
+            })
           : Promise.resolve(false),
         capabilities.articles
           ? this.articles.find({
@@ -569,18 +727,24 @@ export class ContentService {
             })
           : Promise.resolve([]),
         this.categories.find({
-          where: { siteId: site.id, imageMediaId: mediaId },
+          where: [
+            { siteId: site.id, imageMediaId: mediaId },
+            { siteId: site.id, ogImageMediaId: mediaId },
+          ],
         }),
       ]);
-    const pageUses = publishedPages.some((page) =>
-      page.blocks.some((block) => block.mediaId === mediaId),
+    const pageUses = publishedPages.some(
+      (page) =>
+        page.ogImageMediaId === mediaId ||
+        page.blocks.some((block) => block.mediaId === mediaId),
     );
     const seoUses = site.seoImageMediaId === mediaId;
     const articleUses = publicArticles.some(
       (article) =>
         this.categoryIsPublic(article.category, true) &&
         (article.coverMediaId === mediaId ||
-          article.previewMediaId === mediaId),
+          article.previewMediaId === mediaId ||
+          article.ogImageMediaId === mediaId),
     );
     const articleDocumentUses = publicArticles.some(
       (article) =>
@@ -681,7 +845,7 @@ export class ContentService {
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
-    return {
+    return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
@@ -706,7 +870,7 @@ export class ContentService {
       pages,
       banners,
       related,
-    };
+    });
   }
 
   async getPublicCategory(siteSlug: string, categorySlug: string) {
@@ -777,7 +941,7 @@ export class ContentService {
         order: { title: 'ASC' },
       }),
     ]);
-    return {
+    return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
@@ -791,7 +955,7 @@ export class ContentService {
       articles,
       children: children.filter((item) => this.categoryIsPublic(item)),
       pages,
-    };
+    });
   }
 
   async getPublicPage(siteSlug: string, pageSlug: string) {
@@ -801,15 +965,41 @@ export class ContentService {
     if (!site) throw new NotFoundException('Сайт не найден');
     if (pageSlug.trim().toLowerCase() === '404')
       throw new NotFoundException('Страница не найдена');
+    const normalizedPageSlug = pageSlug.trim().toLowerCase();
     const page = await this.pages.findOne({
       where: {
         siteId: site.id,
-        slug: pageSlug.trim().toLowerCase(),
+        slug: normalizedPageSlug,
         kind: PageKind.PAGE,
         status: PageStatus.PUBLISHED,
       },
     });
-    if (!page) throw new NotFoundException('Страница не найдена');
+    if (!page) {
+      const redirectSources = await this.pages.find({
+        where: { siteId: site.id, status: PageStatus.PUBLISHED },
+      });
+      const requestedPaths = [
+        `/${normalizedPageSlug}`,
+        `/pages/${normalizedPageSlug}`,
+      ];
+      const redirectPage = redirectSources.find((candidate) =>
+        (candidate.redirects ?? []).some((redirect) =>
+          requestedPaths.includes(redirect.fromPath.toLowerCase()),
+        ),
+      );
+      const redirectRule = redirectPage?.redirects.find((redirect) =>
+        requestedPaths.includes(redirect.fromPath.toLowerCase()),
+      );
+      if (redirectPage && redirectRule)
+        return {
+          redirectTo:
+            redirectPage.kind === PageKind.HOMEPAGE
+              ? '/'
+              : `/pages/${redirectPage.slug}`,
+          redirectStatus: redirectRule.statusCode,
+        };
+      throw new NotFoundException('Страница не найдена');
+    }
     const pages = await this.pages.find({
       where: {
         siteId: site.id,
@@ -825,7 +1015,7 @@ export class ContentService {
             where: { siteId: site.id, pageId: page.id },
           })
         : null;
-    return {
+    return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
@@ -847,7 +1037,7 @@ export class ContentService {
             config: privacyDisplay.publishedDisplayTemplateConfig ?? {},
           }
         : null,
-    };
+    });
   }
 
   async getPublicNotFoundPage(siteSlug: string) {
@@ -874,7 +1064,7 @@ export class ContentService {
           page.publishedSystemTemplateVersion,
         )
       : getNotFoundTemplate();
-    return {
+    return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
@@ -885,7 +1075,7 @@ export class ContentService {
       pages: pages.filter((item) => item.slug !== '404'),
       active,
       template,
-    };
+    });
   }
 
   async getArticlePreview(siteId: string, articleId: string, actor: Actor) {
@@ -995,7 +1185,8 @@ export class ContentService {
             where: { siteId, pageId: page.id },
           })
         : null;
-    return {
+    const pageBanners = await this.pageBannerData(site, page, banners);
+    return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
@@ -1015,7 +1206,8 @@ export class ContentService {
           ? [page, ...navigationPages]
           : navigationPages,
       articles,
-      banners,
+      banners: pageBanners.banners,
+      bannerAssignments: pageBanners.bannerAssignments,
       privacyDisplay: privacyDisplay
         ? {
             key: privacyDisplay.displayTemplateKey,
@@ -1030,7 +1222,7 @@ export class ContentService {
               page.systemTemplateVersion,
             )
           : null,
-    };
+    });
   }
 
   async submitContactRequest(
@@ -1446,39 +1638,55 @@ export class ContentService {
   }
 
   async listBanners(siteId: string, actor: Actor) {
-    await this.requireSiteModule(siteId, actor, 'banners');
+    const site = await this.requireSiteModule(siteId, actor, 'banners');
     return this.banners.find({
       where: { siteId },
-      relations: { media: true },
-      order: { placement: 'ASC', sortOrder: 'ASC', createdAt: 'DESC' },
+      relations: { media: true, mobileMedia: true },
+      order:
+        site.siteType === SiteType.MEDIA
+          ? { updatedAt: 'DESC' }
+          : { placement: 'ASC', sortOrder: 'ASC', createdAt: 'DESC' },
     });
   }
 
-  private async validateBannerMedia(siteId: string, mediaId?: string | null) {
-    if (mediaId && !(await this.workspaceHasMedia(siteId, mediaId)))
-      throw new NotFoundException(
-        'Изображение рабочего пространства не найдено',
-      );
+  private async validateBannerMedia(
+    siteId: string,
+    ...mediaIds: Array<string | null | undefined>
+  ) {
+    for (const mediaId of mediaIds) {
+      if (mediaId && !(await this.workspaceHasMedia(siteId, mediaId)))
+        throw new NotFoundException(
+          'Изображение рабочего пространства не найдено',
+        );
+    }
   }
 
   async createBanner(siteId: string, actor: Actor, dto: CreateBannerDto) {
-    await this.requireSiteModule(
+    const site = await this.requireSiteModule(
       siteId,
       actor,
       'banners',
       SitePermission.EDIT_CONTENT,
     );
-    await this.validateBannerMedia(siteId, dto.mediaId);
+    await this.validateBannerMedia(siteId, dto.mediaId, dto.mobileMediaId);
+    if (site.siteType !== SiteType.MEDIA && !dto.placement)
+      throw new BadRequestException(
+        'Для этого типа сайта требуется позиция баннера',
+      );
     return this.banners.save(
       this.banners.create({
         siteId,
         name: dto.name.trim(),
-        placement: dto.placement,
+        placement:
+          site.siteType === SiteType.MEDIA ? null : (dto.placement ?? null),
         title: dto.title?.trim() || null,
+        subtitle: dto.subtitle?.trim() || null,
+        buttonText: dto.buttonText?.trim() || null,
         linkUrl: dto.linkUrl?.trim() || null,
         mediaId: dto.mediaId || null,
-        sortOrder: dto.sortOrder,
-        isActive: dto.isActive,
+        mobileMediaId: dto.mobileMediaId || null,
+        sortOrder: dto.sortOrder ?? 0,
+        isActive: dto.isActive ?? true,
       }),
     );
   }
@@ -1489,7 +1697,7 @@ export class ContentService {
     actor: Actor,
     dto: UpdateBannerDto,
   ) {
-    await this.requireSiteModule(
+    const site = await this.requireSiteModule(
       siteId,
       actor,
       'banners',
@@ -1499,12 +1707,19 @@ export class ContentService {
       where: { id: bannerId, siteId },
     });
     if (!banner) throw new NotFoundException('Баннер не найден');
-    await this.validateBannerMedia(siteId, dto.mediaId);
+    await this.validateBannerMedia(siteId, dto.mediaId, dto.mobileMediaId);
     if (dto.name !== undefined) banner.name = dto.name.trim();
-    if (dto.placement !== undefined) banner.placement = dto.placement;
+    if (site.siteType === SiteType.MEDIA) banner.placement = null;
+    else if (dto.placement !== undefined) banner.placement = dto.placement;
     if (dto.title !== undefined) banner.title = dto.title?.trim() || null;
+    if (dto.subtitle !== undefined)
+      banner.subtitle = dto.subtitle?.trim() || null;
+    if (dto.buttonText !== undefined)
+      banner.buttonText = dto.buttonText?.trim() || null;
     if (dto.linkUrl !== undefined) banner.linkUrl = dto.linkUrl?.trim() || null;
     if (dto.mediaId !== undefined) banner.mediaId = dto.mediaId || null;
+    if (dto.mobileMediaId !== undefined)
+      banner.mobileMediaId = dto.mobileMediaId || null;
     if (dto.sortOrder !== undefined) banner.sortOrder = dto.sortOrder;
     if (dto.isActive !== undefined) banner.isActive = dto.isActive;
     return this.banners.save(banner);
@@ -1521,8 +1736,285 @@ export class ContentService {
       where: { id: bannerId, siteId },
     });
     if (!banner) throw new NotFoundException('Баннер не найден');
+    if (await this.bannerAssignments?.existsBy({ bannerId }))
+      throw new ConflictException(
+        'Баннер назначен на страницу. Сначала снимите все назначения',
+      );
     await this.banners.remove(banner);
     return { id: bannerId };
+  }
+
+  private async recordPageActivity(
+    siteId: string,
+    pageId: string,
+    actor: Actor,
+    action: string,
+    description: string,
+    changes?: Record<string, unknown>,
+  ) {
+    if (!this.pageActivities) return;
+    await this.pageActivities.save(
+      this.pageActivities.create({
+        siteId,
+        pageId,
+        userId: actor.userId,
+        action,
+        description,
+        changes: changes ?? null,
+      }),
+    );
+  }
+
+  async listPageBannerAssignments(
+    siteId: string,
+    pageId: string,
+    actor: Actor,
+  ) {
+    await this.requireMediaToolkit(siteId, actor);
+    if (!(await this.pages.existsBy({ id: pageId, siteId })))
+      throw new NotFoundException('Страница не найдена');
+    return (
+      (await this.bannerAssignments?.find({
+        where: { siteId, pageId },
+        relations: { banner: { media: true, mobileMedia: true } },
+        order: { zone: 'ASC' },
+      })) ?? []
+    );
+  }
+
+  async assignPageBanner(
+    siteId: string,
+    pageId: string,
+    actor: Actor,
+    dto: AssignPageBannerDto,
+  ) {
+    await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    if (!(await this.pages.existsBy({ id: pageId, siteId })))
+      throw new NotFoundException('Страница не найдена');
+    if (!(await this.banners.existsBy({ id: dto.bannerId, siteId })))
+      throw new NotFoundException('Баннер этого сайта не найден');
+    if (!this.bannerAssignments)
+      throw new ServiceUnavailableException('Назначения баннеров недоступны');
+    await this.bannerAssignments.upsert(
+      { siteId, pageId, bannerId: dto.bannerId, zone: dto.zone },
+      ['pageId', 'zone'],
+    );
+    await this.recordPageActivity(
+      siteId,
+      pageId,
+      actor,
+      'banner_assigned',
+      `Баннер назначен в зону ${dto.zone}`,
+      { zone: dto.zone, bannerId: dto.bannerId },
+    );
+    return this.listPageBannerAssignments(siteId, pageId, actor);
+  }
+
+  async unassignPageBanner(
+    siteId: string,
+    pageId: string,
+    zone: string,
+    actor: Actor,
+  ) {
+    await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    if (!this.bannerAssignments)
+      throw new ServiceUnavailableException('Назначения баннеров недоступны');
+    await this.bannerAssignments.delete({ siteId, pageId, zone });
+    await this.recordPageActivity(
+      siteId,
+      pageId,
+      actor,
+      'banner_unassigned',
+      `Баннер снят с зоны ${zone}`,
+      { zone },
+    );
+    return { pageId, zone };
+  }
+
+  private async variableUsageCount(siteId: string, identifier: string) {
+    if (!this.siteVariables) return 0;
+    const token = `%{{${identifier}}}%`;
+    const rows: Array<{ count: string }> =
+      await this.siteVariables.manager.query(
+        `SELECT (
+        (SELECT COUNT(*) FROM "sites" WHERE "id" = $1 AND ("global_data"::text LIKE $2 OR "layout_settings"::text LIKE $2)) +
+        (SELECT COUNT(*) FROM "pages" WHERE "site_id" = $1 AND "blocks"::text LIKE $2) +
+        (SELECT COUNT(*) FROM "articles" WHERE "site_id" = $1 AND ("body" LIKE $2 OR COALESCE("body_document"::text, '') LIKE $2)) +
+        (SELECT COUNT(*) FROM "categories" WHERE "site_id" = $1 AND COALESCE("description", '') LIKE $2) +
+        (SELECT COUNT(*) FROM "banners" WHERE "site_id" = $1 AND (COALESCE("title", '') LIKE $2 OR COALESCE("subtitle", '') LIKE $2 OR COALESCE("button_text", '') LIKE $2 OR COALESCE("link_url", '') LIKE $2))
+      )::text AS "count"`,
+        [siteId, token],
+      );
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  async listSiteVariables(siteId: string, actor: Actor) {
+    await this.requireMediaToolkit(siteId, actor);
+    if (!this.siteVariables) return [];
+    const rows = await this.siteVariables.find({
+      where: { siteId },
+      order: { updatedAt: 'DESC' },
+    });
+    return Promise.all(
+      rows.map(async (variable) => ({
+        ...variable,
+        usageCount: await this.variableUsageCount(siteId, variable.identifier),
+      })),
+    );
+  }
+
+  async createSiteVariable(
+    siteId: string,
+    actor: Actor,
+    dto: CreateSiteVariableDto,
+  ) {
+    await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    if (!this.siteVariables)
+      throw new ServiceUnavailableException('Переменные сайта недоступны');
+    const identifier = dto.identifier.trim().toLowerCase();
+    if (await this.siteVariables.existsBy({ siteId, identifier }))
+      throw new ConflictException('Такой идентификатор уже используется');
+    return this.siteVariables.save(
+      this.siteVariables.create({
+        siteId,
+        name: dto.name.trim(),
+        identifier,
+        value: dto.value,
+      }),
+    );
+  }
+
+  async updateSiteVariable(
+    siteId: string,
+    variableId: string,
+    actor: Actor,
+    dto: UpdateSiteVariableDto,
+  ) {
+    await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    if (!this.siteVariables)
+      throw new ServiceUnavailableException('Переменные сайта недоступны');
+    const variable = await this.siteVariables.findOneBy({
+      id: variableId,
+      siteId,
+    });
+    if (!variable) throw new NotFoundException('Переменная не найдена');
+    const identifier = dto.identifier.trim().toLowerCase();
+    if (identifier !== variable.identifier) {
+      if ((await this.variableUsageCount(siteId, variable.identifier)) > 0)
+        throw new ConflictException(
+          'Используемый идентификатор нельзя изменить. Сначала замените его в контенте',
+        );
+      const duplicate = await this.siteVariables.findOneBy({
+        siteId,
+        identifier,
+      });
+      if (duplicate && duplicate.id !== variable.id)
+        throw new ConflictException('Такой идентификатор уже используется');
+    }
+    variable.name = dto.name.trim();
+    variable.identifier = identifier;
+    variable.value = dto.value;
+    return this.siteVariables.save(variable);
+  }
+
+  async deleteSiteVariable(siteId: string, variableId: string, actor: Actor) {
+    await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    if (!this.siteVariables)
+      throw new ServiceUnavailableException('Переменные сайта недоступны');
+    const variable = await this.siteVariables.findOneBy({
+      id: variableId,
+      siteId,
+    });
+    if (!variable) throw new NotFoundException('Переменная не найдена');
+    const usageCount = await this.variableUsageCount(
+      siteId,
+      variable.identifier,
+    );
+    if (usageCount > 0)
+      throw new ConflictException(
+        `Переменная используется в ${usageCount} элементах. Сначала удалите ссылки {{${variable.identifier}}}`,
+      );
+    await this.siteVariables.remove(variable);
+    return { id: variableId };
+  }
+
+  async getSearchSettings(siteId: string, actor: Actor) {
+    await this.requireMediaToolkit(siteId, actor);
+    if (!this.searchSettings)
+      throw new ServiceUnavailableException('Настройки поиска недоступны');
+    let settings = await this.searchSettings.findOneBy({ siteId });
+    if (!settings)
+      settings = await this.searchSettings.save(
+        this.searchSettings.create({
+          siteId,
+          searchableSections: ['articles'],
+          popularQueries: [],
+          recommendedQueries: [],
+        }),
+      );
+    return {
+      ...settings,
+      recommendedQueries: settings.recommendedQueries.filter(
+        (recommended) =>
+          !settings.popularQueries.some(
+            (popular) =>
+              popular.query.toLocaleLowerCase('ru') ===
+              recommended.query.toLocaleLowerCase('ru'),
+          ),
+      ),
+      analyticsAvailable: false,
+    };
+  }
+
+  async updateSearchSettings(
+    siteId: string,
+    actor: Actor,
+    dto: UpdateSearchSettingsDto,
+  ) {
+    await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    const current = await this.getSearchSettings(siteId, actor);
+    if (!this.searchSettings)
+      throw new ServiceUnavailableException('Настройки поиска недоступны');
+    const settings = await this.searchSettings.findOneByOrFail({ siteId });
+    settings.searchableSections = dto.searchableSections;
+    settings.popularQueries = dto.popularQueries.map((item) => ({
+      id: item.id,
+      query: item.query.trim(),
+    }));
+    settings.recommendedQueries = current.recommendedQueries;
+    await this.searchSettings.save(settings);
+    return this.getSearchSettings(siteId, actor);
+  }
+
+  async confirmRecommendedSearch(
+    siteId: string,
+    actor: Actor,
+    dto: ConfirmRecommendedSearchDto,
+  ) {
+    const current = await this.getSearchSettings(siteId, actor);
+    const recommendation = current.recommendedQueries.find(
+      (item) => item.id === dto.recommendationId,
+    );
+    if (!recommendation)
+      throw new NotFoundException('Рекомендованный запрос не найден');
+    return this.updateSearchSettings(siteId, actor, {
+      searchableSections: current.searchableSections,
+      popularQueries: [
+        ...current.popularQueries,
+        { id: recommendation.id, query: recommendation.query },
+      ],
+    });
+  }
+
+  async listPageActivity(siteId: string, pageId: string, actor: Actor) {
+    await this.requireSite(siteId, actor);
+    if (!this.pageActivities) return [];
+    return this.pageActivities.find({
+      where: { siteId, pageId },
+      relations: { user: true },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
   }
 
   private async validateLinks(
@@ -1531,6 +2023,7 @@ export class ContentService {
     authorId?: string,
     coverMediaId?: string,
     previewMediaId?: string,
+    ogImageMediaId?: string | null,
   ) {
     if (
       categoryId &&
@@ -1546,6 +2039,11 @@ export class ContentService {
       !(await this.workspaceHasMedia(siteId, previewMediaId))
     )
       throw new NotFoundException('Изображение превью этого сайта не найдено');
+    if (
+      ogImageMediaId &&
+      !(await this.workspaceHasMedia(siteId, ogImageMediaId))
+    )
+      throw new NotFoundException('Open Graph изображение не найдено');
   }
 
   private async validateArticleDocumentMedia(
@@ -1615,6 +2113,7 @@ export class ContentService {
       dto.authorId,
       dto.coverMediaId,
       dto.previewMediaId,
+      dto.ogImageMediaId,
     );
     const slug = dto.slug.trim().toLowerCase();
     if (new Set(['404', 'privacy-policy', 'search']).has(slug))
@@ -1692,6 +2191,10 @@ export class ContentService {
           seoDescription: dto.seoDescription?.trim() || null,
           canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
           noIndex: dto.noIndex ?? false,
+          ogTitle: dto.ogTitle?.trim() || null,
+          ogDescription: dto.ogDescription?.trim() || null,
+          ogImageMediaId: dto.ogImageMediaId ?? null,
+          structuredData: dto.structuredData ?? null,
           publishedAt: null,
           createdByUserId: actor.userId,
           updatedByUserId: actor.userId,
@@ -1746,6 +2249,7 @@ export class ContentService {
       dto.authorId,
       dto.coverMediaId,
       dto.previewMediaId,
+      dto.ogImageMediaId,
     );
     const displayTemplateKey =
       dto.displayTemplateKey?.trim() || article.displayTemplateKey;
@@ -1783,6 +2287,22 @@ export class ContentService {
       seoDescription: dto.seoDescription?.trim() || null,
       canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
       noIndex: dto.noIndex ?? false,
+      ogTitle:
+        dto.ogTitle === undefined
+          ? (article.ogTitle ?? null)
+          : dto.ogTitle?.trim() || null,
+      ogDescription:
+        dto.ogDescription === undefined
+          ? (article.ogDescription ?? null)
+          : dto.ogDescription?.trim() || null,
+      ogImageMediaId:
+        dto.ogImageMediaId === undefined
+          ? (article.ogImageMediaId ?? null)
+          : dto.ogImageMediaId,
+      structuredData:
+        dto.structuredData === undefined
+          ? (article.structuredData ?? null)
+          : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
       displayTemplateConfig:
@@ -2099,10 +2619,12 @@ export class ContentService {
 
   private async validateCategoryImage(
     siteId: string,
-    imageMediaId: string | null,
+    ...mediaIds: Array<string | null>
   ) {
-    if (imageMediaId && !(await this.workspaceHasMedia(siteId, imageMediaId)))
-      throw new NotFoundException('Изображение этой рубрики не найдено');
+    for (const mediaId of mediaIds) {
+      if (mediaId && !(await this.workspaceHasMedia(siteId, mediaId)))
+        throw new NotFoundException('Изображение этой рубрики не найдено');
+    }
   }
 
   async createCategory(siteId: string, actor: Actor, dto: CreateCategoryDto) {
@@ -2124,7 +2646,11 @@ export class ContentService {
     const parentId = dto.parentId ?? null;
     const imageMediaId = dto.imageMediaId ?? null;
     await this.validateCategoryParent(siteId, parentId);
-    await this.validateCategoryImage(siteId, imageMediaId);
+    await this.validateCategoryImage(
+      siteId,
+      imageMediaId,
+      dto.ogImageMediaId ?? null,
+    );
     const displayTemplateKey =
       dto.displayTemplateKey?.trim() || 'standard-category';
     const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
@@ -2163,6 +2689,10 @@ export class ContentService {
           seoDescription: dto.seoDescription?.trim() || null,
           canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
           noIndex: dto.noIndex ?? false,
+          ogTitle: dto.ogTitle?.trim() || null,
+          ogDescription: dto.ogDescription?.trim() || null,
+          ogImageMediaId: dto.ogImageMediaId ?? null,
+          structuredData: dto.structuredData ?? null,
           displayTemplateKey,
           displayTemplateVersion,
           displayTemplateConfig: dto.displayTemplateConfig ?? {},
@@ -2242,7 +2772,11 @@ export class ContentService {
         ? (category.imageMediaId ?? null)
         : dto.imageMediaId;
     await this.validateCategoryParent(siteId, parentId, categoryId);
-    await this.validateCategoryImage(siteId, imageMediaId);
+    const ogImageMediaId =
+      dto.ogImageMediaId === undefined
+        ? (category.ogImageMediaId ?? null)
+        : dto.ogImageMediaId;
+    await this.validateCategoryImage(siteId, imageMediaId, ogImageMediaId);
     const changes = {
       name: dto.name.trim(),
       slug,
@@ -2278,6 +2812,19 @@ export class ContentService {
           ? (category.canonicalUrl ?? null)
           : dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
       noIndex: dto.noIndex ?? category.noIndex ?? false,
+      ogTitle:
+        dto.ogTitle === undefined
+          ? (category.ogTitle ?? null)
+          : dto.ogTitle?.trim() || null,
+      ogDescription:
+        dto.ogDescription === undefined
+          ? (category.ogDescription ?? null)
+          : dto.ogDescription?.trim() || null,
+      ogImageMediaId,
+      structuredData:
+        dto.structuredData === undefined
+          ? (category.structuredData ?? null)
+          : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
       displayTemplateConfig:
@@ -2883,6 +3430,9 @@ export class ContentService {
         name: page.title,
         status: page.status,
         updatedAt: page.updatedAt,
+        seoTitle: page.seoTitle,
+        seoDescription: page.seoDescription,
+        noIndex: true,
       },
       template: currentTemplate,
       publishedTemplate,
@@ -2909,6 +3459,37 @@ export class ContentService {
     page.systemTemplateKey = template.key;
     page.systemTemplateVersion = template.version;
     await this.pages.save(page);
+    await this.recordPageActivity(
+      siteId,
+      page.id,
+      actor,
+      'template_updated',
+      `Шаблон 404 изменён на ${template.name}`,
+      { templateKey: template.key, templateVersion: template.version },
+    );
+    return this.getNotFoundPage(siteId, actor);
+  }
+
+  async updateNotFoundSeo(
+    siteId: string,
+    actor: Actor,
+    dto: UpdateNotFoundSeoDto,
+  ) {
+    await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
+    const page = await this.pages.findOne({ where: { siteId, slug: '404' } });
+    if (!page) throw new NotFoundException('Страница 404 не найдена');
+    page.seoTitle = dto.seoTitle?.trim() || null;
+    page.seoDescription = dto.seoDescription?.trim() || null;
+    page.noIndex = true;
+    await this.pages.save(page);
+    await this.recordPageActivity(
+      siteId,
+      page.id,
+      actor,
+      'seo_updated',
+      'SEO страницы 404 обновлено',
+      { seoTitle: page.seoTitle, seoDescription: page.seoDescription },
+    );
     return this.getNotFoundPage(siteId, actor);
   }
 
@@ -2926,6 +3507,13 @@ export class ContentService {
     page.publishedSystemTemplateVersion = template.version;
     page.status = PageStatus.PUBLISHED;
     await this.pages.save(page);
+    await this.recordPageActivity(
+      siteId,
+      page.id,
+      actor,
+      'status_updated',
+      'Страница 404 активирована',
+    );
     return this.getNotFoundPage(siteId, actor);
   }
 
@@ -2935,12 +3523,24 @@ export class ContentService {
     if (!page) throw new NotFoundException('Страница 404 не найдена');
     page.status = PageStatus.DRAFT;
     await this.pages.save(page);
+    await this.recordPageActivity(
+      siteId,
+      page.id,
+      actor,
+      'status_updated',
+      'Страница 404 деактивирована',
+    );
     return this.getNotFoundPage(siteId, actor);
   }
 
   async createPage(siteId: string, actor: Actor, dto: CreatePageDto) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
     await this.validatePageBlocks(siteId, dto);
+    if (
+      dto.ogImageMediaId &&
+      !(await this.workspaceHasMedia(siteId, dto.ogImageMediaId))
+    )
+      throw new NotFoundException('OG-изображение этого сайта не найдено');
     if (dto.status !== PageStatus.DRAFT)
       throw new BadRequestException(
         'Новую страницу сначала нужно сохранить как черновик',
@@ -2965,6 +3565,11 @@ export class ContentService {
         seoDescription: dto.seoDescription?.trim() || null,
         canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
         noIndex: dto.noIndex ?? false,
+        ogTitle: dto.ogTitle?.trim() || null,
+        ogDescription: dto.ogDescription?.trim() || null,
+        ogImageMediaId: dto.ogImageMediaId ?? null,
+        structuredData: dto.structuredData ?? null,
+        redirects: dto.redirects ?? [],
       }),
     );
   }
@@ -3020,8 +3625,45 @@ export class ContentService {
       seoDescription: dto.seoDescription?.trim() || null,
       canonicalUrl: dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
       noIndex: dto.noIndex ?? false,
+      ogTitle:
+        dto.ogTitle === undefined
+          ? (page.ogTitle ?? null)
+          : dto.ogTitle?.trim() || null,
+      ogDescription:
+        dto.ogDescription === undefined
+          ? (page.ogDescription ?? null)
+          : dto.ogDescription?.trim() || null,
+      ogImageMediaId:
+        dto.ogImageMediaId === undefined
+          ? (page.ogImageMediaId ?? null)
+          : dto.ogImageMediaId,
+      structuredData:
+        dto.structuredData === undefined
+          ? (page.structuredData ?? null)
+          : dto.structuredData,
+      redirects: dto.redirects ?? page.redirects ?? [],
     });
-    return this.pages.save(page);
+    if (
+      page.ogImageMediaId &&
+      !(await this.workspaceHasMedia(siteId, page.ogImageMediaId))
+    )
+      throw new NotFoundException('Open Graph изображение не найдено');
+    const saved = await this.pages.save(page);
+    await this.recordPageActivity(
+      siteId,
+      page.id,
+      actor,
+      'page_updated',
+      page.kind === PageKind.HOMEPAGE
+        ? 'Настройки главной страницы обновлены'
+        : 'Страница обновлена',
+      {
+        seo: true,
+        redirects: page.redirects.length,
+        blocks: page.blocks.length,
+      },
+    );
+    return saved;
   }
 
   async deletePage(siteId: string, pageId: string, actor: Actor) {
@@ -3127,7 +3769,18 @@ export class ContentService {
       );
 
     page.status = dto.status;
-    return this.pages.save(page);
+    const saved = await this.pages.save(page);
+    await this.recordPageActivity(
+      siteId,
+      page.id,
+      actor,
+      'status_updated',
+      dto.status === PageStatus.PUBLISHED
+        ? 'Страница опубликована'
+        : 'Страница снята с публикации',
+      { status: dto.status },
+    );
+    return saved;
   }
 
   async listArticleActivity(siteId: string, articleId: string, actor: Actor) {

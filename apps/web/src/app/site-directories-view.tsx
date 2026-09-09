@@ -15,6 +15,10 @@ type Category = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageMediaId: string | null;
+  structuredData: Record<string, unknown> | null;
 };
 
 type MediaItem = {
@@ -131,6 +135,18 @@ export function SiteDirectoryView({
     if (!siteId) return;
     const form = event.currentTarget;
     const data = new FormData(form);
+    const structuredDataSource = String(
+      data.get("structuredData") ?? "",
+    ).trim();
+    let structuredData: Record<string, unknown> | null = null;
+    try {
+      structuredData = structuredDataSource
+        ? JSON.parse(structuredDataSource)
+        : null;
+    } catch {
+      setMessage("Проверьте JSON структурированных данных рубрики");
+      return;
+    }
     const payload =
       mode === "categories"
         ? {
@@ -143,9 +159,13 @@ export function SiteDirectoryView({
             seoTitle: String(data.get("seoTitle") ?? "").trim() || null,
             seoDescription:
               String(data.get("seoDescription") ?? "").trim() || null,
-            canonicalUrl:
-              String(data.get("canonicalUrl") ?? "").trim() || null,
+            canonicalUrl: String(data.get("canonicalUrl") ?? "").trim() || null,
             noIndex: data.get("noIndex") === "on",
+            ogTitle: String(data.get("ogTitle") ?? "").trim() || null,
+            ogDescription:
+              String(data.get("ogDescription") ?? "").trim() || null,
+            ogImageMediaId: String(data.get("ogImageMediaId") ?? "") || null,
+            structuredData,
           }
         : {
             fullName: String(data.get("fullName") ?? ""),
@@ -386,8 +406,55 @@ export function SiteDirectoryView({
           defaultValue={category?.canonicalUrl ?? ""}
         />
       </label>
+      <label>
+        <span>OG-заголовок</span>
+        <input
+          name="ogTitle"
+          maxLength={240}
+          defaultValue={category?.ogTitle ?? ""}
+        />
+      </label>
+      <label>
+        <span>OG-описание</span>
+        <textarea
+          name="ogDescription"
+          maxLength={500}
+          rows={3}
+          defaultValue={category?.ogDescription ?? ""}
+        />
+      </label>
+      <label>
+        <span>OG-изображение</span>
+        <select
+          name="ogImageMediaId"
+          defaultValue={category?.ogImageMediaId ?? ""}
+        >
+          <option value="">Не выбрано</option>
+          {media.map((item) => (
+            <option value={item.id} key={item.id}>
+              {item.originalName}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Структурированные данные (JSON)</span>
+        <textarea
+          name="structuredData"
+          rows={6}
+          defaultValue={
+            category?.structuredData
+              ? JSON.stringify(category.structuredData, null, 2)
+              : ""
+          }
+        />
+      </label>
       <label className="category-checkbox">
-        <input name="noIndex" type="checkbox" defaultChecked={category?.noIndex} />
+        <input
+          name="noIndex"
+          type="checkbox"
+          defaultChecked={category?.noIndex}
+        />
         <span>Запретить индексацию этой рубрики</span>
       </label>
       <div className="directory-form-actions">
@@ -678,10 +745,15 @@ export function SiteDirectoryView({
               setNewParentId(null);
             }}
           />
-          <aside className="category-settings-panel" aria-label="Настройки рубрики">
+          <aside
+            className="category-settings-panel"
+            aria-label="Настройки рубрики"
+          >
             <header>
               <div>
-                <strong>{editingId ? "Настройки рубрики" : "Новая рубрика"}</strong>
+                <strong>
+                  {editingId ? "Настройки рубрики" : "Новая рубрика"}
+                </strong>
                 <span>
                   {editingId
                     ? "Структура, адрес, оформление и SEO"

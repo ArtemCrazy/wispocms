@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { PublicContactForm } from "../../../../public-contact-form";
 import {
   PublicSiteFooter,
@@ -30,6 +30,8 @@ type PageBlock = {
   mediaId?: string;
 };
 type PublicPageData = {
+  redirectTo?: string;
+  redirectStatus?: 301 | 302;
   site: {
     name: string;
     slug: string;
@@ -51,6 +53,10 @@ type PublicPageData = {
     seoDescription: string | null;
     canonicalUrl: string | null;
     noIndex: boolean;
+    ogTitle: string | null;
+    ogDescription: string | null;
+    ogImageMediaId: string | null;
+    structuredData: Record<string, unknown> | null;
   };
   pages: Array<{ id: string; title: string; slug: string }>;
   privacyDisplay: {
@@ -132,16 +138,18 @@ export async function generateMetadata({
     return { title: "Страница не найдена", robots: { index: false } };
 
   const { site, page } = result.data;
-  const title = page.seoTitle || `${page.title} — ${site.seoTitle || site.name}`;
+  const title =
+    page.seoTitle || `${page.title} — ${site.seoTitle || site.name}`;
   const description =
     page.seoDescription || page.blocks.find((block) => block.text)?.text || "";
   const canonical =
     page.canonicalUrl ||
     (site.canonicalUrl ? `${site.canonicalUrl}/pages/${page.slug}` : undefined);
   const noIndex = page.noIndex || site.noIndex;
-  const image = site.seoImageMediaId
+  const imageId = page.ogImageMediaId || site.seoImageMediaId;
+  const image = imageId
     ? absolutePublicUrl(
-        `/api/public/sites/${encodeURIComponent(site.slug)}/media/${site.seoImageMediaId}`,
+        `/api/public/sites/${encodeURIComponent(site.slug)}/media/${imageId}`,
       )
     : undefined;
 
@@ -151,8 +159,8 @@ export async function generateMetadata({
     alternates: canonical ? { canonical } : undefined,
     robots: { index: !noIndex, follow: !noIndex },
     openGraph: {
-      title,
-      description: description || undefined,
+      title: page.ogTitle || title,
+      description: page.ogDescription || description || undefined,
       url: canonical,
       images: image ? [image] : undefined,
     },
@@ -177,8 +185,7 @@ export default async function PublicInnerPage({
 
   if (!result.ok) {
     if (result.status === 404) notFound();
-    const message =
-      "Не удалось загрузить страницу";
+    const message = "Не удалось загрузить страницу";
     return (
       <main className="public-state">
         <span>W</span>
@@ -186,6 +193,12 @@ export default async function PublicInnerPage({
         <Link href={`/preview/${siteSlug}`}>Вернуться на сайт</Link>
       </main>
     );
+  }
+
+  if (result.data.redirectTo) {
+    const target = `/preview/${encodeURIComponent(siteSlug)}${result.data.redirectTo}`;
+    if (result.data.redirectStatus === 302) redirect(target);
+    permanentRedirect(target);
   }
 
   const data = result.data;
@@ -218,6 +231,17 @@ export default async function PublicInnerPage({
     <div
       className={`public-site public-page-detail ${page.slug === "privacy-policy" ? `privacy-template-${data.privacyDisplay?.key ?? "system-policy"}` : ""}`}
     >
+      {page.structuredData ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(page.structuredData).replace(
+              /</g,
+              "\\u003c",
+            ),
+          }}
+        />
+      ) : null}
       {cmsPreview ? (
         <div className="cms-preview-bar">
           <strong>Предпросмотр CMS</strong>

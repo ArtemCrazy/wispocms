@@ -43,6 +43,10 @@ type Article = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageMediaId: string | null;
+  structuredData: Record<string, unknown> | null;
   publishedAt: string | null;
   coverMedia: { id: string; altText: string | null } | null;
   previewMedia: { id: string; altText: string | null } | null;
@@ -116,7 +120,8 @@ export async function generateMetadata({
       ? `${site.canonicalUrl}/articles/${article.slug}`
       : undefined);
   const noIndex = article.noIndex || site.noIndex;
-  const imageId = article.coverMedia?.id || site.seoImageMediaId;
+  const imageId =
+    article.ogImageMediaId || article.coverMedia?.id || site.seoImageMediaId;
   const image = imageId
     ? absolutePublicUrl(
         `/api/public/sites/${encodeURIComponent(site.slug)}/media/${imageId}`,
@@ -129,8 +134,8 @@ export async function generateMetadata({
     alternates: canonical ? { canonical } : undefined,
     robots: { index: !noIndex, follow: !noIndex },
     openGraph: {
-      title,
-      description,
+      title: article.ogTitle || title,
+      description: article.ogDescription || description,
       type: "article",
       url: canonical,
       images: image ? [image] : undefined,
@@ -186,6 +191,17 @@ export default async function PublicArticlePage({
 
   return (
     <div className="public-site public-article-page">
+      {article.structuredData ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(article.structuredData).replace(
+              /</g,
+              "\\u003c",
+            ),
+          }}
+        />
+      ) : null}
       {cmsPreview ? (
         <div className="cms-preview-bar">
           <strong>Предпросмотр CMS</strong>

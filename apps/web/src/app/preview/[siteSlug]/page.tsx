@@ -40,6 +40,10 @@ type PublicPage = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageMediaId: string | null;
+  structuredData: Record<string, unknown> | null;
   systemTemplateKey: string | null;
   systemTemplateVersion: string | null;
 };
@@ -59,8 +63,11 @@ type PublicBanner = {
   id: string;
   placement: "homepage_top" | "homepage_middle" | "article_sidebar";
   title: string | null;
+  subtitle: string | null;
+  buttonText: string | null;
   linkUrl: string | null;
   media: { id: string; altText: string | null } | null;
+  mobileMedia: { id: string; altText: string | null } | null;
 };
 type PublicSiteData = {
   site: {
@@ -115,9 +122,10 @@ export async function generateMetadata({
   const description = homepage?.seoDescription || site.seoDescription || "";
   const canonical = homepage?.canonicalUrl || site.canonicalUrl || undefined;
   const noIndex = homepage?.noIndex ?? site.noIndex;
-  const image = site.seoImageMediaId
+  const imageId = homepage?.ogImageMediaId || site.seoImageMediaId;
+  const image = imageId
     ? absolutePublicUrl(
-        `/api/public/sites/${encodeURIComponent(site.slug)}/media/${site.seoImageMediaId}`,
+        `/api/public/sites/${encodeURIComponent(site.slug)}/media/${imageId}`,
       )
     : undefined;
 
@@ -127,8 +135,8 @@ export async function generateMetadata({
     alternates: canonical ? { canonical } : undefined,
     robots: { index: !noIndex, follow: !noIndex },
     openGraph: {
-      title,
-      description: description || undefined,
+      title: homepage?.ogTitle || title,
+      description: homepage?.ogDescription || description || undefined,
       url: canonical,
       images: image ? [image] : undefined,
     },
@@ -176,6 +184,7 @@ export default async function PublicSitePage({
       ? `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/media/${mediaId}/file`
       : `/api/public/sites/${encodeURIComponent(siteSlug)}/media/${mediaId}`;
   const hero = homepage?.blocks.find((block) => block.type === "hero");
+  const customStructuredData = homepage?.structuredData;
   const otherBlocks =
     homepage?.blocks.filter((block) => block.id !== hero?.id) ?? [];
 
@@ -207,6 +216,17 @@ export default async function PublicSitePage({
     };
     return (
       <>
+        {customStructuredData ? (
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify(customStructuredData).replace(
+                /</g,
+                "\\u003c",
+              ),
+            }}
+          />
+        ) : null}
         {cmsPreview ? (
           <div className="cms-preview-bar cms-preview-bar--armaturex">
             <strong>Предпросмотр CMS</strong>
@@ -234,6 +254,17 @@ export default async function PublicSitePage({
 
   return (
     <div className="public-site">
+      {customStructuredData ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(customStructuredData).replace(
+              /</g,
+              "\\u003c",
+            ),
+          }}
+        />
+      ) : null}
       {cmsPreview ? (
         <div className="cms-preview-bar">
           <strong>Предпросмотр CMS</strong>
@@ -261,10 +292,23 @@ export default async function PublicSitePage({
               sizes="100vw"
               src={mediaUrl(banner.media.id)}
               alt={banner.media.altText ?? ""}
+              className="public-banner-desktop"
             />
           ) : null}
-          <span>{banner.title || "Подробнее"}</span>
-          <b>→</b>
+          {banner.mobileMedia ? (
+            <Image
+              unoptimized
+              fill
+              src={mediaUrl(banner.mobileMedia.id)}
+              alt={banner.mobileMedia.altText ?? ""}
+              className="public-banner-mobile"
+            />
+          ) : null}
+          <span className="public-banner-copy">
+            <strong>{banner.title || "Подробнее"}</strong>
+            {banner.subtitle ? <small>{banner.subtitle}</small> : null}
+          </span>
+          <b>{banner.buttonText || "Подробнее"} →</b>
         </a>
       ))}
 
@@ -324,10 +368,23 @@ export default async function PublicSitePage({
                 sizes="1200px"
                 src={mediaUrl(banner.media.id)}
                 alt={banner.media.altText ?? ""}
+                className="public-banner-desktop"
               />
             ) : null}
-            <span>{banner.title || "Подробнее"}</span>
-            <b>→</b>
+            {banner.mobileMedia ? (
+              <Image
+                unoptimized
+                fill
+                src={mediaUrl(banner.mobileMedia.id)}
+                alt={banner.mobileMedia.altText ?? ""}
+                className="public-banner-mobile"
+              />
+            ) : null}
+            <span className="public-banner-copy">
+              <strong>{banner.title || "Подробнее"}</strong>
+              {banner.subtitle ? <small>{banner.subtitle}</small> : null}
+            </span>
+            <b>{banner.buttonText || "Подробнее"} →</b>
           </a>
         ))}
 

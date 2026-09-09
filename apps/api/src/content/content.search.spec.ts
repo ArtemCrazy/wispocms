@@ -24,7 +24,7 @@ function queryBuilder(rows: unknown[]) {
 }
 
 describe('ContentService public search', () => {
-  function setup() {
+  function setup(searchableSections?: string[]) {
     const site = {
       id: 'site-id',
       slug: 'wispo-media',
@@ -51,24 +51,47 @@ describe('ContentService public search', () => {
         updatedAt: new Date('2026-08-24T11:00:00Z'),
       },
     ]);
+    const categoryBuilder = queryBuilder([
+      {
+        id: 'category-id',
+        name: 'Insights',
+        slug: 'insights',
+        description: 'Expert materials',
+        updatedAt: new Date('2026-08-24T12:00:00Z'),
+      },
+    ]);
     const sites = { findOne: jest.fn().mockResolvedValue(site) };
     const articles = { createQueryBuilder: jest.fn(() => articleBuilder) };
+    const categories = { createQueryBuilder: jest.fn(() => categoryBuilder) };
     const pages = { createQueryBuilder: jest.fn(() => pageBuilder) };
+    const searchSettings = searchableSections
+      ? {
+          findOneBy: jest.fn().mockResolvedValue({ searchableSections }),
+        }
+      : undefined;
     const service = new ContentService(
       sites as never,
       {} as never,
-      {} as never,
+      categories as never,
       {} as never,
       articles as never,
       {} as never,
       {} as never,
       pages as never,
       {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      searchSettings as never,
     );
-    return { service, sites, articleBuilder, pageBuilder };
+    return { service, sites, articleBuilder, pageBuilder, categoryBuilder };
   }
 
-  it('returns only rows selected as published for the requested site', async () => {
+  it('defaults Media search scope to published articles', async () => {
     const { service, sites, articleBuilder, pageBuilder } = setup();
 
     await expect(
@@ -76,14 +99,6 @@ describe('ContentService public search', () => {
     ).resolves.toEqual({
       query: 'service',
       results: [
-        {
-          id: 'page-id',
-          type: 'page',
-          title: 'Services',
-          slug: 'services',
-          excerpt: 'Service description',
-          path: '/pages/services',
-        },
         {
           id: 'article-id',
           type: 'article',
@@ -105,14 +120,46 @@ describe('ContentService public search', () => {
       'article.status = :articleStatus',
       { articleStatus: ArticleStatus.PUBLISHED },
     );
+    expect(pageBuilder.where).not.toHaveBeenCalled();
+  });
+
+  it('honors persisted page search scope', async () => {
+    const { service, pageBuilder } = setup(['pages']);
+    const result = await service.searchPublicContent(
+      'wispo-media',
+      'service',
+      '127.0.0.3',
+    );
+    expect(result.results).toEqual([
+      expect.objectContaining({ id: 'page-id', type: 'page' }),
+    ]);
     expect(pageBuilder.andWhere).toHaveBeenCalledWith(
       'page.status = :pageStatus',
       { pageStatus: PageStatus.PUBLISHED },
     );
   });
 
+  it('honors persisted category search scope', async () => {
+    const { service, categoryBuilder } = setup(['categories']);
+    const result = await service.searchPublicContent(
+      'wispo-media',
+      'insights',
+      '127.0.0.4',
+    );
+    expect(result.results).toEqual([
+      expect.objectContaining({ id: 'category-id', type: 'category' }),
+    ]);
+    expect(categoryBuilder.andWhere).toHaveBeenCalledWith(
+      'category.publicationState = :publicationState',
+      expect.any(Object),
+    );
+  });
+
   it('escapes wildcard characters before building the ILIKE pattern', async () => {
-    const { service, articleBuilder, pageBuilder } = setup();
+    const { service, articleBuilder, pageBuilder } = setup([
+      'articles',
+      'pages',
+    ]);
 
     await service.searchPublicContent('wispo-media', '100%_safe', '127.0.0.2');
 

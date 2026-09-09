@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -24,12 +25,15 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import {
   AddArticleCommentDto,
+  AssignPageBannerDto,
   ChangeArticleStatusDto,
   ChangePageStatusDto,
   CreateArticleDto,
   CreateAuthorDto,
   CreateBannerDto,
   CreateCategoryDto,
+  CreateSiteVariableDto,
+  ConfirmRecommendedSearchDto,
   DuplicateContentDto,
   RestoreArticleVersionDto,
   SchedulePublicationDto,
@@ -43,12 +47,15 @@ import {
   UpdateMediaDto,
   UpdatePageDto,
   UpdateNotFoundTemplateDto,
+  UpdateNotFoundSeoDto,
   UpdatePublicationStateDto,
   UpdateRelatedArticlesDto,
   UpdateSiteSettingsDto,
   UpdateSiteGlobalsDto,
   UpdateSiteLayoutDto,
   UpdateSiteSeoDto,
+  UpdateSearchSettingsDto,
+  UpdateSiteVariableDto,
   UploadMediaDto,
 } from './content.dto';
 import { ContentEntityType, ContentEventType } from '../database/entities';
@@ -194,6 +201,81 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.contentService.deleteBanner(siteId, bannerId, request.auth!);
+  }
+
+  @Get('variables')
+  variables(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.listSiteVariables(siteId, request.auth!);
+  }
+
+  @Post('variables')
+  createVariable(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: CreateSiteVariableDto,
+  ) {
+    return this.contentService.createSiteVariable(siteId, request.auth!, dto);
+  }
+
+  @Patch('variables/:variableId')
+  updateVariable(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('variableId', ParseUUIDPipe) variableId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateSiteVariableDto,
+  ) {
+    return this.contentService.updateSiteVariable(
+      siteId,
+      variableId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Delete('variables/:variableId')
+  deleteVariable(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('variableId', ParseUUIDPipe) variableId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.deleteSiteVariable(
+      siteId,
+      variableId,
+      request.auth!,
+    );
+  }
+
+  @Get('search-settings')
+  searchSettings(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getSearchSettings(siteId, request.auth!);
+  }
+
+  @Patch('search-settings')
+  updateSearchSettings(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateSearchSettingsDto,
+  ) {
+    return this.contentService.updateSearchSettings(siteId, request.auth!, dto);
+  }
+
+  @Post('search-settings/recommendations/confirm')
+  confirmRecommendedSearch(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: ConfirmRecommendedSearchDto,
+  ) {
+    return this.contentService.confirmRecommendedSearch(
+      siteId,
+      request.auth!,
+      dto,
+    );
   }
 
   @Get('articles')
@@ -888,6 +970,15 @@ export class ContentController {
     );
   }
 
+  @Patch('not-found/seo')
+  updateNotFoundSeo(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateNotFoundSeoDto,
+  ) {
+    return this.contentService.updateNotFoundSeo(siteId, request.auth!, dto);
+  }
+
   @Post('not-found/activate')
   activateNotFoundPage(
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -921,6 +1012,58 @@ export class ContentController {
     @Body() dto: UpdatePageDto,
   ) {
     return this.contentService.updatePage(siteId, pageId, request.auth!, dto);
+  }
+
+  @Get('pages/:pageId/banner-assignments')
+  pageBannerAssignments(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.listPageBannerAssignments(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+  }
+
+  @Put('pages/:pageId/banner-assignments')
+  assignPageBanner(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: AssignPageBannerDto,
+  ) {
+    return this.contentService.assignPageBanner(
+      siteId,
+      pageId,
+      request.auth!,
+      dto,
+    );
+  }
+
+  @Delete('pages/:pageId/banner-assignments/:zone')
+  unassignPageBanner(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('zone') zone: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.unassignPageBanner(
+      siteId,
+      pageId,
+      zone,
+      request.auth!,
+    );
+  }
+
+  @Get('pages/:pageId/history')
+  pageHistory(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.listPageActivity(siteId, pageId, request.auth!);
   }
 
   @Post('pages/:pageId/status')

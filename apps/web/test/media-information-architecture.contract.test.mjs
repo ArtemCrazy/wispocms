@@ -29,14 +29,68 @@ const publicArticle = await readFile(
   ),
   "utf8",
 );
+const mediaSite = await readFile(
+  new URL("../src/app/media-site-view.tsx", import.meta.url),
+  "utf8",
+);
+const bannerLibrary = await readFile(
+  new URL("../src/app/media-banner-library-view.tsx", import.meta.url),
+  "utf8",
+);
+const assignments = await readFile(
+  new URL("../src/app/page-banner-assignments-view.tsx", import.meta.url),
+  "utf8",
+);
+const variables = await readFile(
+  new URL("../src/app/site-variables-view.tsx", import.meta.url),
+  "utf8",
+);
+const layout = await readFile(
+  new URL("../src/app/media-layout-view.tsx", import.meta.url),
+  "utf8",
+);
 
-test("Media Home owns only Template, Banners, and homepage SEO", () => {
+test("Media Site is a root with template, banner, and variable cards", () => {
+  assert.match(shell, /id: "site"/);
+  assert.match(shell, /<MediaSiteView/);
+  assert.match(mediaSite, /title: "Шаблоны"/);
+  assert.match(mediaSite, /title: "Баннеры"/);
+  assert.match(mediaSite, /title: "Переменные"/);
+  for (const label of [
+    "Главная",
+    "Статьи",
+    "Шапка и подвал",
+    "404",
+    "Политика",
+  ])
+    assert.match(mediaSite, new RegExp(label));
+});
+
+test("Media Home owns exactly banner assignments, SEO, and page history", () => {
   assert.match(shell, /<MediaHomeView/);
-  assert.match(home, /\["template", "Шаблон"\]/);
   assert.match(home, /\["banners", "Баннеры"\]/);
   assert.match(home, /\["seo", "SEO"\]/);
+  assert.match(home, /\["history", "История"\]/);
+  assert.doesNotMatch(home, /\["template", "Шаблон"\]|<PagesView/);
   assert.doesNotMatch(home, /Категории|Рубрики|Авторы/);
   assert.match(home, /kind: "homepage"/);
+  assert.match(assignments, /homepage_top/);
+  assert.match(assignments, /homepage_middle/);
+  assert.match(home, /ogImageMediaId/);
+  assert.match(home, /structuredData/);
+  assert.match(home, /redirects/);
+});
+
+test("Media libraries expose universal autosaved banners, protected variables, and search contract", () => {
+  assert.match(bannerLibrary, /Автосохранение включено/);
+  assert.doesNotMatch(bannerLibrary, /name="placement"/);
+  assert.match(bannerLibrary, /mobileMediaId/);
+  assert.match(bannerLibrary, /buttonText/);
+  assert.match(variables, /usageCount/);
+  assert.match(variables, /\{\{\$\{item\.identifier\}\}\}/);
+  assert.match(layout, /\["search", "Поиск"\]/);
+  assert.match(layout, /analyticsAvailable/);
+  assert.match(layout, /recommendations\/confirm/);
 });
 
 test("Articles owns its inline template and Content preserves the nested URL", () => {
@@ -50,12 +104,7 @@ test("Articles owns its inline template and Content preserves the nested URL", (
 });
 
 test("article settings are internal tabs and editor text autosaves safely", () => {
-  for (const label of [
-    "Редактор",
-    "Параметры",
-    "SEO",
-    "История изменений",
-  ])
+  for (const label of ["Редактор", "Параметры", "SEO", "История изменений"])
     assert.match(editor, new RegExp(`\\["[a-z]+", "${label}"\\]`));
   assert.match(editor, /setTimeout\(\(\) =>/);
   assert.match(editor, /while \(autosavePendingBody\.current !== null\)/);

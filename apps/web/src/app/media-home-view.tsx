@@ -1,14 +1,12 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { PagesView } from "./pages-view";
-import { SiteBannersView } from "./site-banners-view";
+import { PageBannerAssignmentsView } from "./page-banner-assignments-view";
 
-type HomeTab = "template" | "banners" | "seo";
+type HomeTab = "banners" | "seo" | "history";
 type HomePage = {
   id: string;
   title: string;
-  slug: string;
   kind: "homepage";
   status: "draft" | "published";
   blocks: Array<Record<string, unknown>>;
@@ -16,6 +14,19 @@ type HomePage = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  redirects: Array<{ fromPath: string; statusCode: 301 | 302 }>;
+  ogTitle: string | null;
+  ogDescription: string | null;
+  ogImageMediaId: string | null;
+  structuredData: Record<string, unknown> | null;
+  updatedAt: string;
+};
+type MediaItem = { id: string; originalName: string };
+type Activity = {
+  id: string;
+  description: string;
+  createdAt: string;
+  user?: { fullName?: string; email?: string };
 };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -34,6 +45,26 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
+function useHomepage(siteId: string) {
+  const [page, setPage] = useState<HomePage | null>(null);
+  const [message, setMessage] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const pages = await api<HomePage[]>(`/api/sites/${siteId}/content/pages`);
+      setPage(pages.find((item) => item.kind === "homepage") ?? null);
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Не удалось загрузить главную",
+      );
+    }
+  }, [siteId]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+  return { page, message, load };
+}
+
 function HomepageSeo({
   siteId,
   canEdit,
@@ -41,30 +72,40 @@ function HomepageSeo({
   siteId: string;
   canEdit: boolean;
 }) {
-  const [page, setPage] = useState<HomePage | null>(null);
+  const { page, message: loadMessage, load } = useHomepage(siteId);
+  const [media, setMedia] = useState<MediaItem[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const pages = await api<HomePage[]>(`/api/sites/${siteId}/content/pages`);
-      setPage(pages.find((item) => item.kind === "homepage") ?? null);
-    } catch (reason) {
-      setMessage(
-        reason instanceof Error ? reason.message : "Не удалось загрузить SEO",
-      );
-    }
-  }, [siteId]);
-
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0);
+    const timer = window.setTimeout(
+      () =>
+        void api<MediaItem[]>(`/api/sites/${siteId}/content/media`)
+          .then(setMedia)
+          .catch((error) => setMessage(error.message)),
+      0,
+    );
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [siteId]);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!page || !canEdit) return;
     const data = new FormData(event.currentTarget);
+    const optional = (name: string) =>
+      String(data.get(name) ?? "").trim() || null;
+    let structuredData: Record<string, unknown> | null;
+    let redirects: HomePage["redirects"];
+    try {
+      const schemaSource = String(data.get("structuredData") ?? "").trim();
+      const redirectsSource = String(data.get("redirects") ?? "").trim();
+      structuredData = schemaSource ? JSON.parse(schemaSource) : null;
+      redirects = redirectsSource ? JSON.parse(redirectsSource) : [];
+    } catch {
+      setMessage(
+        "Проверьте JSON в структурированных данных или перенаправлениях",
+      );
+      return;
+    }
     setBusy(true);
     try {
       await api(`/api/sites/${siteId}/content/pages/${page.id}`, {
@@ -75,17 +116,22 @@ function HomepageSeo({
           kind: "homepage",
           status: page.status,
           blocks: page.blocks,
-          seoTitle: data.get("seoTitle"),
-          seoDescription: data.get("seoDescription"),
-          canonicalUrl: data.get("canonicalUrl"),
+          seoTitle: optional("seoTitle"),
+          seoDescription: optional("seoDescription"),
+          canonicalUrl: optional("canonicalUrl"),
           noIndex: data.get("noIndex") === "on",
+          redirects,
+          ogTitle: optional("ogTitle"),
+          ogDescription: optional("ogDescription"),
+          ogImageMediaId: optional("ogImageMediaId"),
+          structuredData,
         }),
       });
       setMessage("SEO главной сохранено");
       await load();
-    } catch (reason) {
+    } catch (error) {
       setMessage(
-        reason instanceof Error ? reason.message : "Не удалось сохранить SEO",
+        error instanceof Error ? error.message : "Не удалось сохранить SEO",
       );
     } finally {
       setBusy(false);
@@ -96,10 +142,9 @@ function HomepageSeo({
     return (
       <div className="empty-media">
         <h2>Главная ещё не настроена</h2>
-        <p>{message || "Сначала подключите шаблон главной страницы."}</p>
+        <p>{loadMessage || "Сначала создайте главную страницу."}</p>
       </div>
     );
-
   return (
     <section className="media-seo-card">
       <header>
@@ -107,10 +152,10 @@ function HomepageSeo({
           <small>ГЛАВНАЯ СТРАНИЦА</small>
           <h2>SEO</h2>
         </div>
-        <p>Метаданные относятся только к главной странице.</p>
+        <p>Поиск, соцсети, индексация и технические правила.</p>
       </header>
       {message ? <div className="inline-message">{message}</div> : null}
-      <form onSubmit={save}>
+      <form key={page.updatedAt} onSubmit={save}>
         <label>
           Заголовок в поиске
           <input
@@ -152,6 +197,68 @@ function HomepageSeo({
             <small>Добавляет noindex, nofollow</small>
           </span>
         </label>
+        <div className="media-seo-divider">
+          <h3>Open Graph</h3>
+          <p>Карточка главной при публикации в соцсетях.</p>
+        </div>
+        <label>
+          OG-заголовок
+          <input
+            name="ogTitle"
+            maxLength={240}
+            readOnly={!canEdit}
+            defaultValue={page.ogTitle ?? ""}
+          />
+        </label>
+        <label>
+          OG-описание
+          <textarea
+            name="ogDescription"
+            rows={3}
+            maxLength={500}
+            readOnly={!canEdit}
+            defaultValue={page.ogDescription ?? ""}
+          />
+        </label>
+        <label>
+          OG-изображение
+          <select
+            name="ogImageMediaId"
+            disabled={!canEdit}
+            defaultValue={page.ogImageMediaId ?? ""}
+          >
+            <option value="">Не выбрано</option>
+            {media.map((item) => (
+              <option value={item.id} key={item.id}>
+                {item.originalName}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Структурированные данные (JSON)
+          <textarea
+            name="structuredData"
+            rows={7}
+            readOnly={!canEdit}
+            defaultValue={
+              page.structuredData
+                ? JSON.stringify(page.structuredData, null, 2)
+                : ""
+            }
+            placeholder={'{"@context":"https://schema.org"}'}
+          />
+        </label>
+        <label>
+          Перенаправления (JSON)
+          <textarea
+            name="redirects"
+            rows={6}
+            readOnly={!canEdit}
+            defaultValue={JSON.stringify(page.redirects ?? [], null, 2)}
+            placeholder={'[{"fromPath":"/old-page","statusCode":301}]'}
+          />
+        </label>
         {canEdit ? (
           <footer>
             <button disabled={busy}>
@@ -164,15 +271,65 @@ function HomepageSeo({
   );
 }
 
+function PageHistory({ siteId }: { siteId: string }) {
+  const { page, message } = useHomepage(siteId);
+  const [items, setItems] = useState<Activity[]>([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!page) return;
+    const timer = window.setTimeout(
+      () =>
+        void api<Activity[]>(
+          `/api/sites/${siteId}/content/pages/${page.id}/history`,
+        )
+          .then(setItems)
+          .catch((reason) => setError(reason.message)),
+      0,
+    );
+    return () => window.clearTimeout(timer);
+  }, [page, siteId]);
+  if (!page)
+    return (
+      <div className="empty-media">
+        <h2>История главной</h2>
+        <p>{message || "Главная ещё не создана."}</p>
+      </div>
+    );
+  return (
+    <section className="page-activity">
+      <header>
+        <small>ГЛАВНАЯ СТРАНИЦА</small>
+        <h2>История</h2>
+        <p>Только изменения этой страницы.</p>
+      </header>
+      {error ? <p className="inline-message">{error}</p> : null}
+      <div>
+        {items.map((item) => (
+          <article key={item.id}>
+            <strong>{item.description}</strong>
+            <span>
+              {item.user?.fullName ?? item.user?.email ?? "Пользователь"}
+            </span>
+            <time>{new Date(item.createdAt).toLocaleString("ru-RU")}</time>
+          </article>
+        ))}
+        {!items.length ? (
+          <div className="empty-media">
+            <h2>История пока пуста</h2>
+            <p>
+              Здесь появятся изменения SEO, шаблона, статуса и баннеров главной.
+            </p>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function MediaHomeView({
   siteId,
-  siteName,
-  siteSlug,
   canEdit,
-  canApprove,
-  canEditPublished,
-  onDirtyChange,
-  onPagesChange,
+  onOpenBanners,
 }: {
   siteId: string;
   siteName: string;
@@ -190,8 +347,9 @@ export function MediaHomeView({
       status: "draft" | "published";
     }>,
   ) => void;
+  onOpenBanners?: () => void;
 }) {
-  const [tab, setTab] = useState<HomeTab>("template");
+  const [tab, setTab] = useState<HomeTab>("banners");
   return (
     <section className="media-module-shell media-home-module-shell">
       <header className="media-module-heading">
@@ -199,14 +357,14 @@ export function MediaHomeView({
           <small>MEDIA</small>
           <h1>Главная</h1>
         </div>
-        <p>Шаблон, баннеры и поисковое представление главной.</p>
+        <p>Назначения баннеров, поисковое представление и история главной.</p>
       </header>
       <nav className="media-module-tabs" aria-label="Настройки главной">
         {(
           [
-            ["template", "Шаблон"],
             ["banners", "Баннеры"],
             ["seo", "SEO"],
+            ["history", "История"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -220,31 +378,15 @@ export function MediaHomeView({
           </button>
         ))}
       </nav>
-      {tab === "template" ? (
-        <PagesView
-          siteId={siteId}
-          siteName={siteName}
-          siteSlug={siteSlug}
-          siteType="media"
-          mode="homepage"
-          canEdit={canEdit}
-          canApprove={canApprove}
-          canEditPublished={canEditPublished}
-          onDirtyChange={onDirtyChange}
-          onPagesChange={onPagesChange}
-          hideSeo
-        />
-      ) : null}
       {tab === "banners" ? (
-        <SiteBannersView
+        <PageBannerAssignmentsView
           siteId={siteId}
-          siteName={siteName}
           canEdit={canEdit}
-          scope="homepage"
-          embedded
+          onOpenLibrary={onOpenBanners}
         />
       ) : null}
       {tab === "seo" ? <HomepageSeo siteId={siteId} canEdit={canEdit} /> : null}
+      {tab === "history" ? <PageHistory siteId={siteId} /> : null}
     </section>
   );
 }

@@ -9,7 +9,11 @@ import {
   PublicSiteGlobals,
   PublicSiteLayout,
 } from "../../../../public-site-footer";
-import { loadPublicData, queryValue } from "../../../../public-server-data";
+import {
+  absolutePublicUrl,
+  loadPublicData,
+  queryValue,
+} from "../../../../public-server-data";
 
 type CategoryData = {
   site: {
@@ -28,6 +32,10 @@ type CategoryData = {
     seoDescription: string | null;
     canonicalUrl: string | null;
     noIndex: boolean;
+    ogTitle: string | null;
+    ogDescription: string | null;
+    ogImageMediaId: string | null;
+    structuredData: Record<string, unknown> | null;
   };
   redirectTo: string | null;
   articles: Array<{
@@ -71,6 +79,22 @@ export async function generateMetadata({
     robots: {
       index: !(site.noIndex || category.noIndex),
       follow: !(site.noIndex || category.noIndex),
+    },
+    openGraph: {
+      title: category.ogTitle || category.seoTitle || category.name,
+      description:
+        category.ogDescription ||
+        category.seoDescription ||
+        category.description ||
+        undefined,
+      url: canonical,
+      images: category.ogImageMediaId
+        ? [
+            absolutePublicUrl(
+              `/api/public/sites/${encodeURIComponent(site.slug)}/media/${category.ogImageMediaId}`,
+            ),
+          ]
+        : undefined,
     },
   };
 }
@@ -117,6 +141,17 @@ export default async function PublicCategoryPage({
     `/api/public/sites/${encodeURIComponent(siteSlug)}/media/${id}`;
   return (
     <div className="public-site public-category-page">
+      {category.structuredData ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(category.structuredData).replace(
+              /</g,
+              "\\u003c",
+            ),
+          }}
+        />
+      ) : null}
       {cmsPreview ? (
         <div className="cms-preview-bar">
           <strong>Предпросмотр CMS</strong>

@@ -33,6 +33,10 @@ import { PrivacyPolicyView } from "./privacy-policy-view";
 import { NotFoundPageView } from "./not-found-page-view";
 import { MediaHomeView } from "./media-home-view";
 import { MediaArticlesView } from "./media-articles-view";
+import { MediaSiteView } from "./media-site-view";
+import { MediaBannerLibraryView } from "./media-banner-library-view";
+import { SiteVariablesView } from "./site-variables-view";
+import { MediaLayoutView } from "./media-layout-view";
 
 type SessionData = {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -208,6 +212,7 @@ function Dashboard({
     | "workspaces"
     | "team"
     | "audit"
+    | "site"
     | "homepage"
     | "articles"
     | "categories"
@@ -218,6 +223,8 @@ function Dashboard({
     | "banners"
     | "header"
     | "footer"
+    | "layout"
+    | "variables"
     | "media"
     | "globals"
     | "seo"
@@ -316,6 +323,7 @@ function Dashboard({
       const view = url.searchParams.get("view");
       if (!siteId || !view) return;
       const restorableViews: View[] = [
+        "site",
         "homepage",
         "articles",
         "pages",
@@ -323,6 +331,9 @@ function Dashboard({
         "404",
         "header",
         "footer",
+        "layout",
+        "variables",
+        "banners",
         "media",
         "globals",
         "seo",
@@ -492,11 +503,13 @@ function Dashboard({
   });
   const siteMenus: Record<string, SiteMenuItem[]> = {
     media: [
+      { id: "site", icon: "template", label: "Сайт" },
       { id: "homepage", icon: "home", label: "Главная" },
       { id: "articles", icon: "blog", label: "Статьи" },
       ...mediaSystemPages,
-      { id: "header", icon: "header", label: "Шапка" },
-      { id: "footer", icon: "footer", label: "Подвал" },
+      { id: "layout", icon: "header", label: "Шапка и подвал" },
+      { id: "banners", icon: "banners", label: "Баннеры" },
+      { id: "variables", icon: "company-data", label: "Переменные" },
       { id: "media", icon: "content-center", label: "Контентный центр" },
       { id: "globals", icon: "company-data", label: "Общие данные" },
       { id: "seo", icon: "seo", label: "SEO" },
@@ -553,12 +566,14 @@ function Dashboard({
     {
       label: "Сайт",
       items: siteMenu.filter((item) =>
-        ["homepage", "articles"].includes(item.id),
+        ["site", "homepage", "articles"].includes(item.id),
       ),
     },
     {
       label: "Шапка и подвал",
-      items: siteMenu.filter((item) => ["header", "footer"].includes(item.id)),
+      items: siteMenu.filter((item) =>
+        ["header", "footer", "layout"].includes(item.id),
+      ),
     },
     {
       label:
@@ -571,15 +586,21 @@ function Dashboard({
           item.id === "404" ||
           (item.id === "pages" &&
             !item.pageId &&
-            (site?.siteType === "corporate" ||
-              site?.siteType === "ecommerce")),
+            (site?.siteType === "corporate" || site?.siteType === "ecommerce")),
       ),
     },
   ].filter((group) => group.items.length);
   const siteSidebarUtilities = siteMenu.filter((item) =>
-    ["media", "globals", "seo", "integration", "settings", "history"].includes(
-      item.id,
-    ),
+    [
+      "banners",
+      "variables",
+      "media",
+      "globals",
+      "seo",
+      "integration",
+      "settings",
+      "history",
+    ].includes(item.id),
   );
   const defaultHelp = {
     title: "Как работать в Wispo",
@@ -978,14 +999,19 @@ function Dashboard({
     const targetWorkspace = session.workspaces.find((workspaceItem) =>
       workspaceItem.sites.some((siteItem) => siteItem.id === siteId),
     );
+    const targetSite = targetWorkspace?.sites.find(
+      (item) => item.id === siteId,
+    );
+    const initialView: View =
+      targetSite?.siteType === "media" ? "site" : "homepage";
     if (targetWorkspace) setSelectedWorkspaceId(targetWorkspace.id);
     setSelectedSiteId(siteId);
     setSwitcherOpen(false);
     setSiteSwitcherOpen(false);
-    navigateTo("homepage", undefined, true);
+    navigateTo(initialView, undefined, true);
     const url = new URL(window.location.href);
     url.searchParams.set("site", siteId);
-    url.searchParams.set("view", "homepage");
+    url.searchParams.set("view", initialView);
     window.history.pushState({}, "", url);
   }
 
@@ -1826,6 +1852,11 @@ function Dashboard({
             canEdit={canEdit}
             canApprove={canApprove}
           />
+        ) : activeView === "site" && site?.siteType === "media" ? (
+          <MediaSiteView
+            siteName={site.name}
+            onOpen={(target) => navigateTo(target)}
+          />
         ) : activeView === "homepage" || activeView === "pages" ? (
           site?.siteType === "media" && activeView === "homepage" ? (
             <MediaHomeView
@@ -1837,6 +1868,7 @@ function Dashboard({
               canEditPublished={canEditPublished}
               onDirtyChange={setHasUnsavedChanges}
               onPagesChange={setStructurePages}
+              onOpenBanners={() => navigateTo("banners")}
             />
           ) : (
             <PagesView
@@ -1872,10 +1904,32 @@ function Dashboard({
             focusRequestId={navigationTarget?.requestId}
           />
         ) : activeView === "banners" ? (
-          <SiteBannersView
-            siteId={site?.id}
-            siteName={site?.name}
+          site?.siteType === "media" ? (
+            <MediaBannerLibraryView
+              siteId={site.id}
+              siteName={site.name}
+              canEdit={canEdit}
+            />
+          ) : (
+            <SiteBannersView
+              siteId={site?.id}
+              siteName={site?.name}
+              canEdit={canEdit}
+            />
+          )
+        ) : activeView === "variables" && site?.siteType === "media" ? (
+          <SiteVariablesView
+            siteId={site.id}
+            siteName={site.name}
             canEdit={canEdit}
+          />
+        ) : activeView === "layout" && site?.siteType === "media" ? (
+          <MediaLayoutView
+            siteId={site.id}
+            siteName={site.name}
+            siteSlug={site.slug}
+            canEdit={canEdit}
+            onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "header" || activeView === "footer" ? (
           <SiteLayoutView
@@ -2223,9 +2277,9 @@ function ProjectSelectionView({
               ? "Медиа-сайт"
               : item.siteType === "ecommerce"
                 ? "Интернет-магазин"
-              : item.siteType === "landing"
-                ? "Лендинг"
-                : "Корпоративный сайт";
+                : item.siteType === "landing"
+                  ? "Лендинг"
+                  : "Корпоративный сайт";
           return (
             <button
               type="button"
