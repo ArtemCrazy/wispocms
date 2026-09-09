@@ -208,7 +208,7 @@ export default async function PublicSitePage({
     return (
       <>
         {cmsPreview ? (
-          <div className="cms-preview-bar">
+          <div className="cms-preview-bar cms-preview-bar--armaturex">
             <strong>Предпросмотр CMS</strong>
             <span>Главная страница ещё не опубликована для посетителей</span>
             <Link href="/">Вернуться в CMS</Link>

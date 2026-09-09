@@ -9080,6 +9080,12 @@ input[type="checkbox"] {
   font-weight: 700;
   text-decoration: none;
 }
+@media (min-width: 68.01rem) {
+  .cms-preview-bar--armaturex {
+    box-sizing: border-box;
+    height: 2.5rem;
+  }
+}
 .public-header {
   position: sticky;
   z-index: 20;

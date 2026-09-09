@@ -1,3 +1,93 @@
+@font-face {
+  font-family: "Mulish";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/mulish-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "Mulish";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/mulish-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Istok Web";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/istok-web-400-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "Istok Web";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/istok-web-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Istok Web";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/istok-web-700-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "Istok Web";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/istok-web-700-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/ibm-plex-mono-400-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/ibm-plex-mono-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/ibm-plex-mono-500-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/templates/armaturex-home-v1/fonts/ibm-plex-mono-500-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 .armaturex-home-v1 {
   --ink: #101316;
   --ink-soft: #1c2126;
@@ -14,7 +104,7 @@
   --signal-dark: #a83714;
   --white-60: rgba(255, 255, 255, 0.6);
 
-  --display: "Proxima Nova", "ProximaNova", "Mulish", sans-serif;
+  --display: "Mulish", sans-serif;
   --sans: "Istok Web", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
 
@@ -277,6 +367,10 @@
     position: fixed;
     left: 0;
     right: 0;
+  }
+
+  .armaturex-home-v1--preview .header {
+    top: 2.5rem;
   }
 }
 
@@ -725,6 +819,10 @@
     overflow: hidden;
     padding-top: calc(var(--header-h, 7rem) + var(--s3));
   }
+
+  .armaturex-home-v1--preview .hero {
+    height: calc(100vh - 2.5rem);
+  }
 }
 
 .hero__inner {
@@ -759,6 +857,10 @@
     width: 100%;
     max-width: min(100%, calc(100vh - 19rem));
     margin: 0 auto;
+  }
+
+  .armaturex-home-v1--preview .viewer {
+    max-width: min(100%, calc(100vh - 21.5rem));
   }
 }
 
@@ -2081,7 +2183,7 @@ a.request__contact-value:hover { color: var(--signal-soft); }
 }
 
 @media (max-width: 40rem) {
-  :root { --shell: min(100% - 2rem, 82rem); }
+  .armaturex-home-v1 { --shell: min(100% - 2rem, 82rem); }
 
   /* «Трубопроводная» — самое длинное слово на сайте: на узком экране оно задаёт нижнюю границу кегля. */
   .hero__title { font-size: clamp(1.725rem, 8.4vw, 2.225rem); }
@@ -2104,7 +2206,7 @@ a.request__contact-value:hover { color: var(--signal-soft); }
    Логотип, три кнопки и два зазора в строке шапки в сумме шире экрана,
    поэтому здесь ужимаем именно их, а не масштабируем всю страницу. */
 @media (max-width: 22.5rem) {
-  :root { --shell: min(100% - 1.5rem, 82rem); }
+  .armaturex-home-v1 { --shell: min(100% - 1.5rem, 82rem); }
 
   .header__bar { gap: 0.75rem; }
 

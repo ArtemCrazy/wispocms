@@ -129,7 +129,12 @@ export function ArmaturexHome({
   }
 
   return (
-    <div className={c("armaturex-home-v1")}>
+    <div
+      className={c(
+        "armaturex-home-v1",
+        cmsSiteId ? "armaturex-home-v1--preview" : "",
+      )}
+    >
       <header className={c("header")}>
         <div className={c("header__bar")}>
           <a
