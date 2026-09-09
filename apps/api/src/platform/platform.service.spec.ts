@@ -5,10 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { compare } from 'bcryptjs';
-import { PlatformRole, WorkspaceRole } from '../database/entities';
-import type {
+import {
   PageEntity,
+  PlatformRole,
   SiteEntity,
+  WorkspaceRole,
+} from '../database/entities';
+import type {
   UserEntity,
   WorkspaceMembershipEntity,
 } from '../database/entities';
@@ -133,6 +136,10 @@ describe('PlatformService user access', () => {
 });
 
 describe('PlatformService workspace and site management', () => {
+  const transactionManager = {
+    query: jest.fn().mockResolvedValue(undefined),
+    getRepository: jest.fn(),
+  };
   const workspaces = {
     existsBy: jest.fn(),
     findOneBy: jest.fn(),
@@ -145,6 +152,12 @@ describe('PlatformService workspace and site management', () => {
     findOne: jest.fn(),
     findOneBy: jest.fn(),
     save: jest.fn((site) => Promise.resolve({ id: 'site-id', ...site })),
+    manager: {
+      transaction: jest.fn(
+        (callback: (manager: typeof transactionManager) => Promise<unknown>) =>
+          callback(transactionManager),
+      ),
+    },
   };
   const pages = {
     create: jest.fn((page: Partial<PageEntity>) => page as PageEntity),
@@ -165,6 +178,10 @@ describe('PlatformService workspace and site management', () => {
     sites.countBy.mockResolvedValue(0);
     sites.findOne.mockResolvedValue(null);
     pages.find.mockResolvedValue([]);
+    transactionManager.query.mockResolvedValue(undefined);
+    transactionManager.getRepository.mockImplementation((entity) =>
+      entity === SiteEntity ? sites : pages,
+    );
   });
 
   it('updates a workspace name without changing its system slug', async () => {
@@ -386,6 +403,112 @@ describe('PlatformService workspace and site management', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(sites.existsBy).toHaveBeenCalledWith({ slug: 'shared-site' });
     expect(sites.save).not.toHaveBeenCalled();
+  });
+
+  it('bootstraps all default content contracts for a newly created Media site', async () => {
+    workspaces.existsBy.mockResolvedValue(true);
+    sites.existsBy.mockResolvedValue(false);
+
+    await service.createSite('workspace-id', {
+      name: 'New Media',
+      slug: 'new-media',
+      siteType: 'media' as never,
+    });
+
+    expect(sites.manager.transaction).toHaveBeenCalledTimes(1);
+    const bootstrapCalls = transactionManager.query.mock.calls as Array<
+      [string, unknown[]?]
+    >;
+    const sql = bootstrapCalls
+      .map(([statement]) => String(statement))
+      .join('\n');
+    for (const key of [
+      'editorial-feed',
+      'standard-article',
+      'standard-category',
+      'standard-header',
+      'standard-footer',
+    ])
+      expect(bootstrapCalls[0]?.[1]).toContain(key);
+    expect(sql).toContain('INSERT INTO "article_section_settings"');
+    expect(sql).toContain('ON CONFLICT ("site_id") DO NOTHING');
+    const savedSites = sites.save.mock.calls.map(
+      ([savedSite]) => savedSite as SiteEntity,
+    );
+    expect(
+      savedSites.some(
+        (savedSite) =>
+          savedSite.layoutSettings?.headerTemplateKey === 'standard-header' &&
+          savedSite.layoutSettings?.footerTemplateKey === 'standard-footer',
+      ),
+    ).toBe(true);
+  });
+
+  it('bootstraps content when a corporate site transitions to Media', async () => {
+    const site = {
+      id: 'site-id',
+      workspaceId: 'workspace-id',
+      name: 'Corporate',
+      slug: 'corporate',
+      domain: null,
+      siteType: 'corporate',
+      isActive: true,
+      layoutSettings: {},
+    } as SiteEntity;
+    sites.findOneBy.mockResolvedValue(site);
+
+    await service.updateSite('site-id', {
+      name: 'Media',
+      siteType: 'media' as never,
+      isActive: true,
+    });
+
+    expect(sites.manager.transaction).toHaveBeenCalledTimes(1);
+    expect(site.siteType).toBe('media');
+    expect(site.layoutSettings).toMatchObject({
+      headerTemplateKey: 'standard-header',
+      footerTemplateKey: 'standard-footer',
+    });
+  });
+
+  it('is retry-safe and never overwrites existing Media template settings', async () => {
+    const site = {
+      id: 'site-id',
+      workspaceId: 'workspace-id',
+      name: 'Media',
+      slug: 'media',
+      domain: null,
+      siteType: 'media',
+      isActive: true,
+      layoutSettings: {
+        headerTemplateKey: 'custom-header',
+        headerTemplateVersion: '7',
+        headerTemplateConfig: { brand: 'preserved' },
+        footerTemplateKey: 'custom-footer',
+        footerTemplateVersion: '4',
+        footerTemplateConfig: { columns: 3 },
+      },
+    } as SiteEntity;
+    sites.findOneBy.mockResolvedValue(site);
+    const update = { name: 'Media', isActive: true };
+
+    await service.updateSite('site-id', update);
+    await service.updateSite('site-id', update);
+
+    expect(sites.manager.transaction).toHaveBeenCalledTimes(2);
+    expect(
+      transactionManager.query.mock.calls
+        .map(([statement]) => String(statement))
+        .join('\n'),
+    ).toContain('ON CONFLICT ("site_id", "kind", "key", "version") DO NOTHING');
+    expect(site.layoutSettings).toEqual({
+      headerTemplateKey: 'custom-header',
+      headerTemplateVersion: '7',
+      headerTemplateConfig: { brand: 'preserved' },
+      footerTemplateKey: 'custom-footer',
+      footerTemplateVersion: '4',
+      footerTemplateConfig: { columns: 3 },
+    });
   });
 
   it.each(['corporate', 'ecommerce', 'landing'] as const)(

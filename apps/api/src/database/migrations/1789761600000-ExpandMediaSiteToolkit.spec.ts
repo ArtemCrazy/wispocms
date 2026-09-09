@@ -19,6 +19,7 @@ describe('ExpandMediaSiteToolkit1789761600000', () => {
     expect(sql).toContain(`('header', 'standard-header'`);
     expect(sql).toContain(`('footer', 'standard-footer'`);
     expect(sql).toContain(`'headerTemplateKey', 'standard-header'`);
+    expect(sql).toContain('INSERT INTO "article_section_settings"');
     expect(sql).toContain('SELECT DISTINCT ON (page."id", banner."placement")');
     expect(sql).toContain(`site."site_type" = 'media'`);
     expect(sql).toContain('banner."is_active" DESC');

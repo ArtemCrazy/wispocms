@@ -17,11 +17,21 @@ export class ExpandMediaSiteToolkit1789761600000 implements MigrationInterface {
        SELECT site."id", template."kind", template."key", '1', template."name", '{}'::jsonb
        FROM "sites" site
        CROSS JOIN (VALUES
+         ('articles_list', 'editorial-feed', 'Редакционная лента'),
+         ('article', 'standard-article', 'Стандартная статья'),
+         ('category', 'standard-category', 'Стандартная категория'),
          ('header', 'standard-header', 'Стандартная шапка'),
          ('footer', 'standard-footer', 'Стандартный подвал')
        ) AS template("kind", "key", "name")
        WHERE site."site_type" = 'media'
        ON CONFLICT DO NOTHING`,
+    );
+    await queryRunner.query(
+      `INSERT INTO "article_section_settings" ("site_id", "list_template_key", "list_template_version", "list_template_config")
+       SELECT "id", 'editorial-feed', '1', '{}'::jsonb
+       FROM "sites"
+       WHERE "site_type" = 'media'
+       ON CONFLICT ("site_id") DO NOTHING`,
     );
     await queryRunner.query(
       `UPDATE "sites"

@@ -10,6 +10,7 @@ import { hash } from 'bcryptjs';
 import { Repository } from 'typeorm';
 import {
   DomainStatus,
+  ContentTemplateKind,
   PlatformRole,
   PageEntity,
   PageKind,
@@ -82,6 +83,34 @@ const MEDIA_SYSTEM_PAGE_TEMPLATES: Array<
   },
 ];
 
+const MEDIA_CONTENT_TEMPLATES = [
+  {
+    kind: ContentTemplateKind.ARTICLES_LIST,
+    key: 'editorial-feed',
+    name: 'Редакционная лента',
+  },
+  {
+    kind: ContentTemplateKind.ARTICLE,
+    key: 'standard-article',
+    name: 'Стандартная статья',
+  },
+  {
+    kind: ContentTemplateKind.CATEGORY,
+    key: 'standard-category',
+    name: 'Стандартная категория',
+  },
+  {
+    kind: ContentTemplateKind.HEADER,
+    key: 'standard-header',
+    name: 'Стандартная шапка',
+  },
+  {
+    kind: ContentTemplateKind.FOOTER,
+    key: 'standard-footer',
+    name: 'Стандартный подвал',
+  },
+] as const;
+
 @Injectable()
 export class PlatformService {
   constructor(
@@ -104,17 +133,20 @@ export class PlatformService {
       throw new ConflictException('Этот домен уже назначен другому сайту');
   }
 
-  private async ensureMediaSystemPages(siteId: string) {
-    const existingPages = await this.pages.find({ where: { siteId } });
+  private async ensureMediaSystemPages(
+    siteId: string,
+    pages: Repository<PageEntity> = this.pages,
+  ) {
+    const existingPages = await pages.find({ where: { siteId } });
     const existingSlugs = new Set(existingPages.map((page) => page.slug));
     const missingPages = MEDIA_SYSTEM_PAGE_TEMPLATES.filter(
       (template) => !existingSlugs.has(template.slug),
     );
 
     if (missingPages.length > 0) {
-      await this.pages.save(
+      await pages.save(
         missingPages.map((template) =>
-          this.pages.create({
+          pages.create({
             siteId,
             ...template,
             ...(template.slug === '404'
@@ -140,12 +172,55 @@ export class PlatformService {
     ) {
       notFoundPage.systemTemplateKey = DEFAULT_NOT_FOUND_TEMPLATE_KEY;
       notFoundPage.systemTemplateVersion = DEFAULT_NOT_FOUND_TEMPLATE_VERSION;
-      await this.pages.save(notFoundPage);
+      await pages.save(notFoundPage);
     }
 
-    return this.pages.find({
+    return pages.find({
       where: { siteId },
       order: { kind: 'ASC', title: 'ASC' },
+    });
+  }
+
+  private async ensureMediaContent(site: SiteEntity) {
+    return this.sites.manager.transaction(async (manager) => {
+      const templateValues = MEDIA_CONTENT_TEMPLATES.map(
+        (_, index) =>
+          `($1, $${index * 3 + 2}, $${index * 3 + 3}, '1', $${index * 3 + 4}, '{}'::jsonb)`,
+      ).join(', ');
+      const templateParameters = [
+        site.id,
+        ...MEDIA_CONTENT_TEMPLATES.flatMap(({ kind, key, name }) => [
+          kind,
+          key,
+          name,
+        ]),
+      ];
+      await manager.query(
+        `INSERT INTO "site_content_templates" ("site_id", "kind", "key", "version", "name", "config")
+         VALUES ${templateValues}
+         ON CONFLICT ("site_id", "kind", "key", "version") DO NOTHING`,
+        templateParameters,
+      );
+      await manager.query(
+        `INSERT INTO "article_section_settings" ("site_id", "list_template_key", "list_template_version", "list_template_config")
+         VALUES ($1, 'editorial-feed', '1', '{}'::jsonb)
+         ON CONFLICT ("site_id") DO NOTHING`,
+        [site.id],
+      );
+      site.layoutSettings = {
+        headerTemplateKey: 'standard-header',
+        headerTemplateVersion: '1',
+        headerTemplateConfig: {},
+        footerTemplateKey: 'standard-footer',
+        footerTemplateVersion: '1',
+        footerTemplateConfig: {},
+        ...site.layoutSettings,
+      };
+      await manager.getRepository(SiteEntity).save(site);
+      return this.ensureMediaSystemPages(
+        site.id,
+        manager.getRepository(PageEntity),
+      );
     });
   }
 
@@ -258,8 +333,7 @@ export class PlatformService {
         noIndex: false,
       }),
     );
-    if (site.siteType === SiteType.MEDIA)
-      await this.ensureMediaSystemPages(site.id);
+    if (site.siteType === SiteType.MEDIA) await this.ensureMediaContent(site);
     return site;
   }
 
@@ -328,12 +402,12 @@ export class PlatformService {
       site.domainStatusMessage = null;
     }
     site.isActive = dto.isActive;
-    let structurePages: PageEntity[] | undefined;
-    if (dto.siteType === SiteType.MEDIA)
-      structurePages = await this.ensureMediaSystemPages(site.id);
     if (dto.siteType) site.siteType = dto.siteType;
     if (dto.workspaceId) site.workspaceId = dto.workspaceId;
-    await this.sites.save(site);
+    let structurePages: PageEntity[] | undefined;
+    if (nextType === SiteType.MEDIA)
+      structurePages = await this.ensureMediaContent(site);
+    else await this.sites.save(site);
     structurePages ??= await this.pages.find({
       where: { siteId: site.id },
       order: { kind: 'ASC', title: 'ASC' },
