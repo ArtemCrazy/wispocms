@@ -226,7 +226,9 @@ export class PrivacyService {
         where: { siteId: site.id, slug: 'privacy-policy' },
       }),
       this.latestApprovedModel(),
-      this.legalModels.findOne({ order: { createdAt: 'DESC' } }),
+      this.legalModels
+        .find({ order: { createdAt: 'DESC' }, take: 1 })
+        .then(([model]) => model ?? null),
     ]);
     const legalModel = approvedModel ?? latestModel;
     if (!page)

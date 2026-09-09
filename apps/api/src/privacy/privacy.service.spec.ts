@@ -80,6 +80,7 @@ function setup(
   const pages = { findOne: jest.fn() };
   const legalModels = {
     findOne: jest.fn().mockResolvedValue(null as any),
+    find: jest.fn().mockResolvedValue([]),
     existsBy: jest.fn().mockResolvedValue(false),
     create: jest.fn((value: unknown) => value),
     save: jest
@@ -104,6 +105,7 @@ function setup(
     state,
     site,
     legalModels,
+    pages,
     policyStates,
   };
 }
@@ -154,6 +156,28 @@ describe('PrivacyService', () => {
         platformRole: PlatformRole.EMPLOYEE,
       }),
     ).resolves.toMatchObject({ siteId: 'site-1' });
+  });
+
+  it('uses the latest legal model when initializing a missing policy state', async () => {
+    const { service, state, legalModels, pages, policyStates } = setup();
+    policyStates.findOne.mockResolvedValueOnce(null);
+    pages.findOne.mockResolvedValue(state.page);
+    legalModels.find.mockResolvedValue([state.legalModel]);
+
+    await expect(
+      service.get('site-1', {
+        userId: 'admin',
+        platformRole: PlatformRole.WISPO_ADMIN,
+      }),
+    ).resolves.toMatchObject({
+      siteId: 'site-1',
+      legalModel: { version: 'draft-1' },
+    });
+    expect(legalModels.find).toHaveBeenCalledWith({
+      order: { createdAt: 'DESC' },
+      take: 1,
+    });
+    expect(policyStates.save).toHaveBeenCalled();
   });
 
   it('preserves a manual document and requires review when accepting an approved model', async () => {
