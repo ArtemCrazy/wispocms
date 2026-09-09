@@ -179,19 +179,19 @@
 .armaturex-home-v1 *::before,
 .armaturex-home-v1 *::after { box-sizing: border-box; }
 
-.armaturex-home-v1 h1,
-.armaturex-home-v1 h2,
-.armaturex-home-v1 h3,
-.armaturex-home-v1 p,
-.armaturex-home-v1 ul,
-.armaturex-home-v1 ol,
-.armaturex-home-v1 dl,
-.armaturex-home-v1 dd,
-.armaturex-home-v1 figure,
-.armaturex-home-v1 figcaption { margin: 0; padding: 0; }
+:where(.armaturex-home-v1) h1,
+:where(.armaturex-home-v1) h2,
+:where(.armaturex-home-v1) h3,
+:where(.armaturex-home-v1) p,
+:where(.armaturex-home-v1) ul,
+:where(.armaturex-home-v1) ol,
+:where(.armaturex-home-v1) dl,
+:where(.armaturex-home-v1) dd,
+:where(.armaturex-home-v1) figure,
+:where(.armaturex-home-v1) figcaption { margin: 0; padding: 0; }
 
-.armaturex-home-v1 ul,
-.armaturex-home-v1 ol { list-style: none; }
+:where(.armaturex-home-v1) ul,
+:where(.armaturex-home-v1) ol { list-style: none; }
 
 .armaturex-home-v1 {
   font-family: var(--sans);
