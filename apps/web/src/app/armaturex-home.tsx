@@ -52,6 +52,7 @@ export function ArmaturexHome({
 }: ArmaturexHomeProps) {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [viewerEnabled, setViewerEnabled] = useState(false);
   const [formState, setFormState] = useState<
     "idle" | "sending" | "success" | "error"
   >("idle");
@@ -71,13 +72,11 @@ export function ArmaturexHome({
     : `${ASSET_BASE}/img/logo.webp`;
 
   useEffect(() => {
-    if (!window.matchMedia("(min-width: 68.01rem)").matches) return;
-    if (document.querySelector('script[data-armaturex-viewer="1"]')) return;
-    const script = document.createElement("script");
-    script.src = `${ASSET_BASE}/model/viewer.bundle.js`;
-    script.defer = true;
-    script.dataset.armaturexViewer = "1";
-    document.body.appendChild(script);
+    const desktop = window.matchMedia("(min-width: 68.01rem)");
+    const sync = () => setViewerEnabled(desktop.matches);
+    sync();
+    desktop.addEventListener("change", sync);
+    return () => desktop.removeEventListener("change", sync);
   }, []);
 
   async function submitRequest(event: FormEvent<HTMLFormElement>) {
@@ -323,11 +322,19 @@ export function ArmaturexHome({
                 </a>
               </div>
             </div>
-            <div className={`${c("viewer")} viewer`} id="viewer">
-              <div className={`${c("viewer__stage")} viewer__stage`}>
-                <p className={`${c("viewer__hint")} viewer__hint`}>
-                  Загрузка модели
-                </p>
+            <div className={c("viewer")}>
+              <div className={c("viewer__stage")}>
+                {viewerEnabled ? (
+                  <iframe
+                    className={c("viewer__frame")}
+                    src={`${ASSET_BASE}/model/viewer-frame.html`}
+                    title="Интерактивная 3D-модель задвижки"
+                    loading="eager"
+                  />
+                ) : null}
+                {!viewerEnabled ? (
+                  <p className={c("viewer__hint")}>3D-модель</p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -517,8 +524,14 @@ export function ArmaturexHome({
                   required
                 />
                 <span className={c("consent__text")}>
-                  Даю согласие на обработку персональных данных в соответствии с
-                  политикой сайта.
+                  Даю согласие на обработку персональных данных в соответствии с{" "}
+                  <a
+                    className={c("consent__link")}
+                    href={`/preview/${encodeURIComponent(siteSlug)}/pages/privacy-policy`}
+                  >
+                    политикой сайта
+                  </a>
+                  .
                 </span>
               </label>
               <button

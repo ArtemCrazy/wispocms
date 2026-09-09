@@ -96,6 +96,12 @@ import {
   getNotFoundTemplate,
   NOT_FOUND_TEMPLATES,
 } from './not-found-templates';
+import {
+  ARMATUREX_HOME_TEMPLATE_KEY,
+  ARMATUREX_HOME_TEMPLATE_VERSION,
+  validateArmaturexPageBlocks,
+  validateGenericPageBlocks,
+} from './armaturex-home-validation';
 
 type Actor = { userId: string; platformRole: PlatformRole };
 
@@ -2805,13 +2811,23 @@ export class ContentService {
     return { id: mediaId, deleted: true };
   }
 
-  private async validatePageBlocks(siteId: string, dto: CreatePageDto) {
+  private async validatePageBlocks(
+    siteId: string,
+    dto: CreatePageDto,
+    template?: { key: string | null; version: string | null },
+  ) {
+    const nestedMediaIds =
+      template?.key === ARMATUREX_HOME_TEMPLATE_KEY &&
+      template.version === ARMATUREX_HOME_TEMPLATE_VERSION
+        ? validateArmaturexPageBlocks(dto.blocks)
+        : (validateGenericPageBlocks(dto.blocks), []);
     const mediaIds = [
-      ...new Set(
-        dto.blocks
+      ...new Set([
+        ...dto.blocks
           .map((block) => block.mediaId)
           .filter((id): id is string => Boolean(id)),
-      ),
+        ...nestedMediaIds,
+      ]),
     ];
     for (const mediaId of mediaIds) {
       if (!(await this.workspaceHasMedia(siteId, mediaId)))
@@ -2943,9 +2959,12 @@ export class ContentService {
     dto: UpdatePageDto,
   ) {
     await this.requireSite(siteId, actor);
-    await this.validatePageBlocks(siteId, dto);
     const page = await this.pages.findOne({ where: { id: pageId, siteId } });
     if (!page) throw new NotFoundException('Страница не найдена');
+    await this.validatePageBlocks(siteId, dto, {
+      key: page.systemTemplateKey,
+      version: page.systemTemplateVersion,
+    });
     if (page.slug === 'privacy-policy' || page.slug === '404')
       throw new BadRequestException(
         page.slug === '404'

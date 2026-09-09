@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D-модель задвижки</title>
+    <style>
+      :root { --signal: #d0451b; color-scheme: dark; }
+      html, body, .viewer__stage { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+      .viewer__stage { position: relative; }
+      .viewer__canvas, .viewer__fallback { display: block; width: 100%; height: 100%; object-fit: cover; }
+      .viewer__canvas { cursor: grab; }
+      .viewer__canvas:active { cursor: grabbing; }
+      .viewer__hint { position: absolute; inset: 50% auto auto 50%; margin: 0; transform: translate(-50%, -50%); color: #8b979f; font: 0.75rem ui-monospace, monospace; text-transform: uppercase; }
+    </style>
+  </head>
+  <body>
+    <div class="viewer__stage"><p class="viewer__hint">Загрузка модели</p></div>
+    <script>
+      const nativeMatchMedia = window.matchMedia.bind(window);
+      window.matchMedia = (query) =>
+        query === "(min-width: 68rem)"
+          ? { matches: true, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return true; } }
+          : nativeMatchMedia(query);
+    </script>
+    <script src="/templates/armaturex-home-v1/model/viewer.bundle.js"></script>
+  </body>
+</html>
