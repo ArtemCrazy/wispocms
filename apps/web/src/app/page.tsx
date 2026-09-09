@@ -1865,6 +1865,7 @@ function Dashboard({
         ) : activeView === "templates" && site?.siteType === "media" ? (
           <MediaTemplatesView
             siteId={site.id}
+            canEdit={canEdit}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "homepage-template" && site?.siteType === "media" ? (

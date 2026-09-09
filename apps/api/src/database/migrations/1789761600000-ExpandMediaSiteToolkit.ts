@@ -7,6 +7,36 @@ export class ExpandMediaSiteToolkit1789761600000 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
+      `ALTER TABLE "site_content_templates" DROP CONSTRAINT "CHK_site_content_templates_kind"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "site_content_templates" ADD CONSTRAINT "CHK_site_content_templates_kind" CHECK ("kind" IN ('articles_list', 'article', 'category', 'header', 'footer'))`,
+    );
+    await queryRunner.query(
+      `INSERT INTO "site_content_templates" ("site_id", "kind", "key", "version", "name", "config")
+       SELECT site."id", template."kind", template."key", '1', template."name", '{}'::jsonb
+       FROM "sites" site
+       CROSS JOIN (VALUES
+         ('header', 'standard-header', 'Стандартная шапка'),
+         ('footer', 'standard-footer', 'Стандартный подвал')
+       ) AS template("kind", "key", "name")
+       WHERE site."site_type" = 'media'
+       ON CONFLICT DO NOTHING`,
+    );
+    await queryRunner.query(
+      `UPDATE "sites"
+       SET "layout_settings" = jsonb_build_object(
+         'headerTemplateKey', 'standard-header',
+         'headerTemplateVersion', '1',
+         'headerTemplateConfig', '{}'::jsonb,
+         'footerTemplateKey', 'standard-footer',
+         'footerTemplateVersion', '1',
+         'footerTemplateConfig', '{}'::jsonb
+       ) || COALESCE("layout_settings", '{}'::jsonb)
+       WHERE "site_type" = 'media'`,
+    );
+
+    await queryRunner.query(
       `ALTER TABLE "banners" ALTER COLUMN "placement" DROP NOT NULL`,
     );
     await queryRunner.query(
@@ -142,6 +172,21 @@ export class ExpandMediaSiteToolkit1789761600000 implements MigrationInterface {
         (SELECT COUNT(*) FROM "pages" WHERE "og_title" IS NOT NULL OR "og_description" IS NOT NULL OR "og_image_media_id" IS NOT NULL OR "structured_data" IS NOT NULL OR "redirects" <> '[]'::jsonb) +
         (SELECT COUNT(*) FROM "articles" WHERE "og_title" IS NOT NULL OR "og_description" IS NOT NULL OR "og_image_media_id" IS NOT NULL OR "structured_data" IS NOT NULL) +
         (SELECT COUNT(*) FROM "categories" WHERE "og_title" IS NOT NULL OR "og_description" IS NOT NULL OR "og_image_media_id" IS NOT NULL OR "structured_data" IS NOT NULL) +
+        (SELECT COUNT(*) FROM "site_content_templates"
+          WHERE "kind" IN ('header', 'footer')
+            AND NOT (
+              ("kind" = 'header' AND "key" = 'standard-header' AND "version" = '1' AND "config" = '{}'::jsonb AND "is_active") OR
+              ("kind" = 'footer' AND "key" = 'standard-footer' AND "version" = '1' AND "config" = '{}'::jsonb AND "is_active")
+            )) +
+        (SELECT COUNT(*) FROM "sites"
+          WHERE "site_type" = 'media' AND (
+            COALESCE("layout_settings"->>'headerTemplateKey', '') <> 'standard-header' OR
+            COALESCE("layout_settings"->>'headerTemplateVersion', '') <> '1' OR
+            COALESCE("layout_settings"->'headerTemplateConfig', '{}'::jsonb) <> '{}'::jsonb OR
+            COALESCE("layout_settings"->>'footerTemplateKey', '') <> 'standard-footer' OR
+            COALESCE("layout_settings"->>'footerTemplateVersion', '') <> '1' OR
+            COALESCE("layout_settings"->'footerTemplateConfig', '{}'::jsonb) <> '{}'::jsonb
+          )) +
         (SELECT COUNT(*) FROM "page_banner_assignments" assignment
           WHERE NOT EXISTS (
             SELECT 1 FROM "banners" banner
@@ -187,6 +232,26 @@ export class ExpandMediaSiteToolkit1789761600000 implements MigrationInterface {
     );
     await queryRunner.query(
       `ALTER TABLE "banners" ALTER COLUMN "placement" SET NOT NULL`,
+    );
+    await queryRunner.query(
+      `UPDATE "sites"
+       SET "layout_settings" = "layout_settings"
+         - 'headerTemplateKey'
+         - 'headerTemplateVersion'
+         - 'headerTemplateConfig'
+         - 'footerTemplateKey'
+         - 'footerTemplateVersion'
+         - 'footerTemplateConfig'
+       WHERE "site_type" = 'media'`,
+    );
+    await queryRunner.query(
+      `DELETE FROM "site_content_templates" WHERE "kind" IN ('header', 'footer')`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "site_content_templates" DROP CONSTRAINT "CHK_site_content_templates_kind"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "site_content_templates" ADD CONSTRAINT "CHK_site_content_templates_kind" CHECK ("kind" IN ('articles_list', 'article', 'category'))`,
     );
   }
 }

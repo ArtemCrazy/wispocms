@@ -15,6 +15,10 @@ describe('ExpandMediaSiteToolkit1789761600000', () => {
     expect(sql).toContain('CREATE TABLE "site_variables"');
     expect(sql).toContain('CREATE TABLE "site_search_settings"');
     expect(sql).toContain('CREATE TABLE "page_activities"');
+    expect(sql).toContain(`'category', 'header', 'footer'`);
+    expect(sql).toContain(`('header', 'standard-header'`);
+    expect(sql).toContain(`('footer', 'standard-footer'`);
+    expect(sql).toContain(`'headerTemplateKey', 'standard-header'`);
     expect(sql).toContain('SELECT DISTINCT ON (page."id", banner."placement")');
     expect(sql).toContain(`site."site_type" = 'media'`);
     expect(sql).toContain('banner."is_active" DESC');

@@ -17,9 +17,28 @@ type NotFoundState = { template: { name: string; version: string } };
 type PrivacyState = {
   displayTemplate: { title: string; key: string; version: string };
 };
+type ContentTemplate = {
+  kind: "articles_list" | "article" | "category" | "header" | "footer";
+  key: string;
+  version: string;
+  name: string;
+  config: Record<string, unknown>;
+};
+type LayoutSettings = {
+  headerTemplateKey?: string;
+  headerTemplateVersion?: string;
+  headerTemplateConfig?: Record<string, unknown>;
+  footerTemplateKey?: string;
+  footerTemplateVersion?: string;
+  footerTemplateConfig?: Record<string, unknown>;
+};
 
-async function request<T>(url: string): Promise<T> {
-  const response = await fetch(url, { credentials: "include" });
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
   const payload = await response.json().catch(() => null);
   if (!response.ok)
     throw new Error(
@@ -32,25 +51,56 @@ async function request<T>(url: string): Promise<T> {
 
 export function MediaTemplatesView({
   siteId,
+  canEdit,
   onOpen,
 }: {
   siteId: string;
+  canEdit: boolean;
   onOpen: (target: TemplateTarget) => void;
 }) {
   const [rows, setRows] = useState<
     Array<{ id: TemplateTarget; name: string; current: string; hint: string }>
   >([]);
+  const [templates, setTemplates] = useState<ContentTemplate[]>([]);
+  const [headerIdentity, setHeaderIdentity] = useState("");
+  const [footerIdentity, setFooterIdentity] = useState("");
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
-    const [pages, articles, notFound, privacy] = await Promise.all([
-      request<Page[]>(`/api/sites/${siteId}/content/pages`),
-      request<ArticleSettings>(
-        `/api/sites/${siteId}/content/articles/settings`,
-      ),
-      request<NotFoundState>(`/api/sites/${siteId}/content/not-found`),
-      request<PrivacyState>(`/api/sites/${siteId}/content/privacy`),
-    ]);
+    const [pages, articles, notFound, privacy, contentTemplates, siteLayout] =
+      await Promise.all([
+        request<Page[]>(`/api/sites/${siteId}/content/pages`),
+        request<ArticleSettings>(
+          `/api/sites/${siteId}/content/articles/settings`,
+        ),
+        request<NotFoundState>(`/api/sites/${siteId}/content/not-found`),
+        request<PrivacyState>(`/api/sites/${siteId}/content/privacy`),
+        request<ContentTemplate[]>(`/api/sites/${siteId}/content/templates`),
+        request<LayoutSettings>(`/api/sites/${siteId}/content/layout`),
+      ]);
+    const identity = (key?: string, version?: string) =>
+      key && version ? `${key}::${version}` : "";
+    const templateName = (
+      kind: ContentTemplate["kind"],
+      key?: string,
+      version?: string,
+    ) => {
+      const template = contentTemplates.find(
+        (candidate) =>
+          candidate.kind === kind &&
+          candidate.key === key &&
+          candidate.version === version,
+      );
+      return template ? `${template.name} · ${template.version}` : "Не выбран";
+    };
+    setTemplates(contentTemplates);
+    setHeaderIdentity(
+      identity(siteLayout.headerTemplateKey, siteLayout.headerTemplateVersion),
+    );
+    setFooterIdentity(
+      identity(siteLayout.footerTemplateKey, siteLayout.footerTemplateVersion),
+    );
     const homepage = pages.find((page) => page.kind === "homepage");
     setRows([
       {
@@ -72,7 +122,15 @@ export function MediaTemplatesView({
       {
         id: "layout",
         name: "Шапка и подвал",
-        current: "Общий шаблон сайта",
+        current: `${templateName(
+          "header",
+          siteLayout.headerTemplateKey,
+          siteLayout.headerTemplateVersion,
+        )}; ${templateName(
+          "footer",
+          siteLayout.footerTemplateKey,
+          siteLayout.footerTemplateVersion,
+        )}`,
         hint: "Единые области, используемые всеми страницами",
       },
       {
@@ -98,6 +156,44 @@ export function MediaTemplatesView({
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  const templateOptions = (kind: "header" | "footer") =>
+    templates.filter((template) => template.kind === kind);
+  const saveLayoutTemplates = async () => {
+    const selected = (identity: string, kind: "header" | "footer") =>
+      templates.find(
+        (template) =>
+          template.kind === kind &&
+          `${template.key}::${template.version}` === identity,
+      );
+    const header = selected(headerIdentity, "header");
+    const footer = selected(footerIdentity, "footer");
+    if (!header || !footer) {
+      setMessage("Выберите шаблоны шапки и подвала");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      await request(`/api/sites/${siteId}/content/layout`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          headerTemplateKey: header.key,
+          headerTemplateVersion: header.version,
+          headerTemplateConfig: header.config,
+          footerTemplateKey: footer.key,
+          footerTemplateVersion: footer.version,
+          footerTemplateConfig: footer.config,
+        }),
+      });
+      await load();
+      setMessage("Шаблоны шапки и подвала сохранены");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Ошибка запроса");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <section className="media-module-shell media-templates-view">
       <header className="media-module-heading">
@@ -118,9 +214,60 @@ export function MediaTemplatesView({
                 Текущий: <strong>{row.current}</strong>
               </p>
             </div>
-            <button type="button" onClick={() => onOpen(row.id)}>
-              Открыть и изменить
-            </button>
+            {row.id === "layout" ? (
+              <div className="media-template-controls">
+                <label>
+                  Шапка
+                  <select
+                    value={headerIdentity}
+                    disabled={!canEdit || saving}
+                    onChange={(event) => setHeaderIdentity(event.target.value)}
+                  >
+                    <option value="">Не выбрана</option>
+                    {templateOptions("header").map((template) => (
+                      <option
+                        key={`${template.key}:${template.version}`}
+                        value={`${template.key}::${template.version}`}
+                      >
+                        {template.name} · {template.version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Подвал
+                  <select
+                    value={footerIdentity}
+                    disabled={!canEdit || saving}
+                    onChange={(event) => setFooterIdentity(event.target.value)}
+                  >
+                    <option value="">Не выбран</option>
+                    {templateOptions("footer").map((template) => (
+                      <option
+                        key={`${template.key}:${template.version}`}
+                        value={`${template.key}::${template.version}`}
+                      >
+                        {template.name} · {template.version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={!canEdit || saving}
+                  onClick={() => void saveLayoutTemplates()}
+                >
+                  {saving ? "Сохраняем…" : "Применить"}
+                </button>
+                <button type="button" onClick={() => onOpen("layout")}>
+                  Настроить содержимое
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => onOpen(row.id)}>
+                Открыть и изменить
+              </button>
+            )}
           </article>
         ))}
         {!rows.length && !message ? <p>Загружаем шаблоны…</p> : null}

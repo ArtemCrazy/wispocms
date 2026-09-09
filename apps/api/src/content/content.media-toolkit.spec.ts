@@ -1,5 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { PlatformRole, SiteType } from '../database/entities';
+import { BannerPlacement, PlatformRole, SiteType } from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('ContentService Media site toolkit', () => {
@@ -157,7 +157,7 @@ describe('ContentService Media site toolkit', () => {
         seoImageMediaId: null,
       }),
     };
-    const banners = { exists: jest.fn() };
+    const banners = { exists: jest.fn().mockResolvedValue(false) };
     const assignments = { find: jest.fn().mockResolvedValue([]) };
     const service = new ContentService(
       sites as never,
@@ -189,6 +189,62 @@ describe('ContentService Media site toolkit', () => {
       service.getPublicMedia('media', 'media-id'),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(assignments.find).toHaveBeenCalled();
-    expect(banners.exists).not.toHaveBeenCalled();
+    expect(banners.exists).toHaveBeenCalledWith({
+      where: [
+        {
+          siteId: 'site-id',
+          isActive: true,
+          placement: BannerPlacement.ARTICLE_SIDEBAR,
+          mediaId: 'media-id',
+        },
+        {
+          siteId: 'site-id',
+          isActive: true,
+          placement: BannerPlacement.ARTICLE_SIDEBAR,
+          mobileMediaId: 'media-id',
+        },
+      ],
+    });
+  });
+
+  it('publishes an active legacy article sidebar banner image', async () => {
+    const sites = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'site-id',
+        slug: 'media',
+        workspaceId: 'workspace-id',
+        siteType: SiteType.MEDIA,
+        seoImageMediaId: null,
+      }),
+    };
+    const service = new ContentService(
+      sites as never,
+      {} as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {} as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'media-id',
+          workspaceId: 'workspace-id',
+          storageNamespace: 'files',
+          storedName: 'sidebar.webp',
+          mimeType: 'image/webp',
+        }),
+      } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      { exists: jest.fn().mockResolvedValue(true) } as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+    );
+
+    const result = await service.getPublicMedia('media', 'media-id');
+    expect(result.mimeType).toBe('image/webp');
+    expect(result.path).toContain('sidebar.webp');
   });
 });

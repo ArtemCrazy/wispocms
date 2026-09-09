@@ -709,12 +709,30 @@ export class ContentService {
         }),
         capabilities.banners
           ? site.siteType === SiteType.MEDIA && this.bannerAssignments
-            ? this.bannerAssignments
-                .find({
+            ? Promise.all([
+                this.bannerAssignments.find({
                   where: { siteId: site.id },
                   relations: { banner: true, page: true },
-                })
-                .then((assignments) =>
+                }),
+                this.banners.exists({
+                  where: [
+                    {
+                      siteId: site.id,
+                      isActive: true,
+                      placement: BannerPlacement.ARTICLE_SIDEBAR,
+                      mediaId,
+                    },
+                    {
+                      siteId: site.id,
+                      isActive: true,
+                      placement: BannerPlacement.ARTICLE_SIDEBAR,
+                      mobileMediaId: mediaId,
+                    },
+                  ],
+                }),
+              ]).then(
+                ([assignments, legacyArticleSidebarUse]) =>
+                  legacyArticleSidebarUse ||
                   assignments.some(
                     ({ banner, page }) =>
                       page.status === PageStatus.PUBLISHED &&
@@ -722,7 +740,7 @@ export class ContentService {
                       (banner.mediaId === mediaId ||
                         banner.mobileMediaId === mediaId),
                   ),
-                )
+              )
             : this.banners.exists({
                 where: [
                   { siteId: site.id, isActive: true, mediaId },
@@ -1629,6 +1647,58 @@ export class ContentService {
     )
       throw new NotFoundException('Логотип не найден');
     const value = (input?: string) => input?.trim() || undefined;
+    const changesHeaderTemplate =
+      dto.headerTemplateKey !== undefined ||
+      dto.headerTemplateVersion !== undefined ||
+      dto.headerTemplateConfig !== undefined;
+    const changesFooterTemplate =
+      dto.footerTemplateKey !== undefined ||
+      dto.footerTemplateVersion !== undefined ||
+      dto.footerTemplateConfig !== undefined;
+    if (
+      site.siteType !== SiteType.MEDIA &&
+      (changesHeaderTemplate || changesFooterTemplate)
+    )
+      throw new BadRequestException(
+        'Шаблоны шапки и подвала доступны только Media-сайтам',
+      );
+    const headerTemplateKey =
+      value(dto.headerTemplateKey) ??
+      site.layoutSettings.headerTemplateKey ??
+      'standard-header';
+    const headerTemplateVersion =
+      value(dto.headerTemplateVersion) ??
+      site.layoutSettings.headerTemplateVersion ??
+      '1';
+    const footerTemplateKey =
+      value(dto.footerTemplateKey) ??
+      site.layoutSettings.footerTemplateKey ??
+      'standard-footer';
+    const footerTemplateVersion =
+      value(dto.footerTemplateVersion) ??
+      site.layoutSettings.footerTemplateVersion ??
+      '1';
+    const lifecycle = this.lifecycle;
+    if (changesHeaderTemplate || changesFooterTemplate) {
+      if (!lifecycle)
+        throw new ServiceUnavailableException(
+          'Проверка шаблонов временно недоступна',
+        );
+      if (changesHeaderTemplate)
+        await lifecycle.assertTemplate(
+          siteId,
+          ContentTemplateKind.HEADER,
+          headerTemplateKey,
+          headerTemplateVersion,
+        );
+      if (changesFooterTemplate)
+        await lifecycle.assertTemplate(
+          siteId,
+          ContentTemplateKind.FOOTER,
+          footerTemplateKey,
+          footerTemplateVersion,
+        );
+    }
     site.layoutSettings = {
       ...site.layoutSettings,
       ...(dto.logoText !== undefined && { logoText: value(dto.logoText) }),
@@ -1648,6 +1718,22 @@ export class ContentService {
         showContacts: dto.showContacts,
       }),
       ...(dto.showSocials !== undefined && { showSocials: dto.showSocials }),
+      ...(changesHeaderTemplate && {
+        headerTemplateKey,
+        headerTemplateVersion,
+        headerTemplateConfig:
+          dto.headerTemplateConfig ??
+          site.layoutSettings.headerTemplateConfig ??
+          {},
+      }),
+      ...(changesFooterTemplate && {
+        footerTemplateKey,
+        footerTemplateVersion,
+        footerTemplateConfig:
+          dto.footerTemplateConfig ??
+          site.layoutSettings.footerTemplateConfig ??
+          {},
+      }),
     };
     await this.sites.save(site);
     return { siteId: site.id, ...site.layoutSettings };

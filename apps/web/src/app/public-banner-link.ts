@@ -11,6 +11,7 @@ export function resolvePublicBannerHref(
 
   const encodedSite = encodeURIComponent(siteSlug);
   const currentPreviewPrefix = `/preview/${encodedSite}`;
+  if (/^\/preview\/?$/.test(href)) return currentPreviewPrefix;
   if (
     href === currentPreviewPrefix ||
     href.startsWith(`${currentPreviewPrefix}/`)

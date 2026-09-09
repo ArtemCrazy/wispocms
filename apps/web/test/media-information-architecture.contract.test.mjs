@@ -64,6 +64,12 @@ test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(shell, /activeView === "homepage-template"/);
   assert.match(templates, /Текущий:/);
   assert.match(templates, /Открыть и изменить/);
+  assert.match(templates, /content\/templates/);
+  assert.match(templates, /content\/layout/);
+  assert.match(templates, /method: "PATCH"/);
+  assert.match(templates, /headerTemplateKey/);
+  assert.match(templates, /footerTemplateKey/);
+  assert.doesNotMatch(templates, /current: "Общий шаблон сайта"/);
   for (const label of [
     "Главная",
     "Статьи",

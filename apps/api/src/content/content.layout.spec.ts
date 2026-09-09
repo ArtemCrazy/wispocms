@@ -1,5 +1,10 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PlatformRole, WorkspaceRole } from '../database/entities';
+import {
+  ContentTemplateKind,
+  PlatformRole,
+  SiteType,
+  WorkspaceRole,
+} from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('ContentService site layout', () => {
@@ -9,6 +14,7 @@ describe('ContentService site layout', () => {
     const site = {
       id: 'site-id',
       workspaceId: 'workspace-id',
+      siteType: SiteType.MEDIA,
       layoutSettings: { showPages: true, footerDescription: 'О проекте' },
     };
     const sites = {
@@ -20,6 +26,9 @@ describe('ContentService site layout', () => {
     };
     const emptyRepository = {};
     const media = { existsBy: jest.fn().mockResolvedValue(logoExists) };
+    const lifecycle = {
+      assertTemplate: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new ContentService(
       sites as never,
       memberships as never,
@@ -30,8 +39,13 @@ describe('ContentService site layout', () => {
       media as never,
       emptyRepository as never,
       emptyRepository as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lifecycle as never,
     );
-    return { service, site, sites, media };
+    return { service, site, sites, media, lifecycle };
   }
 
   it('updates header settings without losing footer settings', async () => {
@@ -98,6 +112,46 @@ describe('ContentService site layout', () => {
         logoMediaId: '11111111-1111-4111-8111-111111111111',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('validates and persists selected Media header and footer templates', async () => {
+    const { service, site, lifecycle } = setup(WorkspaceRole.CONTENT_MANAGER);
+
+    await expect(
+      service.updateSiteLayout('site-id', actor, {
+        headerTemplateKey: 'compact-header',
+        headerTemplateVersion: '2',
+        headerTemplateConfig: { sticky: true },
+        footerTemplateKey: 'legal-footer',
+        footerTemplateVersion: '3',
+        footerTemplateConfig: { columns: 4 },
+      }),
+    ).resolves.toMatchObject({
+      headerTemplateKey: 'compact-header',
+      headerTemplateVersion: '2',
+      headerTemplateConfig: { sticky: true },
+      footerTemplateKey: 'legal-footer',
+      footerTemplateVersion: '3',
+      footerTemplateConfig: { columns: 4 },
+    });
+    expect(lifecycle.assertTemplate).toHaveBeenNthCalledWith(
+      1,
+      'site-id',
+      ContentTemplateKind.HEADER,
+      'compact-header',
+      '2',
+    );
+    expect(lifecycle.assertTemplate).toHaveBeenNthCalledWith(
+      2,
+      'site-id',
+      ContentTemplateKind.FOOTER,
+      'legal-footer',
+      '3',
+    );
+    expect(site.layoutSettings).toMatchObject({
+      headerTemplateKey: 'compact-header',
+      footerTemplateKey: 'legal-footer',
+    });
   });
 
   it('does not allow an unassigned member to change layout settings', async () => {

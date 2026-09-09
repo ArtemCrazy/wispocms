@@ -109,6 +109,8 @@ export enum ContentTemplateKind {
   ARTICLES_LIST = 'articles_list',
   ARTICLE = 'article',
   CATEGORY = 'category',
+  HEADER = 'header',
+  FOOTER = 'footer',
 }
 
 export enum CategoryStatus {
@@ -208,6 +210,12 @@ export type SiteLayoutSettings = {
   footerDescription?: string;
   showContacts?: boolean;
   showSocials?: boolean;
+  headerTemplateKey?: string;
+  headerTemplateVersion?: string;
+  headerTemplateConfig?: Record<string, unknown>;
+  footerTemplateKey?: string;
+  footerTemplateVersion?: string;
+  footerTemplateConfig?: Record<string, unknown>;
 };
 
 export type PageRedirect = {

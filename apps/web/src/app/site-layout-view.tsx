@@ -13,6 +13,12 @@ export type SiteLayoutSettings = {
   footerDescription?: string;
   showContacts?: boolean;
   showSocials?: boolean;
+  headerTemplateKey?: string;
+  headerTemplateVersion?: string;
+  headerTemplateConfig?: Record<string, unknown>;
+  footerTemplateKey?: string;
+  footerTemplateVersion?: string;
+  footerTemplateConfig?: Record<string, unknown>;
 };
 type LayoutDraft = Omit<SiteLayoutSettings, "siteId">;
 type MediaItem = { id: string; originalName: string; altText: string | null };

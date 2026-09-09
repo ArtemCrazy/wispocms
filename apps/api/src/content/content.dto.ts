@@ -638,6 +638,34 @@ export class UpdateSiteLayoutDto {
   @IsOptional()
   @IsBoolean()
   showSocials?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  headerTemplateKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  headerTemplateVersion?: string;
+
+  @IsOptional()
+  @IsObject()
+  headerTemplateConfig?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  footerTemplateKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  footerTemplateVersion?: string;
+
+  @IsOptional()
+  @IsObject()
+  footerTemplateConfig?: Record<string, unknown>;
 }
 
 export class CreateBannerDto {

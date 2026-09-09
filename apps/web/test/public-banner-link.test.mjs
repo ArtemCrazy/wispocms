@@ -35,6 +35,14 @@ test("preserves safe external targets and repairs legacy Media values", () => {
     "/preview/wispo-media/pages/about",
   );
   assert.equal(
+    resolvePublicBannerHref("wispo-media", "/preview/"),
+    "/preview/wispo-media",
+  );
+  assert.equal(
+    resolvePublicBannerHref("wispo-media", "/preview"),
+    "/preview/wispo-media",
+  );
+  assert.equal(
     resolvePublicBannerHref("wispo-media", "/articles/category/news"),
     "/preview/wispo-media/categories/news",
   );
