@@ -24,7 +24,7 @@ describe('MoveArmaturexToPakWorkspace1789588800000', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([pak])
       .mockResolvedValueOnce([provisionedSite])
-      .mockResolvedValueOnce([{ id: provisionedSite.id }]);
+      .mockResolvedValueOnce([[{ id: provisionedSite.id }], 1]);
 
     await new MoveArmaturexToPakWorkspace1789588800000().up({
       query,

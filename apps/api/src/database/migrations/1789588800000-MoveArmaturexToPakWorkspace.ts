@@ -98,7 +98,7 @@ export class MoveArmaturexToPakWorkspace1789588800000 implements MigrationInterf
       );
     }
 
-    const movedRows = (await queryRunner.query(
+    const movedResult = (await queryRunner.query(
       `UPDATE "sites"
        SET "workspace_id" = $1
        WHERE "id" = $2
@@ -113,9 +113,14 @@ export class MoveArmaturexToPakWorkspace1789588800000 implements MigrationInterf
         site.workspace_id,
         ARMATUREX.provisioningOwner,
       ],
-    )) as Array<{ id: string }>;
+    )) as [Array<{ id: string }>, number];
+    const [movedRows, affectedRows] = movedResult;
 
-    if (movedRows.length !== 1 || movedRows[0].id !== ARMATUREX.id) {
+    if (
+      affectedRows !== 1 ||
+      movedRows.length !== 1 ||
+      movedRows[0].id !== ARMATUREX.id
+    ) {
       throw new Error(
         'Cannot move Armaturex: site ownership changed during migration',
       );
