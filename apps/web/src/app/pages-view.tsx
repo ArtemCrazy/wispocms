@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArmaturexHomeEditor } from "./armaturex-home-editor";
+import { isArmaturexHomepage } from "./homepage-templates";
 
 type BlockType = "hero" | "text" | "cta";
 type PageBlock = {
@@ -12,6 +14,7 @@ type PageBlock = {
   buttonLabel?: string;
   buttonUrl?: string;
   mediaId?: string;
+  data?: Record<string, unknown>;
 };
 type PageItem = {
   id: string;
@@ -25,6 +28,8 @@ type PageItem = {
   canonicalUrl: string | null;
   noIndex: boolean;
   updatedAt: string;
+  systemTemplateKey: string | null;
+  systemTemplateVersion: string | null;
 };
 type MediaItem = { id: string; originalName: string; altText: string | null };
 
@@ -99,6 +104,13 @@ export function PagesView({
   const isSystemPage =
     editor?.kind === "page" &&
     (editor.slug === "privacy-policy" || editor.slug === "404");
+  const isArmaturexEditor = Boolean(
+    editor &&
+    isArmaturexHomepage({
+      key: editor.systemTemplateKey,
+      version: editor.systemTemplateVersion,
+    }),
+  );
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -641,119 +653,138 @@ export function PagesView({
                 ) : null}
               </section>
               <div className="builder-layout">
-                <div className="blocks-column">
-                  {blocks.map((block) => (
-                    <article className="block-card" key={block.id}>
-                      <header>
-                        <span aria-hidden="true">◇</span>
-                        <strong>{blockNames[block.type]}</strong>
-                      </header>
-                      <label>
-                        Заголовок
-                        <input
-                          readOnly={!editorCanEdit}
-                          value={block.title ?? ""}
-                          onChange={(event) =>
-                            updateBlock(block.id, "title", event.target.value)
-                          }
-                        />
-                      </label>
-                      <label>
-                        Текст
-                        <textarea
-                          readOnly={!editorCanEdit}
-                          rows={4}
-                          value={block.text ?? ""}
-                          onChange={(event) =>
-                            updateBlock(block.id, "text", event.target.value)
-                          }
-                        />
-                      </label>
-                      {block.type !== "text" ? (
-                        <div className="block-grid">
-                          <label>
-                            Текст кнопки
-                            <input
-                              readOnly={!editorCanEdit}
-                              value={block.buttonLabel ?? ""}
-                              onChange={(event) =>
-                                updateBlock(
-                                  block.id,
-                                  "buttonLabel",
-                                  event.target.value,
-                                )
-                              }
-                            />
-                          </label>
-                          <label>
-                            Ссылка
-                            <input
-                              readOnly={!editorCanEdit}
-                              value={block.buttonUrl ?? ""}
-                              onChange={(event) =>
-                                updateBlock(
-                                  block.id,
-                                  "buttonUrl",
-                                  event.target.value,
-                                )
-                              }
-                            />
-                          </label>
-                        </div>
-                      ) : null}
-                      {block.type === "hero" ? (
-                        <label>
-                          Фоновое изображение
-                          <select
-                            disabled={!editorCanEdit}
-                            value={block.mediaId ?? ""}
-                            onChange={(event) =>
-                              updateBlock(
-                                block.id,
-                                "mediaId",
-                                event.target.value,
-                              )
-                            }
-                          >
-                            <option value="">Без изображения</option>
-                            {media.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.altText || item.originalName}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-                    </article>
-                  ))}
-                </div>
-                <aside className="page-preview">
-                  <span>ПРЕДПРОСМОТР</span>
-                  <div>
+                {isArmaturexEditor ? (
+                  <ArmaturexHomeEditor
+                    blocks={blocks}
+                    media={media}
+                    disabled={!editorCanEdit}
+                    onChange={(nextBlocks) => {
+                      setBlocks(nextBlocks);
+                      setDirty(true);
+                    }}
+                  />
+                ) : (
+                  <div className="blocks-column">
                     {blocks.map((block) => (
-                      <section
-                        key={block.id}
-                        className={`preview-${block.type}`}
-                      >
-                        {block.mediaId ? (
-                          <Image
-                            unoptimized
-                            fill
-                            sizes="420px"
-                            src={`/api/sites/${siteId}/content/media/${block.mediaId}/file`}
-                            alt=""
+                      <article className="block-card" key={block.id}>
+                        <header>
+                          <span aria-hidden="true">◇</span>
+                          <strong>{blockNames[block.type]}</strong>
+                        </header>
+                        <label>
+                          Заголовок
+                          <input
+                            readOnly={!editorCanEdit}
+                            value={block.title ?? ""}
+                            onChange={(event) =>
+                              updateBlock(block.id, "title", event.target.value)
+                            }
                           />
+                        </label>
+                        <label>
+                          Текст
+                          <textarea
+                            readOnly={!editorCanEdit}
+                            rows={4}
+                            value={block.text ?? ""}
+                            onChange={(event) =>
+                              updateBlock(block.id, "text", event.target.value)
+                            }
+                          />
+                        </label>
+                        {block.type !== "text" ? (
+                          <div className="block-grid">
+                            <label>
+                              Текст кнопки
+                              <input
+                                readOnly={!editorCanEdit}
+                                value={block.buttonLabel ?? ""}
+                                onChange={(event) =>
+                                  updateBlock(
+                                    block.id,
+                                    "buttonLabel",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </label>
+                            <label>
+                              Ссылка
+                              <input
+                                readOnly={!editorCanEdit}
+                                value={block.buttonUrl ?? ""}
+                                onChange={(event) =>
+                                  updateBlock(
+                                    block.id,
+                                    "buttonUrl",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </label>
+                          </div>
                         ) : null}
-                        <div>
-                          <h3>{block.title || blockNames[block.type]}</h3>
-                          {block.text ? <p>{block.text}</p> : null}
-                          {block.buttonLabel ? (
-                            <b>{block.buttonLabel}</b>
-                          ) : null}
-                        </div>
-                      </section>
+                        {block.type === "hero" ? (
+                          <label>
+                            Фоновое изображение
+                            <select
+                              disabled={!editorCanEdit}
+                              value={block.mediaId ?? ""}
+                              onChange={(event) =>
+                                updateBlock(
+                                  block.id,
+                                  "mediaId",
+                                  event.target.value,
+                                )
+                              }
+                            >
+                              <option value="">Без изображения</option>
+                              {media.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.altText || item.originalName}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : null}
+                      </article>
                     ))}
                   </div>
+                )}
+                <aside className="page-preview">
+                  <span>ПРЕДПРОСМОТР</span>
+                  {isArmaturexEditor && siteId && siteSlug ? (
+                    <iframe
+                      title="Предпросмотр шаблона Armaturex"
+                      src={`/preview/${siteSlug}?cmsSiteId=${siteId}&cmsPageId=${editor.id}`}
+                    />
+                  ) : (
+                    <div>
+                      {blocks.map((block) => (
+                        <section
+                          key={block.id}
+                          className={`preview-${block.type}`}
+                        >
+                          {block.mediaId ? (
+                            <Image
+                              unoptimized
+                              fill
+                              sizes="420px"
+                              src={`/api/sites/${siteId}/content/media/${block.mediaId}/file`}
+                              alt=""
+                            />
+                          ) : null}
+                          <div>
+                            <h3>{block.title || blockNames[block.type]}</h3>
+                            {block.text ? <p>{block.text}</p> : null}
+                            {block.buttonLabel ? (
+                              <b>{block.buttonLabel}</b>
+                            ) : null}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  )}
                 </aside>
               </div>
               <footer>

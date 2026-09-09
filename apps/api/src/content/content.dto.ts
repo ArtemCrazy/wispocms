@@ -290,6 +290,10 @@ export class PageBlockDto {
   @IsOptional()
   @IsUUID()
   mediaId?: string;
+
+  @IsOptional()
+  @IsObject()
+  data?: Record<string, unknown>;
 }
 
 export class CreatePageDto {
@@ -525,6 +529,10 @@ export class UpdateSiteLayoutDto {
   @IsString()
   @MaxLength(120)
   logoText?: string;
+
+  @IsOptional()
+  @IsUUID()
+  logoMediaId?: string;
 
   @IsOptional()
   @IsBoolean()

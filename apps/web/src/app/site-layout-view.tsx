@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 export type SiteLayoutSettings = {
   siteId: string;
   logoText?: string;
+  logoMediaId?: string;
   showPages?: boolean;
   showArticles?: boolean;
   ctaLabel?: string;
@@ -14,6 +15,7 @@ export type SiteLayoutSettings = {
   showSocials?: boolean;
 };
 type LayoutDraft = Omit<SiteLayoutSettings, "siteId">;
+type MediaItem = { id: string; originalName: string; altText: string | null };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -50,15 +52,19 @@ export function SiteLayoutView({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [draft, setDraft] = useState<LayoutDraft>({});
+  const [media, setMedia] = useState<MediaItem[]>([]);
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    const loaded = await request<SiteLayoutSettings>(
-      `/api/sites/${siteId}/content/layout`,
-    );
+    const [loaded, mediaRows] = await Promise.all([
+      request<SiteLayoutSettings>(`/api/sites/${siteId}/content/layout`),
+      request<MediaItem[]>(`/api/sites/${siteId}/content/media`),
+    ]);
+    setMedia(mediaRows);
     setData(loaded);
     setDraft({
       logoText: loaded.logoText ?? "",
+      logoMediaId: loaded.logoMediaId ?? "",
       showPages: loaded.showPages ?? true,
       showArticles: loaded.showArticles ?? true,
       ctaLabel: loaded.ctaLabel ?? "",
@@ -110,6 +116,7 @@ export function SiteLayoutView({
       mode === "header"
         ? {
             logoText: text(draft.logoText),
+            logoMediaId: draft.logoMediaId || undefined,
             showPages: draft.showPages,
             showArticles: draft.showArticles,
             ctaLabel: text(draft.ctaLabel),
@@ -133,6 +140,7 @@ export function SiteLayoutView({
       setData(updated);
       setDraft({
         logoText: updated.logoText ?? "",
+        logoMediaId: updated.logoMediaId ?? "",
         showPages: updated.showPages ?? true,
         showArticles: updated.showArticles ?? true,
         ctaLabel: updated.ctaLabel ?? "",
@@ -214,6 +222,24 @@ export function SiteLayoutView({
                   placeholder={siteName}
                   readOnly={!canEdit}
                 />
+              </label>
+              <label>
+                <span>Изображение логотипа</span>
+                <select
+                  name="logoMediaId"
+                  value={draft.logoMediaId ?? ""}
+                  onChange={(event) =>
+                    updateDraft("logoMediaId", event.target.value)
+                  }
+                  disabled={!canEdit}
+                >
+                  <option value="">Использовать логотип шаблона</option>
+                  {media.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.altText || item.originalName}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 <span>Текст кнопки</span>

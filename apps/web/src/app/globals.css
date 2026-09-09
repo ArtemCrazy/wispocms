@@ -10544,3 +10544,26 @@ input[type="checkbox"] {
     justify-content: flex-start;
   }
 }
+
+.armaturex-template-editor {
+  min-width: 0;
+}
+
+.armaturex-template-editor .template-repeater {
+  border-top: 1px solid #d9dee8;
+  padding-top: 12px;
+}
+
+.armaturex-template-editor .template-repeater summary {
+  cursor: pointer;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.page-preview > iframe {
+  width: 100%;
+  min-height: 720px;
+  border: 0;
+  border-radius: 12px;
+  background: white;
+}

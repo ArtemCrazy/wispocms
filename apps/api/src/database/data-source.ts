@@ -17,6 +17,7 @@ import { ExpandMediaArticleLifecycle1789156800000 } from './migrations/178915680
 import { CompleteArticleCategoryLifecycle1789243200000 } from './migrations/1789243200000-CompleteArticleCategoryLifecycle';
 import { WorkspaceContentCenterAndDomains1789329600000 } from './migrations/1789329600000-WorkspaceContentCenterAndDomains';
 import { ArticlePublishingPlatform1789416000000 } from './migrations/1789416000000-ArticlePublishingPlatform';
+import { SeedArmaturexHomepage1789502400000 } from './migrations/1789502400000-SeedArmaturexHomepage';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -40,6 +41,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       CompleteArticleCategoryLifecycle1789243200000,
       WorkspaceContentCenterAndDomains1789329600000,
       ArticlePublishingPlatform1789416000000,
+      SeedArmaturexHomepage1789502400000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

@@ -1,5 +1,6 @@
 export type PublicSiteGlobals = {
   companyName?: string;
+  legalName?: string;
   phone?: string;
   email?: string;
   address?: string;
@@ -9,6 +10,7 @@ export type PublicSiteGlobals = {
 
 export type PublicSiteLayout = {
   logoText?: string;
+  logoMediaId?: string;
   showPages?: boolean;
   showArticles?: boolean;
   ctaLabel?: string;

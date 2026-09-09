@@ -180,6 +180,7 @@ export type PageBlock = {
   buttonLabel?: string;
   buttonUrl?: string;
   mediaId?: string;
+  data?: Record<string, unknown>;
 };
 
 export type SiteGlobalData = {
@@ -198,6 +199,7 @@ export type SiteGlobalData = {
 
 export type SiteLayoutSettings = {
   logoText?: string;
+  logoMediaId?: string;
   showPages?: boolean;
   showArticles?: boolean;
   ctaLabel?: string;

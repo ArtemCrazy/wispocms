@@ -9,6 +9,11 @@ import {
   PublicSiteLayout,
 } from "../../public-site-footer";
 import { PublicSiteHeader } from "../../public-site-header";
+import { ArmaturexHome } from "../../armaturex-home";
+import {
+  isArmaturexHomepage,
+  resolveArmaturexContent,
+} from "../../homepage-templates";
 import {
   absolutePublicUrl,
   loadPublicData,
@@ -23,6 +28,7 @@ type PageBlock = {
   buttonLabel?: string;
   buttonUrl?: string;
   mediaId?: string;
+  data?: Record<string, unknown>;
 };
 type PublicPage = {
   id: string;
@@ -34,6 +40,8 @@ type PublicPage = {
   seoDescription: string | null;
   canonicalUrl: string | null;
   noIndex: boolean;
+  systemTemplateKey: string | null;
+  systemTemplateVersion: string | null;
 };
 type PublicArticle = {
   id: string;
@@ -170,6 +178,59 @@ export default async function PublicSitePage({
   const hero = homepage?.blocks.find((block) => block.type === "hero");
   const otherBlocks =
     homepage?.blocks.filter((block) => block.id !== hero?.id) ?? [];
+
+  if (
+    homepage &&
+    isArmaturexHomepage({
+      key: homepage.systemTemplateKey,
+      version: homepage.systemTemplateVersion,
+    })
+  ) {
+    const organizationSchema = {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name:
+        data.site.globalData.legalName ||
+        data.site.globalData.companyName ||
+        data.site.name,
+      url: data.site.canonicalUrl || undefined,
+      email: data.site.globalData.email || undefined,
+      telephone: data.site.globalData.phone || undefined,
+      address: data.site.globalData.address
+        ? {
+            "@type": "PostalAddress",
+            streetAddress: data.site.globalData.address,
+            addressCountry: "RU",
+          }
+        : undefined,
+      areaServed: "RU",
+    };
+    return (
+      <>
+        {cmsPreview ? (
+          <div className="cms-preview-bar">
+            <strong>Предпросмотр CMS</strong>
+            <span>Главная страница ещё не опубликована для посетителей</span>
+            <Link href="/">Вернуться в CMS</Link>
+          </div>
+        ) : null}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(organizationSchema).replace(/</g, "\\u003c"),
+          }}
+        />
+        <ArmaturexHome
+          siteName={data.site.name}
+          siteSlug={siteSlug}
+          content={resolveArmaturexContent(homepage.blocks)}
+          globals={data.site.globalData}
+          layout={data.site.layoutSettings}
+          cmsSiteId={cmsPreview?.siteId}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="public-site">

@@ -1402,10 +1402,18 @@ export class ContentService {
       actor,
       SitePermission.EDIT_CONTENT,
     );
+    if (
+      dto.logoMediaId &&
+      !(await this.workspaceHasMedia(siteId, dto.logoMediaId))
+    )
+      throw new NotFoundException('Логотип не найден');
     const value = (input?: string) => input?.trim() || undefined;
     site.layoutSettings = {
       ...site.layoutSettings,
       ...(dto.logoText !== undefined && { logoText: value(dto.logoText) }),
+      ...(dto.logoMediaId !== undefined && {
+        logoMediaId: dto.logoMediaId || undefined,
+      }),
       ...(dto.showPages !== undefined && { showPages: dto.showPages }),
       ...(dto.showArticles !== undefined && {
         showArticles: dto.showArticles,
