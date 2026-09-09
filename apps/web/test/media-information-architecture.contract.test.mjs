@@ -49,6 +49,10 @@ const layout = await readFile(
   new URL("../src/app/media-layout-view.tsx", import.meta.url),
   "utf8",
 );
+const templates = await readFile(
+  new URL("../src/app/media-templates-view.tsx", import.meta.url),
+  "utf8",
+);
 
 test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(shell, /id: "site"/);
@@ -56,6 +60,10 @@ test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(mediaSite, /title: "Шаблоны"/);
   assert.match(mediaSite, /title: "Баннеры"/);
   assert.match(mediaSite, /title: "Переменные"/);
+  assert.match(shell, /activeView === "templates"/);
+  assert.match(shell, /activeView === "homepage-template"/);
+  assert.match(templates, /Текущий:/);
+  assert.match(templates, /Открыть и изменить/);
   for (const label of [
     "Главная",
     "Статьи",

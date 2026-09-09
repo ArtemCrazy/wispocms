@@ -1,6 +1,7 @@
 "use client";
 
 type MediaSiteTarget =
+  | "templates"
   | "homepage"
   | "articles"
   | "layout"
@@ -71,29 +72,17 @@ export function MediaSiteView({
               <p>{card.description}</p>
             </div>
             {card.id === "templates" ? (
-              <div className="media-template-links">
-                {templates.map(([target, label, hint]) => (
-                  <button
-                    key={target}
-                    type="button"
-                    onClick={() => onOpen(target)}
-                  >
-                    <span>{label}</span>
-                    <small>{hint}</small>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <button
-                className="media-card-open"
-                type="button"
-                onClick={() =>
-                  onOpen(card.id === "banners" ? "banners" : "variables")
-                }
-              >
-                Открыть
-              </button>
-            )}
+              <p className="media-template-summary">
+                {templates.map(([, label]) => label).join(" · ")}
+              </p>
+            ) : null}
+            <button
+              className="media-card-open"
+              type="button"
+              onClick={() => onOpen(card.id)}
+            >
+              Открыть
+            </button>
           </article>
         ))}
       </div>

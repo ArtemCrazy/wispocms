@@ -346,7 +346,7 @@ export class ContentService {
     legacyBanners: BannerEntity[],
   ) {
     if (site.siteType !== SiteType.MEDIA || !page || !this.bannerAssignments)
-      return { banners: legacyBanners, bannerAssignments: [] };
+      return { banners: legacyBanners };
     const assignments = await this.bannerAssignments.find({
       where: { siteId: site.id, pageId: page.id },
       relations: { banner: { media: true, mobileMedia: true } },
@@ -365,7 +365,6 @@ export class ContentService {
         ),
         ...assignedBanners,
       ],
-      bannerAssignments: assignments,
     };
   }
 
@@ -516,7 +515,6 @@ export class ContentService {
         ),
         pages,
         banners: pageBanners.banners,
-        bannerAssignments: pageBanners.bannerAssignments,
         categories: categories.filter((category) =>
           this.categoryIsPublic(category),
         ),
@@ -574,13 +572,17 @@ export class ContentService {
             .createQueryBuilder('article')
             .where('article.siteId = :siteId', { siteId: site.id })
             .leftJoin('article.category', 'category')
-            .andWhere('article.status = :articleStatus', {
-              articleStatus: ArticleStatus.PUBLISHED,
+            .andWhere('article.publicationState = :publicationState', {
+              publicationState: PublicationState.PUBLISHED,
             })
-            .andWhere('article.publishedAt <= :now', { now: new Date() })
+            .andWhere('article.deletedAt IS NULL')
             .andWhere(
-              `(article.categoryId IS NULL OR (category.status = :categoryStatus AND (category.publishedAt IS NULL OR category.publishedAt <= :now)))`,
-              { categoryStatus: CategoryStatus.ACTIVE },
+              '(article.publishedAt IS NULL OR article.publishedAt <= :now)',
+              { now: new Date() },
+            )
+            .andWhere(
+              `(article.categoryId IS NULL OR (category.publicationState = :categoryPublicationState AND category.deletedAt IS NULL AND (category.publishedAt IS NULL OR category.publishedAt <= :now)))`,
+              { categoryPublicationState: PublicationState.PUBLISHED },
             )
             .andWhere(
               `(article.title ILIKE :pattern ESCAPE '\\' OR COALESCE(article.excerpt, '') ILIKE :pattern ESCAPE '\\' OR article.body ILIKE :pattern ESCAPE '\\')`,
@@ -706,12 +708,27 @@ export class ContentService {
           select: { blocks: true, ogImageMediaId: true },
         }),
         capabilities.banners
-          ? this.banners.exists({
-              where: [
-                { siteId: site.id, isActive: true, mediaId },
-                { siteId: site.id, isActive: true, mobileMediaId: mediaId },
-              ],
-            })
+          ? site.siteType === SiteType.MEDIA && this.bannerAssignments
+            ? this.bannerAssignments
+                .find({
+                  where: { siteId: site.id },
+                  relations: { banner: true, page: true },
+                })
+                .then((assignments) =>
+                  assignments.some(
+                    ({ banner, page }) =>
+                      page.status === PageStatus.PUBLISHED &&
+                      banner.isActive &&
+                      (banner.mediaId === mediaId ||
+                        banner.mobileMediaId === mediaId),
+                  ),
+                )
+            : this.banners.exists({
+                where: [
+                  { siteId: site.id, isActive: true, mediaId },
+                  { siteId: site.id, isActive: true, mobileMediaId: mediaId },
+                ],
+              })
           : Promise.resolve(false),
         capabilities.articles
           ? this.articles.find({
@@ -1207,7 +1224,6 @@ export class ContentService {
           : navigationPages,
       articles,
       banners: pageBanners.banners,
-      bannerAssignments: pageBanners.bannerAssignments,
       privacyDisplay: privacyDisplay
         ? {
             key: privacyDisplay.displayTemplateKey,
@@ -1833,15 +1849,19 @@ export class ContentService {
 
   private async variableUsageCount(siteId: string, identifier: string) {
     if (!this.siteVariables) return 0;
-    const token = `%{{${identifier}}}%`;
+    const escapedIdentifier = identifier.replace(/[\\%_]/g, '\\$&');
+    const token = `%{{${escapedIdentifier}}}%`;
     const rows: Array<{ count: string }> =
       await this.siteVariables.manager.query(
         `SELECT (
-        (SELECT COUNT(*) FROM "sites" WHERE "id" = $1 AND ("global_data"::text LIKE $2 OR "layout_settings"::text LIKE $2)) +
-        (SELECT COUNT(*) FROM "pages" WHERE "site_id" = $1 AND "blocks"::text LIKE $2) +
-        (SELECT COUNT(*) FROM "articles" WHERE "site_id" = $1 AND ("body" LIKE $2 OR COALESCE("body_document"::text, '') LIKE $2)) +
-        (SELECT COUNT(*) FROM "categories" WHERE "site_id" = $1 AND COALESCE("description", '') LIKE $2) +
-        (SELECT COUNT(*) FROM "banners" WHERE "site_id" = $1 AND (COALESCE("title", '') LIKE $2 OR COALESCE("subtitle", '') LIKE $2 OR COALESCE("button_text", '') LIKE $2 OR COALESCE("link_url", '') LIKE $2))
+        (SELECT COUNT(*) FROM "sites" entry WHERE entry."id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "pages" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "articles" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "categories" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "banners" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "privacy_policy_states" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "site_content_templates" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\') +
+        (SELECT COUNT(*) FROM "article_section_settings" entry WHERE entry."site_id" = $1 AND to_jsonb(entry)::text LIKE $2 ESCAPE '\\')
       )::text AS "count"`,
         [siteId, token],
       );
@@ -2009,12 +2029,20 @@ export class ContentService {
   async listPageActivity(siteId: string, pageId: string, actor: Actor) {
     await this.requireSite(siteId, actor);
     if (!this.pageActivities) return [];
-    return this.pageActivities.find({
+    const rows = await this.pageActivities.find({
       where: { siteId, pageId },
       relations: { user: true },
       order: { createdAt: 'DESC' },
       take: 50,
     });
+    return rows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      description: row.description,
+      changes: row.changes,
+      createdAt: row.createdAt,
+      user: row.user ? { id: row.user.id, fullName: row.user.fullName } : null,
+    }));
   }
 
   private async validateLinks(

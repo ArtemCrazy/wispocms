@@ -19,6 +19,7 @@ import {
   loadPublicData,
   queryValue,
 } from "../../public-server-data";
+import { resolvePublicBannerHref } from "../../public-banner-link";
 
 type PageBlock = {
   id: string;
@@ -283,7 +284,7 @@ export default async function PublicSitePage({
         <a
           key={banner.id}
           className="public-banner"
-          href={banner.linkUrl || "#articles"}
+          href={resolvePublicBannerHref(siteSlug, banner.linkUrl)}
         >
           {banner.media ? (
             <Image
@@ -359,7 +360,7 @@ export default async function PublicSitePage({
           <a
             key={banner.id}
             className="public-banner middle"
-            href={banner.linkUrl || "#articles"}
+            href={resolvePublicBannerHref(siteSlug, banner.linkUrl)}
           >
             {banner.media ? (
               <Image

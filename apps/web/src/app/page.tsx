@@ -37,6 +37,7 @@ import { MediaSiteView } from "./media-site-view";
 import { MediaBannerLibraryView } from "./media-banner-library-view";
 import { SiteVariablesView } from "./site-variables-view";
 import { MediaLayoutView } from "./media-layout-view";
+import { MediaTemplatesView } from "./media-templates-view";
 
 type SessionData = {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -213,6 +214,8 @@ function Dashboard({
     | "team"
     | "audit"
     | "site"
+    | "templates"
+    | "homepage-template"
     | "homepage"
     | "articles"
     | "categories"
@@ -324,6 +327,8 @@ function Dashboard({
       if (!siteId || !view) return;
       const restorableViews: View[] = [
         "site",
+        "templates",
+        "homepage-template",
         "homepage",
         "articles",
         "pages",
@@ -1856,6 +1861,24 @@ function Dashboard({
           <MediaSiteView
             siteName={site.name}
             onOpen={(target) => navigateTo(target)}
+          />
+        ) : activeView === "templates" && site?.siteType === "media" ? (
+          <MediaTemplatesView
+            siteId={site.id}
+            onOpen={(target) => navigateTo(target)}
+          />
+        ) : activeView === "homepage-template" && site?.siteType === "media" ? (
+          <PagesView
+            siteId={site.id}
+            siteName={site.name}
+            siteSlug={site.slug}
+            canEdit={canEdit}
+            canApprove={canApprove}
+            canEditPublished={canEditPublished}
+            mode="homepage"
+            onDirtyChange={setHasUnsavedChanges}
+            onPagesChange={setStructurePages}
+            siteType="media"
           />
         ) : activeView === "homepage" || activeView === "pages" ? (
           site?.siteType === "media" && activeView === "homepage" ? (

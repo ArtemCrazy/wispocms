@@ -15,6 +15,7 @@ import {
   loadPublicData,
   queryValue,
 } from "../../../../public-server-data";
+import { resolvePublicBannerHref } from "../../../../public-banner-link";
 
 type Article = {
   id: string;
@@ -323,7 +324,11 @@ export default async function PublicArticlePage({
                 <a
                   key={banner.id}
                   className="public-banner"
-                  href={banner.linkUrl || `/preview/${siteSlug}`}
+                  href={resolvePublicBannerHref(
+                    siteSlug,
+                    banner.linkUrl,
+                    `/preview/${siteSlug}`,
+                  )}
                 >
                   {banner.media ? (
                     <Image

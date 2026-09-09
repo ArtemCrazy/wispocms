@@ -19,6 +19,37 @@
 .not-found-seo {
   font-size: 14px;
 }
+.media-template-manager {
+  display: grid;
+  gap: 12px;
+}
+.media-template-manager article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--glavbook-border, #dfe3e8);
+  border-radius: 12px;
+  padding: 18px;
+}
+.media-template-manager h2 {
+  margin: 4px 0;
+  font-size: 18px;
+}
+.media-template-manager p {
+  margin: 0;
+  color: var(--glavbook-text-muted, #667085);
+}
+.media-template-manager button {
+  border: 0;
+  border-radius: 9px;
+  padding: 10px 14px;
+  background: #111827;
+  color: #fff;
+}
+.media-template-summary {
+  font-size: 13px;
+}
 
 .media-site-cards {
   display: grid;

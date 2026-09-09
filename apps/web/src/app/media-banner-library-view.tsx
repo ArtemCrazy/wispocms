@@ -4,7 +4,13 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type MediaItem = { id: string; originalName: string };
-type LinkItem = { id: string; title?: string; name?: string; slug: string };
+type LinkItem = {
+  id: string;
+  title?: string;
+  name?: string;
+  slug: string;
+  kind?: "homepage" | "page";
+};
 export type MediaBanner = {
   id: string;
   name: string;
@@ -83,7 +89,7 @@ export function MediaBannerLibraryView({
     setMedia(mediaRows);
     setLinks([
       ...pages.map((item) => ({
-        value: `/preview/${item.slug}`,
+        value: item.kind === "homepage" ? "/" : `/pages/${item.slug}`,
         label: `Страница: ${item.title ?? item.name}`,
       })),
       ...articles.map((item) => ({
@@ -91,7 +97,7 @@ export function MediaBannerLibraryView({
         label: `Статья: ${item.title ?? item.name}`,
       })),
       ...categories.map((item) => ({
-        value: `/articles/category/${item.slug}`,
+        value: `/categories/${item.slug}`,
         label: `Категория: ${item.title ?? item.name}`,
       })),
     ]);

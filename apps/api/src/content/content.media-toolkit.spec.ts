@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PlatformRole, SiteType } from '../database/entities';
 import { ContentService } from './content.service';
 
@@ -8,7 +8,7 @@ describe('ContentService Media site toolkit', () => {
     platformRole: PlatformRole.WISPO_ADMIN,
   };
 
-  function setup(usageCount = '0') {
+  function setup(usageCount = '0', activityRows: unknown[] = []) {
     const sites = {
       findOne: jest.fn().mockResolvedValue({
         id: 'site-id',
@@ -36,6 +36,7 @@ describe('ContentService Media site toolkit', () => {
     const pageActivities = {
       create: jest.fn((value: Record<string, unknown>) => value),
       save: jest.fn().mockResolvedValue(undefined),
+      find: jest.fn().mockResolvedValue(activityRows),
     };
     const service = new ContentService(
       sites as never,
@@ -80,11 +81,114 @@ describe('ContentService Media site toolkit', () => {
     expect(pageActivities.save).toHaveBeenCalled();
   });
 
-  it('protects a variable that is still referenced by content', async () => {
+  it('protects variables used in SEO, structured data, or template config by scanning complete rows', async () => {
     const { service, variables } = setup('2');
     await expect(
       service.deleteSiteVariable('site-id', 'variable-id', actor),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(variables.remove).not.toHaveBeenCalled();
+    const calls = variables.manager.query.mock.calls as Array<
+      [string, unknown[]]
+    >;
+    const [sql, parameters] = calls[0];
+    expect(sql).toContain('to_jsonb(entry)::text');
+    expect(sql).toContain('"site_content_templates"');
+    expect(sql).toContain('"article_section_settings"');
+    expect(sql).toContain('FROM "pages" entry');
+    expect(parameters).toEqual(['site-id', '%{{phone}}%']);
+  });
+
+  it('escapes wildcard characters in variable usage lookup', async () => {
+    const { service, variables } = setup('1');
+    variables.findOneBy.mockResolvedValue({
+      id: 'variable-id',
+      siteId: 'site-id',
+      identifier: 'support_phone',
+    });
+    await expect(
+      service.deleteSiteVariable('site-id', 'variable-id', actor),
+    ).rejects.toBeInstanceOf(ConflictException);
+    const calls = variables.manager.query.mock.calls as Array<
+      [string, unknown[]]
+    >;
+    expect(calls[0][1]).toEqual(['site-id', '%{{support\\_phone}}%']);
+  });
+
+  it('returns page history without sensitive user fields', async () => {
+    const activity = {
+      id: 'activity-id',
+      action: 'seo_updated',
+      description: 'SEO updated',
+      changes: { seoTitle: 'New' },
+      createdAt: new Date('2026-09-09T12:00:00Z'),
+      user: {
+        id: 'user-id',
+        fullName: 'Editor',
+        email: 'secret@example.ru',
+        passwordHash: 'never-expose',
+        platformRole: 'wispo_admin',
+        isActive: true,
+      },
+    };
+    const { service } = setup('0', [activity]);
+    const result = await service.listPageActivity('site-id', 'page-id', actor);
+    expect(result).toEqual([
+      {
+        id: activity.id,
+        action: activity.action,
+        description: activity.description,
+        changes: activity.changes,
+        createdAt: activity.createdAt,
+        user: { id: 'user-id', fullName: 'Editor' },
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toMatch(
+      /passwordHash|platformRole|email/,
+    );
+  });
+
+  it('does not publish an unassigned universal banner image', async () => {
+    const sites = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'site-id',
+        slug: 'media',
+        workspaceId: 'workspace-id',
+        siteType: SiteType.MEDIA,
+        seoImageMediaId: null,
+      }),
+    };
+    const banners = { exists: jest.fn() };
+    const assignments = { find: jest.fn().mockResolvedValue([]) };
+    const service = new ContentService(
+      sites as never,
+      {} as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {} as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'media-id',
+          workspaceId: 'workspace-id',
+          storageNamespace: 'files',
+          storedName: 'banner.webp',
+          mimeType: 'image/webp',
+        }),
+      } as never,
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      banners as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      assignments as never,
+    );
+
+    await expect(
+      service.getPublicMedia('media', 'media-id'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(assignments.find).toHaveBeenCalled();
+    expect(banners.exists).not.toHaveBeenCalled();
   });
 });

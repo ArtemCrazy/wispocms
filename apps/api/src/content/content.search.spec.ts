@@ -1,7 +1,7 @@
 import {
-  ArticleStatus,
   PageKind,
   PageStatus,
+  PublicationState,
   SiteType,
 } from '../database/entities';
 import { ContentService } from './content.service';
@@ -117,8 +117,22 @@ describe('ContentService public search', () => {
       { siteId: 'site-id' },
     );
     expect(articleBuilder.andWhere).toHaveBeenCalledWith(
-      'article.status = :articleStatus',
-      { articleStatus: ArticleStatus.PUBLISHED },
+      'article.publicationState = :publicationState',
+      { publicationState: PublicationState.PUBLISHED },
+    );
+    expect(articleBuilder.andWhere).toHaveBeenCalledWith(
+      'article.deletedAt IS NULL',
+    );
+    const articleFilters = articleBuilder.andWhere.mock.calls as Array<
+      [string, { now?: unknown }?]
+    >;
+    const scheduledFilter = articleFilters.find(([statement]) =>
+      statement.includes('article.publishedAt'),
+    );
+    expect(scheduledFilter?.[1]?.now).toBeInstanceOf(Date);
+    expect(articleBuilder.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('category.publicationState'),
+      { categoryPublicationState: PublicationState.PUBLISHED },
     );
     expect(pageBuilder.where).not.toHaveBeenCalled();
   });
