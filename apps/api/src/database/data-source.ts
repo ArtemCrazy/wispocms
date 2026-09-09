@@ -19,6 +19,7 @@ import { WorkspaceContentCenterAndDomains1789329600000 } from './migrations/1789
 import { ArticlePublishingPlatform1789416000000 } from './migrations/1789416000000-ArticlePublishingPlatform';
 import { SeedArmaturexHomepage1789502400000 } from './migrations/1789502400000-SeedArmaturexHomepage';
 import { MoveArmaturexToPakWorkspace1789588800000 } from './migrations/1789588800000-MoveArmaturexToPakWorkspace';
+import { SetArmaturexEcommerceSiteType1789675200000 } from './migrations/1789675200000-SetArmaturexEcommerceSiteType';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -44,6 +45,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       ArticlePublishingPlatform1789416000000,
       SeedArmaturexHomepage1789502400000,
       MoveArmaturexToPakWorkspace1789588800000,
+      SetArmaturexEcommerceSiteType1789675200000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

@@ -1,4 +1,4 @@
-export type SiteType = "media" | "corporate" | "landing";
+export type SiteType = "media" | "corporate" | "ecommerce" | "landing";
 
 const siteTypes: Array<{
   value: SiteType;
@@ -14,6 +14,11 @@ const siteTypes: Array<{
     value: "corporate",
     title: "Корпоративный сайт",
     description: "Страницы, услуги, блог и корпоративные данные.",
+  },
+  {
+    value: "ecommerce",
+    title: "Интернет-магазин",
+    description: "Каталог, страницы, блог, баннеры и данные компании.",
   },
   {
     value: "landing",

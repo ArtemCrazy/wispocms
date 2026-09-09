@@ -327,6 +327,10 @@ describe('PlatformService workspace and site management', () => {
       ...mediaUpdate,
       siteType: 'corporate' as never,
     });
+    const ecommerceResult = await service.updateSite('site-id', {
+      ...mediaUpdate,
+      siteType: 'ecommerce' as never,
+    });
 
     expect(createdPages.map((page) => page.slug)).toEqual([
       '404',
@@ -351,6 +355,7 @@ describe('PlatformService workspace and site management', () => {
     );
     expect(secondResult.pages).toHaveLength(firstResult.pages.length);
     expect(corporateResult.pages).toHaveLength(firstResult.pages.length);
+    expect(ecommerceResult.pages).toHaveLength(firstResult.pages.length);
     expect(pages.save).toHaveBeenCalledTimes(savesAfterFirstUpdate);
     expect(existingPages[0]).toEqual(
       expect.objectContaining({ slug: 'about', title: 'О компании' }),
@@ -383,7 +388,7 @@ describe('PlatformService workspace and site management', () => {
     expect(sites.save).not.toHaveBeenCalled();
   });
 
-  it.each(['corporate', 'landing'] as const)(
+  it.each(['corporate', 'ecommerce', 'landing'] as const)(
     'creates a safe homepage for a %s site without media-only system pages',
     async (siteType) => {
       workspaces.existsBy.mockResolvedValue(true);

@@ -32,6 +32,7 @@ export enum WorkspaceRole {
 export enum SiteType {
   MEDIA = 'media',
   CORPORATE = 'corporate',
+  ECOMMERCE = 'ecommerce',
   LANDING = 'landing',
 }
 
@@ -280,7 +281,7 @@ export class WorkspaceEntity {
 @Unique(['workspaceId', 'slug'])
 @Check(
   'CHK_sites_site_type',
-  `"site_type" IN ('media', 'corporate', 'landing')`,
+  `"site_type" IN ('media', 'corporate', 'ecommerce', 'landing')`,
 )
 export class SiteEntity {
   @PrimaryGeneratedColumn('uuid')

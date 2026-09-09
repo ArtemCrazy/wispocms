@@ -20,6 +20,13 @@ const capabilitiesBySiteType: Record<SiteType, SiteContentCapabilities> = {
     pages: true,
     banners: true,
   },
+  [SiteType.ECOMMERCE]: {
+    articles: true,
+    categories: false,
+    authors: false,
+    pages: true,
+    banners: true,
+  },
   [SiteType.LANDING]: {
     articles: false,
     categories: false,

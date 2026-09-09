@@ -5,10 +5,29 @@ import test from "node:test";
 const source = async (relativePath) =>
   readFile(new URL(relativePath, import.meta.url), "utf8");
 
-test("site creation offers Media, Corporate and Landing", async () => {
+test("site creation offers all canonical site types", async () => {
   const picker = await source("../src/app/site-type-picker.tsx");
-  for (const value of ["media", "corporate", "landing"])
+  for (const value of ["media", "corporate", "ecommerce", "landing"])
     assert.match(picker, new RegExp(`value: "${value}"`));
+  assert.match(picker, /title: "Интернет-магазин"/);
+});
+
+test("ecommerce is labeled consistently and reuses the corporate page shell", async () => {
+  const [projects, platform, settings, integration, shell] = await Promise.all([
+    source("../src/app/all-projects-view.tsx"),
+    source("../src/app/platform-views.tsx"),
+    source("../src/app/site-settings-view.tsx"),
+    source("../src/app/site-integration-view.tsx"),
+    source("../src/app/page.tsx"),
+  ]);
+
+  for (const ui of [projects, platform, settings]) {
+    assert.match(ui, /ecommerce: "Интернет-магазин"/);
+  }
+  assert.match(projects, /<option value="ecommerce">Интернет-магазин<\/option>/);
+  assert.match(platform, /<option value="ecommerce">Интернет-магазин<\/option>/);
+  assert.match(integration, /ecommerce:/);
+  assert.match(shell, /siteMenus\.ecommerce = siteMenus\.corporate/);
 });
 
 test("the site shell names the workspace library Content Center", async () => {

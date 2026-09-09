@@ -73,7 +73,7 @@ export function PagesView({
   siteId?: string;
   siteName?: string;
   siteSlug?: string;
-  siteType?: "media" | "corporate" | "landing";
+  siteType?: "media" | "corporate" | "ecommerce" | "landing";
   mode: "homepage" | "pages";
   canEdit?: boolean;
   canApprove?: boolean;
@@ -206,9 +206,11 @@ export function PagesView({
   const siteTypeLabel =
     siteType === "landing"
       ? "Лендинг"
-      : siteType === "corporate"
-        ? "Корпоративный"
-        : "Медиа";
+      : siteType === "ecommerce"
+        ? "Интернет-магазин"
+        : siteType === "corporate"
+          ? "Корпоративный"
+          : "Медиа";
 
   function openEditor(page: PageItem) {
     setEditor(page);

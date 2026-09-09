@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, Fragment, useCallback, useEffect, useState } from "react";
-import { SiteTypePicker } from "./site-type-picker";
+import { SiteTypePicker, type SiteType } from "./site-type-picker";
 import { AuditLogView } from "./audit-log-view";
 import { TeamAccessView } from "./team-access-view";
 
@@ -15,7 +15,7 @@ type WorkspaceItem = {
     name: string;
     slug: string;
     domain: string | null;
-    siteType: string;
+    siteType: SiteType;
     isActive: boolean;
   }>;
 };
@@ -336,6 +336,7 @@ function Workspaces({
         body: JSON.stringify({
           name: data.get("name"),
           domain: String(data.get("domain") ?? "").trim() || null,
+          siteType: data.get("siteType"),
           isActive: site.isActive,
         }),
       });
@@ -462,6 +463,7 @@ function Workspaces({
           <option value="all">Все типы сайтов</option>
           <option value="media">Медиа</option>
           <option value="corporate">Корпоративные</option>
+          <option value="ecommerce">Интернет-магазины</option>
           <option value="landing">Лендинги</option>
         </select>
         <small>
@@ -531,6 +533,7 @@ function Workspaces({
                         {{
                           media: "Медиа",
                           corporate: "Корпоративный",
+                          ecommerce: "Интернет-магазин",
                           landing: "Лендинг",
                         }[site.siteType] ?? site.siteType}
                       </small>
@@ -576,6 +579,12 @@ function Workspaces({
                         placeholder="domain.ru"
                         defaultValue={site.domain ?? ""}
                       />
+                      <select name="siteType" defaultValue={site.siteType}>
+                        <option value="media">Медиа-сайт</option>
+                        <option value="corporate">Корпоративный</option>
+                        <option value="ecommerce">Интернет-магазин</option>
+                        <option value="landing">Лендинг</option>
+                      </select>
                       <span>Системный адрес: {site.slug}</span>
                       <div>
                         <button disabled={busyId === site.id}>

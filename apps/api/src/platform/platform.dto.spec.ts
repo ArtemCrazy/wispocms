@@ -22,7 +22,7 @@ describe('CreateSiteDto', () => {
     expect(errors.some((error) => error.property === 'siteType')).toBe(true);
   });
 
-  it.each(['media', 'corporate', 'landing'])(
+  it.each(['media', 'corporate', 'ecommerce', 'landing'])(
     'accepts the %s site profile',
     async (siteType) => {
       const errors = await validate(

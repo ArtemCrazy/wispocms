@@ -30,6 +30,7 @@ describe('buildPublicIntegrationManifest', () => {
   it.each([
     [SiteType.MEDIA, true, true, true],
     [SiteType.CORPORATE, true, false, true],
+    [SiteType.ECOMMERCE, true, false, true],
     [SiteType.LANDING, false, false, false],
   ])(
     'exposes only the modules supported by %s sites',

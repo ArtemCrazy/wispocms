@@ -14,7 +14,7 @@ type ProjectSite = {
   name: string;
   slug: string;
   domain: string | null;
-  siteType: "media" | "corporate" | "landing";
+  siteType: "media" | "corporate" | "ecommerce" | "landing";
   isActive: boolean;
   createdAt: string;
   creator: { id: string; fullName: string; email: string } | null;
@@ -64,6 +64,7 @@ type SettingsContext = {
 const siteTypeNames = {
   media: "Медиа-сайт",
   corporate: "Корпоративный сайт",
+  ecommerce: "Интернет-магазин",
   landing: "Лендинг",
 };
 
@@ -438,7 +439,7 @@ export function AllProjectsView({
                 <label>Название сайта<input name="name" required minLength={2} maxLength={160} defaultValue={settingsContext.site.name} /></label>
                 <label>Домен<input name="domain" maxLength={255} defaultValue={settingsContext.site.domain ?? ""} placeholder="example.ru" /></label>
                 <div className="project-settings-fields-row">
-                  <label>Тип сайта<select name="siteType" defaultValue={settingsContext.site.siteType}><option value="media">Медиа-сайт</option><option value="corporate">Корпоративный</option><option value="landing">Лендинг</option></select></label>
+                  <label>Тип сайта<select name="siteType" defaultValue={settingsContext.site.siteType}><option value="media">Медиа-сайт</option><option value="corporate">Корпоративный</option><option value="ecommerce">Интернет-магазин</option><option value="landing">Лендинг</option></select></label>
                   <label>Рабочее пространство<select name="workspaceId" defaultValue={settingsContext.workspace.id}>{workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
                 </div>
                 <label className="project-settings-toggle"><input name="isActive" type="checkbox" defaultChecked={settingsContext.site.isActive} /><span><strong>Сайт включён</strong><small>Если отключить, публичная версия станет недоступна.</small></span></label>

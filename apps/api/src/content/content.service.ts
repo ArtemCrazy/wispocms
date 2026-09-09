@@ -1181,7 +1181,11 @@ export class ContentService {
         ? this.sites.find({
             where: {
               workspaceId: site.workspaceId,
-              siteType: In([SiteType.CORPORATE, SiteType.LANDING]),
+              siteType: In([
+                SiteType.CORPORATE,
+                SiteType.ECOMMERCE,
+                SiteType.LANDING,
+              ]),
               isActive: true,
             },
             select: {
@@ -1249,10 +1253,12 @@ export class ContentService {
           !target.isActive ||
           target.id === site.id ||
           target.workspaceId !== site.workspaceId ||
-          ![SiteType.CORPORATE, SiteType.LANDING].includes(target.siteType)
+          ![SiteType.CORPORATE, SiteType.ECOMMERCE, SiteType.LANDING].includes(
+            target.siteType,
+          )
         )
           throw new BadRequestException(
-            'Выберите активный Corporate или Landing из этого рабочего пространства',
+            'Выберите активный Corporate, Ecommerce или Landing из этого рабочего пространства',
           );
         site.linkedCommercialSiteId = target.id;
       } else {

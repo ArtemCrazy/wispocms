@@ -21,6 +21,12 @@ describe('site content capabilities', () => {
     });
   });
 
+  it('gives ecommerce the safe corporate content baseline', () => {
+    expect(getSiteContentCapabilities(SiteType.ECOMMERCE)).toEqual(
+      getSiteContentCapabilities(SiteType.CORPORATE),
+    );
+  });
+
   it('prevents content modules that do not belong to a landing page', () => {
     expect(siteSupportsContentModule(SiteType.LANDING, 'pages')).toBe(true);
     expect(siteSupportsContentModule(SiteType.LANDING, 'articles')).toBe(false);

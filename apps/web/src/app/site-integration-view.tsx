@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 
-type SiteType = "media" | "corporate" | "landing";
+type SiteType = "media" | "corporate" | "ecommerce" | "landing";
 
 const typeDescriptions: Record<SiteType, string> = {
   media: "статьи, рубрики, авторы, страницы, баннеры и общие данные",
   corporate: "страницы, услуги, блог, баннеры и общие данные компании",
+  ecommerce: "каталог, страницы, блог, баннеры и общие данные магазина",
   landing: "структура посадочной страницы, медиа, контакты и SEO",
 };
 

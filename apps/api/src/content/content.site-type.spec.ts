@@ -71,4 +71,25 @@ describe('ContentService site type boundaries', () => {
     expect(categories.find).not.toHaveBeenCalled();
     expect(authors.find).not.toHaveBeenCalled();
   });
+
+  it('keeps ecommerce on the corporate content baseline', async () => {
+    const { service, articles, categories, authors, pages, banners } = setup(
+      SiteType.ECOMMERCE,
+    );
+
+    await expect(service.listArticles('site-id', actor)).resolves.toEqual([]);
+    await expect(service.listPages('site-id', actor)).resolves.toEqual([]);
+    await expect(service.listBanners('site-id', actor)).resolves.toEqual([]);
+    await expect(
+      service.listCategories('site-id', actor),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.listAuthors('site-id', actor)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(articles.find).toHaveBeenCalled();
+    expect(pages.find).toHaveBeenCalled();
+    expect(banners.find).toHaveBeenCalled();
+    expect(categories.find).not.toHaveBeenCalled();
+    expect(authors.find).not.toHaveBeenCalled();
+  });
 });

@@ -12,7 +12,7 @@ type SiteSettings = {
   domainCheckedAt: string | null;
   domainStatusMessage: string | null;
   expectedDnsRecords: string[];
-  siteType: "media" | "corporate" | "landing";
+  siteType: "media" | "corporate" | "ecommerce" | "landing";
   linkedCommercialSiteId: string | null;
   linkedCommercialSite: CommercialSite | null;
   commercialSiteOptions: CommercialSite[];
@@ -24,7 +24,7 @@ type CommercialSite = {
   name: string;
   slug: string;
   domain: string | null;
-  siteType: "corporate" | "landing";
+  siteType: "corporate" | "ecommerce" | "landing";
 };
 
 type EmailStatus = {
@@ -232,6 +232,7 @@ export function SiteSettingsView({
   const typeNames = {
     media: "Медиа-сайт",
     corporate: "Корпоративный сайт",
+    ecommerce: "Интернет-магазин",
     landing: "Лендинг",
   };
   const normalizedEmailDraft = notificationEmailDraft.trim().toLowerCase();

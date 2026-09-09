@@ -19,7 +19,7 @@ export type GlobalSearchWorkspace = {
   sites: Array<{
     id: string;
     name: string;
-    siteType: "media" | "corporate" | "landing";
+    siteType: "media" | "corporate" | "ecommerce" | "landing";
   }>;
 };
 

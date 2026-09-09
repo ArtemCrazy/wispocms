@@ -53,7 +53,7 @@ type SessionData = {
       slug: string;
       domain: string | null;
       domainStatus: "not_configured" | "pending" | "verified" | "error";
-      siteType: "media" | "corporate" | "landing";
+      siteType: "media" | "corporate" | "ecommerce" | "landing";
       linkedCommercialSiteId: string | null;
       linkedCommercialSite: {
         id: string;
@@ -533,6 +533,7 @@ function Dashboard({
       { id: "history", icon: "log", label: "История изменений" },
     ],
   };
+  siteMenus.ecommerce = siteMenus.corporate;
   const siteMenu = (
     siteMenus[site?.siteType ?? "media"] ?? siteMenus.media
   ).filter(
@@ -560,14 +561,18 @@ function Dashboard({
       items: siteMenu.filter((item) => ["header", "footer"].includes(item.id)),
     },
     {
-      label: site?.siteType === "corporate" ? "Страницы" : "Технические",
+      label:
+        site?.siteType === "corporate" || site?.siteType === "ecommerce"
+          ? "Страницы"
+          : "Технические",
       items: siteMenu.filter(
         (item) =>
           Boolean(item.pageId) ||
           item.id === "404" ||
           (item.id === "pages" &&
             !item.pageId &&
-            site?.siteType === "corporate"),
+            (site?.siteType === "corporate" ||
+              site?.siteType === "ecommerce")),
       ),
     },
   ].filter((group) => group.items.length);
@@ -2216,6 +2221,8 @@ function ProjectSelectionView({
           const siteType =
             item.siteType === "media"
               ? "Медиа-сайт"
+              : item.siteType === "ecommerce"
+                ? "Интернет-магазин"
               : item.siteType === "landing"
                 ? "Лендинг"
                 : "Корпоративный сайт";

@@ -293,7 +293,9 @@ export class PlatformService {
     const nextWorkspaceId = dto.workspaceId ?? site.workspaceId;
     const nextType = dto.siteType ?? site.siteType;
     const isCommercialType = (type: SiteType) =>
-      type === SiteType.CORPORATE || type === SiteType.LANDING;
+      type === SiteType.CORPORATE ||
+      type === SiteType.ECOMMERCE ||
+      type === SiteType.LANDING;
     if (
       site.linkedCommercialSiteId &&
       (nextWorkspaceId !== site.workspaceId || nextType !== SiteType.MEDIA)
