@@ -859,9 +859,6 @@
     margin: 0 auto;
   }
 
-  .armaturex-home-v1--preview .viewer {
-    max-width: min(100%, calc(100vh - 21.5rem));
-  }
 }
 
 .viewer__stage {

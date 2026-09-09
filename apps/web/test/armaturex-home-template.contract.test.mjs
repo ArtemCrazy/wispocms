@@ -83,6 +83,7 @@ test("preview sizing and responsive gutters stay scoped to Armaturex", () => {
   assert.match(publicHome, /cms-preview-bar cms-preview-bar--armaturex/);
   assert.match(rendererStyles, /\.armaturex-home-v1--preview \.header/);
   assert.match(rendererStyles, /height:\s*calc\(100vh - 2\.5rem\)/);
+  assert.doesNotMatch(rendererStyles, /100vh - 21\.5rem/);
   assert.match(rendererStyles, /:where\(\.armaturex-home-v1\) h1/);
   assert.doesNotMatch(rendererStyles, /\.armaturex-home-v1 h1,/);
   assert.doesNotMatch(rendererStyles, /@media \(max-width: 40rem\)[\s\S]*?:root\s*\{/);
