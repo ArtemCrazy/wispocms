@@ -174,7 +174,10 @@ describe('ContentService workspace integration', () => {
         .fn()
         .mockResolvedValue([{ blocks: [{ mediaId: 'shared-media' }] }]),
     };
-    const banners = { existsBy: jest.fn().mockResolvedValue(false) };
+    const banners = {
+      existsBy: jest.fn().mockResolvedValue(false),
+      exists: jest.fn().mockResolvedValue(false),
+    };
     const articles = { find: jest.fn().mockResolvedValue([]) };
     const categories = { find: jest.fn().mockResolvedValue([]) };
     const service = new ContentService(
