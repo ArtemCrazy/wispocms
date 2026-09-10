@@ -24,6 +24,7 @@ describe('ImportSkinovaMediaSite1789848000000', () => {
     expect(sql).toContain('"site_type"');
     expect(sql).toMatch(/NULL, 'media', \$5, \$6, true,/);
     expect(sql).toContain('INSERT INTO "privacy_policy_states"');
+    expect(sql).toContain('WHERE "status" = \'approved\'');
     expect(parameters).toContain('approved-v1');
     expect(parameters).toContainEqual(
       expect.stringContaining('## 11. Контакты'),

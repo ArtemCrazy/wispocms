@@ -441,8 +441,8 @@ export class ImportSkinovaMediaSite1789848000000 implements MigrationInterface {
 
     const legalModels = (await queryRunner.query(
       `SELECT "id", "version" FROM "privacy_legal_models"
-       ORDER BY ("status" = 'approved') DESC,
-         "approved_at" DESC NULLS LAST, "created_at" DESC
+       WHERE "status" = 'approved'
+       ORDER BY "approved_at" DESC NULLS LAST, "created_at" DESC
        LIMIT 1`,
     )) as Array<{ id: string; version: string }>;
     if (!legalModels[0])
