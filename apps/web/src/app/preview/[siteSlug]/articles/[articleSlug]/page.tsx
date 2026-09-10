@@ -16,6 +16,16 @@ import {
   queryValue,
 } from "../../../../public-server-data";
 import { resolvePublicBannerHref } from "../../../../public-banner-link";
+import {
+  SkinovaArticlePage,
+  type SkinovaArticle,
+  type SkinovaBanner,
+  type SkinovaCategory,
+} from "../../../../skinova-site";
+import {
+  SKINOVA_ARTICLE_TEMPLATE_KEY,
+  SKINOVA_TEMPLATE_VERSION,
+} from "../../../../skinova-template";
 
 type Article = {
   id: string;
@@ -51,12 +61,17 @@ type Article = {
   publishedAt: string | null;
   coverMedia: { id: string; altText: string | null } | null;
   previewMedia: { id: string; altText: string | null } | null;
-  category: { name: string } | null;
+  category: { id?: string; name: string; slug?: string } | null;
   author: { fullName: string } | null;
+  displayTemplateKey?: string;
+  displayTemplateVersion?: string;
+  displayTemplateConfig?: SkinovaArticle["displayTemplateConfig"];
 };
 type PublicBanner = {
   id: string;
   title: string | null;
+  subtitle: string | null;
+  buttonText: string | null;
   linkUrl: string | null;
   media: { id: string; altText: string | null } | null;
 };
@@ -189,6 +204,56 @@ export default async function PublicArticlePage({
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
+
+  if (
+    article.displayTemplateKey === SKINOVA_ARTICLE_TEMPLATE_KEY &&
+    article.displayTemplateVersion === SKINOVA_TEMPLATE_VERSION
+  ) {
+    const categoryRows = [article, ...related]
+      .map((item) => item.category)
+      .filter((category): category is NonNullable<Article["category"]> =>
+        Boolean(category?.name),
+      );
+    const categories = Array.from(
+      new Map(
+        categoryRows.map((category) => [
+          category.id || category.slug || category.name,
+          {
+            id: category.id || category.slug || category.name,
+            name: category.name,
+            slug: category.slug || "",
+            parentId: null,
+          },
+        ]),
+      ).values(),
+    ) as SkinovaCategory[];
+    return (
+      <>
+        {cmsPreview ? (
+          <div className="cms-preview-bar">
+            <strong>Предпросмотр CMS</strong>
+            <span>Материал ещё не опубликован для посетителей</span>
+            <Link href="/">Вернуться в CMS</Link>
+          </div>
+        ) : null}
+        <SkinovaArticlePage
+          siteSlug={siteSlug}
+          article={article as SkinovaArticle}
+          related={related as SkinovaArticle[]}
+          categories={categories}
+          globals={site.globalData}
+          layout={site.layoutSettings}
+          banner={(banners[0] as SkinovaBanner | undefined) ?? null}
+          mediaBaseUrl={
+            cmsPreview
+              ? `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/media`
+              : `/api/public/sites/${encodeURIComponent(siteSlug)}/media`
+          }
+          mediaFileSuffix={cmsPreview ? "/file" : ""}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="public-site public-article-page">

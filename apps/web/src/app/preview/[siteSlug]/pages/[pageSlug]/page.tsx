@@ -19,6 +19,8 @@ import {
   NotFoundTemplate,
   type NotFoundTemplateData,
 } from "../../../../not-found-template";
+import { SkinovaSystemPage } from "../../../../skinova-site";
+import { SKINOVA_HEADER_TEMPLATE_KEY } from "../../../../skinova-template";
 
 type PageBlock = {
   id: string;
@@ -203,6 +205,32 @@ export default async function PublicInnerPage({
 
   const data = result.data;
   const { page, pages, site } = data;
+  if (
+    site.layoutSettings.headerTemplateKey === SKINOVA_HEADER_TEMPLATE_KEY &&
+    (page.slug === "404" || page.slug === "privacy-policy")
+  ) {
+    const firstBlock = page.blocks[0];
+    return (
+      <>
+        {cmsPreview ? (
+          <div className="cms-preview-bar">
+            <strong>Предпросмотр CMS</strong>
+            <span>Системная страница Skinova</span>
+            <Link href="/">Вернуться в CMS</Link>
+          </div>
+        ) : null}
+        <SkinovaSystemPage
+          siteSlug={siteSlug}
+          title={firstBlock?.title || page.title}
+          text={
+            firstBlock?.text ||
+            "Проверьте адрес или вернитесь на главную страницу."
+          }
+          kind={page.slug === "404" ? "not-found" : "privacy"}
+        />
+      </>
+    );
+  }
   if (page.slug === "404" && data.notFoundDisplay) {
     return (
       <div className="not-found-preview-wrap">

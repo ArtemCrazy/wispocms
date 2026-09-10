@@ -20,6 +20,16 @@ import {
   queryValue,
 } from "../../public-server-data";
 import { resolvePublicBannerHref } from "../../public-banner-link";
+import {
+  SkinovaHome,
+  type SkinovaArticle,
+  type SkinovaBanner,
+  type SkinovaCategory,
+} from "../../skinova-site";
+import {
+  SKINOVA_HOME_TEMPLATE_KEY,
+  SKINOVA_TEMPLATE_VERSION,
+} from "../../skinova-template";
 
 type PageBlock = {
   id: string;
@@ -57,8 +67,10 @@ type PublicArticle = {
   publishedAt: string | null;
   coverMedia: { id: string; altText: string | null } | null;
   previewMedia: { id: string; altText: string | null } | null;
-  category: { name: string } | null;
+  category: { id?: string; name: string; slug?: string } | null;
   author: { fullName: string } | null;
+  displayTemplateKey?: string;
+  displayTemplateConfig?: SkinovaArticle["displayTemplateConfig"];
 };
 type PublicBanner = {
   id: string;
@@ -86,6 +98,7 @@ type PublicSiteData = {
   pages: PublicPage[];
   articles: PublicArticle[];
   banners: PublicBanner[];
+  categories: SkinovaCategory[];
 };
 
 type PublicSitePageProps = {
@@ -248,6 +261,38 @@ export default async function PublicSitePage({
           globals={data.site.globalData}
           layout={data.site.layoutSettings}
           cmsSiteId={cmsPreview?.siteId}
+        />
+      </>
+    );
+  }
+
+  if (
+    homepage?.systemTemplateKey === SKINOVA_HOME_TEMPLATE_KEY &&
+    homepage.systemTemplateVersion === SKINOVA_TEMPLATE_VERSION
+  ) {
+    return (
+      <>
+        {cmsPreview ? (
+          <div className="cms-preview-bar">
+            <strong>Предпросмотр CMS</strong>
+            <span>Главная страница ещё не опубликована для посетителей</span>
+            <Link href="/">Вернуться в CMS</Link>
+          </div>
+        ) : null}
+        <SkinovaHome
+          siteSlug={siteSlug}
+          categories={data.categories ?? []}
+          articles={data.articles as SkinovaArticle[]}
+          banners={data.banners as SkinovaBanner[]}
+          globals={data.site.globalData}
+          layout={data.site.layoutSettings}
+          homepage={homepage}
+          mediaBaseUrl={
+            cmsPreview
+              ? `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/media`
+              : `/api/public/sites/${encodeURIComponent(siteSlug)}/media`
+          }
+          mediaFileSuffix={cmsPreview ? "/file" : ""}
         />
       </>
     );

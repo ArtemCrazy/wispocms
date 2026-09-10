@@ -18,6 +18,10 @@ export type PublicSiteLayout = {
   footerDescription?: string;
   showContacts?: boolean;
   showSocials?: boolean;
+  headerTemplateKey?: string;
+  headerTemplateVersion?: string;
+  footerTemplateKey?: string;
+  footerTemplateVersion?: string;
 };
 
 export function PublicSiteFooter({

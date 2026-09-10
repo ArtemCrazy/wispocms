@@ -48,6 +48,21 @@ export const NOT_FOUND_TEMPLATES: readonly NotFoundTemplate[] = [
     alignment: 'left',
     visual: 'grid',
   },
+  {
+    key: 'skinova',
+    version: '1',
+    name: 'Skinova',
+    description: 'Светлая редакционная страница в визуальной системе Skinova.',
+    eyebrow: 'Ошибка навигации',
+    code: '404',
+    title: 'Страница не найдена',
+    text: 'Похоже, такой страницы больше нет или адрес введён неверно.',
+    buttonLabel: 'Вернуться на главную',
+    buttonUrl: '/',
+    tone: 'violet',
+    alignment: 'left',
+    visual: 'grid',
+  },
 ] as const;
 
 export function getNotFoundTemplate(

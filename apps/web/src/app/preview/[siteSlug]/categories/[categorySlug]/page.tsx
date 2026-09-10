@@ -14,6 +14,15 @@ import {
   loadPublicData,
   queryValue,
 } from "../../../../public-server-data";
+import {
+  SkinovaCategoryPage,
+  type SkinovaArticle,
+  type SkinovaCategory,
+} from "../../../../skinova-site";
+import {
+  SKINOVA_CATEGORY_TEMPLATE_KEY,
+  SKINOVA_TEMPLATE_VERSION,
+} from "../../../../skinova-template";
 
 type CategoryData = {
   site: {
@@ -25,8 +34,10 @@ type CategoryData = {
     noIndex: boolean;
   };
   category: {
+    id: string;
     name: string;
     slug: string;
+    parentId: string | null;
     description: string | null;
     seoTitle: string | null;
     seoDescription: string | null;
@@ -36,6 +47,8 @@ type CategoryData = {
     ogDescription: string | null;
     ogImageMediaId: string | null;
     structuredData: Record<string, unknown> | null;
+    displayTemplateKey?: string;
+    displayTemplateVersion?: string;
   };
   redirectTo: string | null;
   articles: Array<{
@@ -137,6 +150,40 @@ export default async function PublicCategoryPage({
       `/preview/${encodeURIComponent(siteSlug)}/categories/${encodeURIComponent(result.data.redirectTo)}`,
     );
   const { site, category, articles, children, pages } = result.data;
+  if (
+    category.displayTemplateKey === SKINOVA_CATEGORY_TEMPLATE_KEY &&
+    category.displayTemplateVersion === SKINOVA_TEMPLATE_VERSION
+  ) {
+    return (
+      <>
+        {cmsPreview ? (
+          <div className="cms-preview-bar">
+            <strong>Предпросмотр CMS</strong>
+            <span>Рубрика может быть скрыта от посетителей</span>
+            <Link href="/">Вернуться в CMS</Link>
+          </div>
+        ) : null}
+        <SkinovaCategoryPage
+          siteSlug={siteSlug}
+          category={
+            category as SkinovaCategory & {
+              description?: string | null;
+            }
+          }
+          articles={articles as SkinovaArticle[]}
+          subcategories={children as SkinovaCategory[]}
+          globals={site.globalData}
+          layout={site.layoutSettings}
+          mediaBaseUrl={
+            cmsPreview
+              ? `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/media`
+              : `/api/public/sites/${encodeURIComponent(siteSlug)}/media`
+          }
+          mediaFileSuffix={cmsPreview ? "/file" : ""}
+        />
+      </>
+    );
+  }
   const mediaUrl = (id: string) =>
     `/api/public/sites/${encodeURIComponent(siteSlug)}/media/${id}`;
   return (

@@ -1180,7 +1180,7 @@ export class ContentService {
     const site = await this.requireSite(siteId, actor);
     const page = await this.pages.findOne({ where: { id: pageId, siteId } });
     if (!page) throw new NotFoundException('Страница не найдена');
-    const [navigationPages, articles, banners] = await Promise.all([
+    const [navigationPages, articles, banners, categories] = await Promise.all([
       this.pages.find({
         where: {
           siteId,
@@ -1213,6 +1213,14 @@ export class ContentService {
         relations: { media: true },
         order: { placement: 'ASC', sortOrder: 'ASC' },
       }),
+      this.categories.find({
+        where: {
+          siteId,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
+        },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      }),
     ]);
     const privacyDisplay =
       page.slug === 'privacy-policy'
@@ -1242,6 +1250,9 @@ export class ContentService {
           : navigationPages,
       articles,
       banners: pageBanners.banners,
+      categories: categories.filter((category) =>
+        this.categoryIsPublic(category),
+      ),
       privacyDisplay: privacyDisplay
         ? {
             key: privacyDisplay.displayTemplateKey,

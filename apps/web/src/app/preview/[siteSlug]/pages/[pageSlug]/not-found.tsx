@@ -7,9 +7,15 @@ import {
   safeNotFoundTemplate,
   type NotFoundTemplateData,
 } from "../../../../not-found-template";
+import { SkinovaSystemPage } from "../../../../skinova-site";
+import { SKINOVA_HEADER_TEMPLATE_KEY } from "../../../../skinova-template";
 
 type PublicNotFoundData = {
-  site: { name: string; slug: string };
+  site: {
+    name: string;
+    slug: string;
+    layoutSettings?: { headerTemplateKey?: string };
+  };
   active: boolean;
   template: NotFoundTemplateData;
 };
@@ -31,6 +37,18 @@ export default function PublicNotFound() {
       .catch(() => undefined);
     return () => controller.abort();
   }, [siteSlug]);
+
+  if (
+    data?.site.layoutSettings?.headerTemplateKey === SKINOVA_HEADER_TEMPLATE_KEY
+  )
+    return (
+      <SkinovaSystemPage
+        siteSlug={siteSlug}
+        title={data.template.title}
+        text={data.template.text}
+        kind="not-found"
+      />
+    );
 
   return (
     <NotFoundTemplate
