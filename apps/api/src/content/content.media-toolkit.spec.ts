@@ -32,12 +32,27 @@ describe('ContentService Media site toolkit', () => {
       findOne: jest.fn().mockResolvedValue({
         id: 'banner-id',
         siteId: 'site-id',
-        mediaId: 'media-id',
+        mediaId: null,
+        mobileMediaId: null,
+        title: 'Акция',
+        subtitle: null,
+        buttonText: null,
       }),
       create: jest.fn((value: Record<string, unknown>) => value),
-      save: jest.fn(),
+      save: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
     };
-    const media = { existsBy: jest.fn().mockResolvedValue(true) };
+    const media = {
+      existsBy: jest.fn().mockResolvedValue(true),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'media-id',
+        workspaceId: 'workspace-id',
+        storageNamespace: 'files',
+        storedName: 'banner.webp',
+        width: 1800,
+        height: 480,
+      }),
+      save: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
+    };
     const assignments = {
       upsert: jest.fn().mockResolvedValue(undefined),
       find: jest.fn().mockResolvedValue([]),
@@ -138,6 +153,43 @@ describe('ContentService Media site toolkit', () => {
     expect(assignments.upsert).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'empty',
+      {
+        id: 'banner-id',
+        siteId: 'site-id',
+        mediaId: null,
+        mobileMediaId: null,
+        title: null,
+        subtitle: null,
+        buttonText: null,
+      },
+    ],
+    [
+      'image-only',
+      {
+        id: 'banner-id',
+        siteId: 'site-id',
+        mediaId: 'media-id',
+        mobileMediaId: null,
+        title: null,
+        subtitle: null,
+        buttonText: null,
+      },
+    ],
+  ])('rejects %s content in the text-only promo slot', async (_name, row) => {
+    const { service, assignments, banners } = setup();
+    banners.findOne.mockResolvedValue(row);
+    await expect(
+      service.assignPageBanner('site-id', 'page-id', actor, {
+        zone: 'homepage_top',
+        bannerId: 'banner-id',
+      }),
+    ).rejects.toBeInstanceOf(Error);
+    expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
   it('rejects assigning a banner owned by another site', async () => {
     const { service, assignments, banners } = setup();
     banners.findOne.mockResolvedValue(null);
@@ -156,6 +208,10 @@ describe('ContentService Media site toolkit', () => {
       id: 'banner-id',
       siteId: 'site-id',
       mediaId: null,
+      mobileMediaId: null,
+      title: 'Акция',
+      subtitle: null,
+      buttonText: null,
     });
     await expect(
       service.assignPageBanner('site-id', 'page-id', actor, {
@@ -164,6 +220,82 @@ describe('ContentService Media site toolkit', () => {
       }),
     ).rejects.toThrow('Для этой зоны требуется изображение для компьютера');
     expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
+  it('accepts a compatible banner with exact slot geometry', async () => {
+    const { service, assignments, banners } = setup();
+    banners.findOne.mockResolvedValue({
+      id: 'banner-id',
+      siteId: 'site-id',
+      mediaId: 'media-id',
+      mobileMediaId: null,
+      title: null,
+      subtitle: null,
+      buttonText: null,
+    });
+    await expect(
+      service.assignPageBanner('site-id', 'page-id', actor, {
+        zone: 'homepage_middle',
+        bannerId: 'banner-id',
+      }),
+    ).resolves.toEqual([]);
+    expect(assignments.upsert).toHaveBeenCalled();
+  });
+
+  it('rejects an image whose actual geometry misses the slot contract', async () => {
+    const { service, assignments, banners, media } = setup();
+    banners.findOne.mockResolvedValue({
+      id: 'banner-id',
+      siteId: 'site-id',
+      mediaId: 'media-id',
+      mobileMediaId: null,
+      title: null,
+      subtitle: null,
+      buttonText: null,
+    });
+    media.findOne.mockResolvedValue({
+      id: 'media-id',
+      workspaceId: 'workspace-id',
+      width: 1200,
+      height: 400,
+    });
+    await expect(
+      service.assignPageBanner('site-id', 'page-id', actor, {
+        zone: 'homepage_middle',
+        bannerId: 'banner-id',
+      }),
+    ).rejects.toThrow(
+      'ожидается не меньше 1800 × 480 px, формат 15:4, получено 1200 × 400 px',
+    );
+    expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps the legacy article sidebar placement while editing its content', async () => {
+    const { service, banners } = setup();
+    const existing = {
+      id: 'sidebar-banner-id',
+      siteId: 'site-id',
+      placement: BannerPlacement.ARTICLE_SIDEBAR,
+      title: 'До изменения',
+      subtitle: null,
+      buttonText: null,
+      linkUrl: null,
+      mediaId: null,
+      mobileMediaId: null,
+      sortOrder: 0,
+      isActive: true,
+    };
+    banners.findOne.mockResolvedValue(existing);
+    await service.updateBanner('site-id', 'sidebar-banner-id', actor, {
+      title: 'После изменения',
+    });
+    expect(existing.placement).toBe(BannerPlacement.ARTICLE_SIDEBAR);
+    expect(banners.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'После изменения',
+        placement: BannerPlacement.ARTICLE_SIDEBAR,
+      }),
+    );
   });
 
   it('rejects foreign media and executable links before banner creation', async () => {

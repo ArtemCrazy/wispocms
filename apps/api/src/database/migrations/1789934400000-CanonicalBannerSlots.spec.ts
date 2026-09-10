@@ -11,6 +11,7 @@ describe('CanonicalBannerSlots1789934400000', () => {
       .map(([statement]) => String(statement))
       .join('\n');
     expect(sql).toContain('cross-site rows exist');
+    expect(sql).toContain('ALTER TABLE "media" ADD COLUMN "width" integer');
     expect(sql).toContain('FK_page_banner_assignments_page_site');
     expect(sql).toContain('FK_page_banner_assignments_banner_site');
     expect(sql).toContain(`page."system_template_key" = 'skinova-home'`);

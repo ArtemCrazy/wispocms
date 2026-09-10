@@ -13,7 +13,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { resolve4, resolve6, resolveCname } from 'node:dns/promises';
-import { mkdir, unlink, writeFile } from 'fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
 import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
@@ -59,8 +59,11 @@ import {
 } from '../platform/site-domain';
 import { buildPublicIntegrationManifest } from './public-integration-manifest';
 import {
+  bannerGeometryError,
+  bannerSlotCompatibilityError,
   bannerSlotsForPage,
   isAllowedBannerLink,
+  type BannerSlotDefinition,
 } from './banner-slot-registry';
 import {
   getSiteContentCapabilities,
@@ -103,7 +106,7 @@ import {
   articleDocumentText,
   normalizeArticleDocument,
 } from './article-document';
-import { detectImageMimeType } from './image-signature';
+import { detectImageMimeType, readImageDimensions } from './image-signature';
 import { hasSitePermission, SitePermission } from './content.permissions';
 import { privacyFingerprint } from '../privacy/privacy-generator';
 import {
@@ -1892,7 +1895,11 @@ export class ContentService {
     if (!isAllowedBannerLink(dto.linkUrl))
       throw new BadRequestException('Недопустимый адрес баннера');
     if (dto.name !== undefined) banner.name = dto.name.trim();
-    if (site.siteType === SiteType.MEDIA) banner.placement = null;
+    if (
+      site.siteType === SiteType.MEDIA &&
+      banner.placement !== BannerPlacement.ARTICLE_SIDEBAR
+    )
+      banner.placement = null;
     else if (dto.placement !== undefined) banner.placement = dto.placement;
     if (dto.title !== undefined) banner.title = dto.title?.trim() || null;
     if (dto.subtitle !== undefined)
@@ -1977,10 +1984,9 @@ export class ContentService {
       where: { id: dto.bannerId, siteId },
     });
     if (!banner) throw new NotFoundException('Баннер этого сайта не найден');
-    if (slot.supports.desktopImage && !banner.mediaId)
-      throw new BadRequestException(
-        'Для этой зоны требуется изображение для компьютера',
-      );
+    const compatibilityError = bannerSlotCompatibilityError(slot, banner);
+    if (compatibilityError) throw new BadRequestException(compatibilityError);
+    await this.validateBannerSlotMedia(siteId, banner, slot);
     if (!this.bannerAssignments)
       throw new ServiceUnavailableException('Назначения баннеров недоступны');
     await this.bannerAssignments.upsert(
@@ -2033,6 +2039,59 @@ export class ContentService {
         'Шаблон страницы не содержит такой зоны баннера',
       );
     return slot;
+  }
+
+  private async validateBannerSlotMedia(
+    siteId: string,
+    banner: BannerEntity,
+    slot: BannerSlotDefinition,
+  ) {
+    const candidates = [
+      {
+        id: banner.mediaId,
+        label: 'Изображение для компьютера',
+        constraints: slot.desktop,
+      },
+      {
+        id: banner.mobileMediaId,
+        label: 'Изображение для телефона',
+        constraints: slot.mobile,
+      },
+    ];
+    for (const candidate of candidates) {
+      if (!candidate.id) continue;
+      const { media } = await this.workspaceMedia(siteId, candidate.id);
+      let dimensions =
+        media.width && media.height
+          ? { width: media.width, height: media.height }
+          : null;
+      if (!dimensions) {
+        const buffer = await readFile(
+          join(
+            process.env.MEDIA_ROOT ?? '/data/media',
+            media.storageNamespace,
+            media.storedName,
+          ),
+        );
+        const detectedMimeType = detectImageMimeType(buffer);
+        dimensions = detectedMimeType
+          ? readImageDimensions(buffer, detectedMimeType)
+          : null;
+        if (!dimensions)
+          throw new BadRequestException(
+            `${candidate.label}: не удалось определить размер изображения`,
+          );
+        media.width = dimensions.width;
+        media.height = dimensions.height;
+        await this.media.save(media);
+      }
+      const geometryError = bannerGeometryError(
+        candidate.label,
+        dimensions,
+        candidate.constraints,
+      );
+      if (geometryError) throw new BadRequestException(geometryError);
+    }
   }
 
   private async variableUsageCount(siteId: string, identifier: string) {
@@ -3440,6 +3499,11 @@ export class ContentService {
       throw new BadRequestException(
         'Формат файла не соответствует заявленному типу изображения',
       );
+    const dimensions = readImageDimensions(file.buffer, detectedMimeType);
+    if (!dimensions)
+      throw new BadRequestException(
+        'Не удалось определить размер загруженного изображения',
+      );
 
     const extension = extensions[detectedMimeType];
     if (!extension)
@@ -3460,6 +3524,8 @@ export class ContentService {
           originalName: file.originalname.slice(0, 255),
           mimeType: detectedMimeType,
           size: file.size,
+          width: dimensions.width,
+          height: dimensions.height,
           altText: altText?.trim() || null,
         }),
       );

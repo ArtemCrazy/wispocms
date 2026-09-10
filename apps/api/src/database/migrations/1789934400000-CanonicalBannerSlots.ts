@@ -4,6 +4,8 @@ export class CanonicalBannerSlots1789934400000 implements MigrationInterface {
   name = 'CanonicalBannerSlots1789934400000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`ALTER TABLE "media" ADD COLUMN "width" integer`);
+    await queryRunner.query(`ALTER TABLE "media" ADD COLUMN "height" integer`);
     await queryRunner.query(
       `DO $$
        BEGIN
@@ -64,5 +66,7 @@ export class CanonicalBannerSlots1789934400000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "pages" DROP CONSTRAINT "UQ_pages_id_site"`,
     );
+    await queryRunner.query(`ALTER TABLE "media" DROP COLUMN "height"`);
+    await queryRunner.query(`ALTER TABLE "media" DROP COLUMN "width"`);
   }
 }

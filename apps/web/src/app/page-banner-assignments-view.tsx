@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import {
   bannerAssetRequirement,
+  bannerCompatibilityError,
   type BannerSlotDefinition,
 } from "./banner-slot";
 import type { MediaBanner } from "./media-banner-library-view";
@@ -163,7 +164,7 @@ export function PageBannerAssignmentsView({
                     alt=""
                   />
                 ) : (
-                  <span>Зона свободна</span>
+                  <span>{assigned ? "Текстовый баннер" : "Зона свободна"}</span>
                 )}
               </div>
               <div>
@@ -187,11 +188,22 @@ export function PageBannerAssignmentsView({
                   onChange={(event) => void assign(zone.id, event.target.value)}
                 >
                   <option value="">Не назначен</option>
-                  {banners.map((banner) => (
-                    <option key={banner.id} value={banner.id}>
-                      {banner.name}
-                    </option>
-                  ))}
+                  {banners.map((banner) => {
+                    const incompatibility = bannerCompatibilityError(
+                      zone,
+                      banner,
+                    );
+                    return (
+                      <option
+                        key={banner.id}
+                        value={banner.id}
+                        disabled={Boolean(incompatibility)}
+                      >
+                        {banner.name}
+                        {incompatibility ? ` — ${incompatibility}` : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
             </article>

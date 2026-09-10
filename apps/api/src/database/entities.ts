@@ -813,6 +813,12 @@ export class MediaEntity {
   @Column({ type: 'integer' })
   size!: number;
 
+  @Column({ type: 'integer', nullable: true })
+  width!: number | null;
+
+  @Column({ type: 'integer', nullable: true })
+  height!: number | null;
+
   @Column({ name: 'alt_text', type: 'varchar', length: 300, nullable: true })
   altText!: string | null;
 

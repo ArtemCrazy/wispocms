@@ -4,10 +4,17 @@ import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bannerAssetRequirement,
+  bannerLinkSelectValue,
   type BannerSlotDefinition,
 } from "./banner-slot";
+import { LatestValueQueue } from "./latest-value-queue";
 
-type MediaItem = { id: string; originalName: string };
+type MediaItem = {
+  id: string;
+  originalName: string;
+  width: number | null;
+  height: number | null;
+};
 type LinkItem = {
   id: string;
   title?: string;
@@ -59,6 +66,12 @@ type Draft = Pick<
   | "isActive"
 >;
 
+type BannerSaveJob = {
+  siteId: string;
+  bannerId: string;
+  draft: Draft;
+};
+
 export function MediaBannerLibraryView({
   siteId,
   siteName,
@@ -84,6 +97,31 @@ export function MediaBannerLibraryView({
   const [slots, setSlots] = useState<BannerSlotDefinition[]>([]);
   const hydrated = useRef(false);
   const createdForKey = useRef<number | undefined>(undefined);
+  const saveQueue = useRef<LatestValueQueue<BannerSaveJob> | null>(null);
+  if (saveQueue.current == null)
+    saveQueue.current = new LatestValueQueue(async (job) => {
+      setSaving(true);
+      try {
+        const updated = await request<MediaBanner>(
+          `/api/sites/${job.siteId}/content/banners/${job.bannerId}`,
+          { method: "PATCH", body: JSON.stringify(job.draft) },
+        );
+        setItems((current) =>
+          current.map((item) =>
+            item.id === updated.id ? { ...item, ...updated } : item,
+          ),
+        );
+        setMessage("Все изменения сохранены");
+      } catch (error) {
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Не удалось сохранить баннер",
+        );
+      } finally {
+        setSaving(false);
+      }
+    });
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -163,28 +201,12 @@ export function MediaBannerLibraryView({
   useEffect(() => {
     if (!siteId || !selectedId || !draft || !hydrated.current || !canEdit)
       return;
-    const timer = window.setTimeout(async () => {
-      setSaving(true);
-      try {
-        const updated = await request<MediaBanner>(
-          `/api/sites/${siteId}/content/banners/${selectedId}`,
-          { method: "PATCH", body: JSON.stringify(draft) },
-        );
-        setItems((current) =>
-          current.map((item) =>
-            item.id === updated.id ? { ...item, ...updated } : item,
-          ),
-        );
-        setMessage("Все изменения сохранены");
-      } catch (error) {
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Не удалось сохранить баннер",
-        );
-      } finally {
-        setSaving(false);
-      }
+    const timer = window.setTimeout(() => {
+      saveQueue.current?.enqueue({
+        siteId,
+        bannerId: selectedId,
+        draft,
+      });
     }, 650);
     return () => window.clearTimeout(timer);
   }, [canEdit, draft, selectedId, siteId]);
@@ -236,6 +258,7 @@ export function MediaBannerLibraryView({
     )
       return;
     try {
+      await saveQueue.current?.idle();
       await request(`/api/sites/${siteId}/content/banners/${selectedId}`, {
         method: "DELETE",
       });
@@ -436,11 +459,10 @@ export function MediaBannerLibraryView({
             <label>
               Ссылка
               <select
-                value={
-                  links.some((item) => item.value === draft.linkUrl)
-                    ? (draft.linkUrl ?? "")
-                    : "external"
-                }
+                value={bannerLinkSelectValue(
+                  draft.linkUrl,
+                  links.map((item) => item.value),
+                )}
                 disabled={!canEdit}
                 onChange={(event) =>
                   field(
@@ -460,8 +482,10 @@ export function MediaBannerLibraryView({
                 <option value="external">Внешний адрес…</option>
               </select>
             </label>
-            {!links.some((item) => item.value === draft.linkUrl) &&
-            draft.linkUrl !== null ? (
+            {bannerLinkSelectValue(
+              draft.linkUrl,
+              links.map((item) => item.value),
+            ) === "external" ? (
               <label>
                 Внешний адрес
                 <input

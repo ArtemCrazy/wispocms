@@ -12,6 +12,7 @@ export type BannerSlotDefinition = {
     subtitle: boolean;
     button: boolean;
   };
+  required: { desktopImage: boolean };
   desktop: {
     layout: string;
     aspectRatio?: string;
@@ -39,6 +40,7 @@ const HOMEPAGE_BANNER_SLOTS: Record<string, readonly BannerSlotDefinition[]> = {
         subtitle: true,
         button: true,
       },
+      required: { desktopImage: false },
       desktop: { layout: 'Промо-полоса, высота от 50 px' },
       mobile: {
         layout: 'Компактная промо-полоса',
@@ -57,6 +59,7 @@ const HOMEPAGE_BANNER_SLOTS: Record<string, readonly BannerSlotDefinition[]> = {
         subtitle: true,
         button: true,
       },
+      required: { desktopImage: true },
       desktop: {
         layout: 'Широкий баннер',
         aspectRatio: '15:4',
@@ -100,4 +103,78 @@ export function isAllowedBannerLink(value: string | null | undefined) {
   } catch {
     return false;
   }
+}
+
+export type BannerSlotContent = {
+  mediaId?: string | null;
+  mobileMediaId?: string | null;
+  title?: string | null;
+  subtitle?: string | null;
+  buttonText?: string | null;
+};
+
+export function bannerSlotCompatibilityError(
+  slot: BannerSlotDefinition,
+  banner: BannerSlotContent,
+): string | null {
+  if (!slot.supports.desktopImage && banner.mediaId)
+    return 'Эта зона не поддерживает изображение для компьютера';
+  if (!slot.supports.mobileImage && banner.mobileMediaId)
+    return 'Эта зона не поддерживает изображение для телефона';
+  if (!slot.supports.title && banner.title)
+    return 'Эта зона не поддерживает заголовок';
+  if (!slot.supports.subtitle && banner.subtitle)
+    return 'Эта зона не поддерживает подзаголовок';
+  if (!slot.supports.button && banner.buttonText)
+    return 'Эта зона не поддерживает кнопку';
+  if (slot.required.desktopImage && !banner.mediaId)
+    return 'Для этой зоны требуется изображение для компьютера';
+
+  const hasVisibleContent = Boolean(
+    (slot.supports.desktopImage && banner.mediaId) ||
+    (slot.supports.title && banner.title?.trim()) ||
+    (slot.supports.subtitle && banner.subtitle?.trim()) ||
+    (slot.supports.button && banner.buttonText?.trim()),
+  );
+  return hasVisibleContent
+    ? null
+    : 'Баннер не содержит элементов, отображаемых в этой зоне';
+}
+
+export function bannerGeometryError(
+  label: string,
+  dimensions: { width: number; height: number },
+  constraints: {
+    aspectRatio?: string;
+    minWidth?: number;
+    minHeight?: number;
+  },
+): string | null {
+  const expected = [
+    constraints.minWidth && constraints.minHeight
+      ? `не меньше ${constraints.minWidth} × ${constraints.minHeight} px`
+      : null,
+    constraints.aspectRatio ? `формат ${constraints.aspectRatio}` : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  if (
+    (constraints.minWidth && dimensions.width < constraints.minWidth) ||
+    (constraints.minHeight && dimensions.height < constraints.minHeight)
+  )
+    return `${label}: ожидается ${expected}, получено ${dimensions.width} × ${dimensions.height} px`;
+  if (constraints.aspectRatio) {
+    const [ratioWidth, ratioHeight] = constraints.aspectRatio
+      .split(':')
+      .map(Number);
+    const expectedRatio = ratioWidth / ratioHeight;
+    const actualRatio = dimensions.width / dimensions.height;
+    if (
+      !Number.isFinite(expectedRatio) ||
+      !Number.isFinite(actualRatio) ||
+      Math.abs(actualRatio - expectedRatio) / expectedRatio > 0.01
+    )
+      return `${label}: ожидается ${expected}, получено ${dimensions.width} × ${dimensions.height} px`;
+  }
+  return null;
 }
