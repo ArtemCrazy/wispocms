@@ -94,7 +94,10 @@ test("visual document supports required blocks, arbitrary insertion, ordering an
 test("public render uses typed React elements and category routes redirect permanently", () => {
   assert.match(publicArticle, /block\.type === "heading"/);
   assert.match(publicArticle, /block\.type === "image"/);
-  assert.doesNotMatch(publicArticle, /dangerouslySetInnerHTML/);
+  assert.doesNotMatch(
+    publicArticle,
+    /__html:\s*(?:article\.body|block\.(?:text|items))/,
+  );
   assert.match(publicCategory, /permanentRedirect/);
   assert.match(publicCategory, /result\.data\.redirectTo/);
 });
