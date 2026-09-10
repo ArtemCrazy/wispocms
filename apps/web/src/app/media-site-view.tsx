@@ -19,22 +19,26 @@ export function MediaSiteView({
 }) {
   const cards: Array<{
     id: "templates" | "banners" | "variables";
+    icon: "template" | "banners" | "company-data";
     title: string;
     description: string;
   }> = [
     {
       id: "templates",
+      icon: "template",
       title: "Шаблоны",
       description: "Страницы, общие области и системные шаблоны сайта.",
     },
     {
       id: "banners",
-      title: "Баннеры",
+      icon: "banners",
+      title: "Библиотека баннеров",
       description: "Единая библиотека баннеров без привязки к месту показа.",
     },
     {
       id: "variables",
-      title: "Переменные",
+      icon: "company-data",
+      title: "Библиотека переменных",
       description: "Повторно используемые значения для шаблонов и контента.",
     },
   ];
@@ -44,7 +48,7 @@ export function MediaSiteView({
     ["articles", "Статьи", "Материалы, категории и авторы"],
     ["layout", "Шапка и подвал", "Общие области и настройки поиска"],
     ["404", "404", "Системная страница и её SEO"],
-    ["privacy-policy", "Политика", "Юридический текст сайта"],
+    ["privacy-policy", "ПК", "Юридический текст сайта"],
   ];
 
   return (
@@ -63,27 +67,30 @@ export function MediaSiteView({
 
       <div className="media-site-cards">
         {cards.map((card) => (
-          <article className="media-site-card" key={card.id}>
-            <div>
-              <small>
-                {card.id === "templates" ? "СТРУКТУРА" : "БИБЛИОТЕКА"}
-              </small>
-              <h2>{card.title}</h2>
-              <p>{card.description}</p>
-            </div>
+          <button
+            aria-label={`Открыть раздел «${card.title}»`}
+            className="media-site-card"
+            key={card.id}
+            type="button"
+            onClick={() => onOpen(card.id)}
+          >
+            <span className="media-site-card-icon" aria-hidden="true">
+              <i className={`site-system-icon ${card.icon}`} />
+            </span>
+            <span className="media-site-card-copy">
+              <strong>{card.title}</strong>
+              <span>{card.description}</span>
+            </span>
             {card.id === "templates" ? (
-              <p className="media-template-summary">
+              <span className="media-template-summary">
                 {templates.map(([, label]) => label).join(" · ")}
-              </p>
+              </span>
             ) : null}
-            <button
-              className="media-card-open"
-              type="button"
-              onClick={() => onOpen(card.id)}
-            >
+            <span className="media-site-card-action">
               Открыть
-            </button>
-          </article>
+              <i className="weeek-icon weeek-icon-chevron" aria-hidden="true" />
+            </span>
+          </button>
         ))}
       </div>
     </section>
