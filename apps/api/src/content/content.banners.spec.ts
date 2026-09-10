@@ -37,11 +37,12 @@ describe('ContentService public article banners', () => {
       find: jest.fn().mockResolvedValue([article]),
     };
     const pages = { find: jest.fn().mockResolvedValue([]) };
+    const categories = { find: jest.fn().mockResolvedValue([]) };
     const banners = { find: jest.fn().mockResolvedValue(sidebarBanners) };
     const service = new ContentService(
       sites as never,
       {} as never,
-      {} as never,
+      categories as never,
       {} as never,
       articles as never,
       {} as never,
@@ -53,6 +54,7 @@ describe('ContentService public article banners', () => {
     const result = await service.getPublicArticle('WISPO-MEDIA', 'STORY');
 
     expect(result.banners).toEqual(sidebarBanners);
+    expect(result.categories).toEqual([]);
     expect(banners.find).toHaveBeenCalledWith({
       where: {
         siteId: site.id,

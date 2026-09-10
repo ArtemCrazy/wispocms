@@ -38,11 +38,12 @@ function setup(overrides: Record<string, unknown> = {}) {
       .mockImplementation((value: unknown) => Promise.resolve(value)),
   };
   const articles = { find: jest.fn().mockResolvedValue([]) };
+  const categories = { find: jest.fn().mockResolvedValue([]) };
   const banners = { find: jest.fn().mockResolvedValue([]) };
   const service = new ContentService(
     sites as never,
     {} as never,
-    {} as never,
+    categories as never,
     {} as never,
     articles as never,
     {} as never,
@@ -95,6 +96,7 @@ describe('404 system page contracts', () => {
     const result = await service.getPublicNotFoundPage('wispo-media');
     expect(result.active).toBe(true);
     expect(result.template.key).toBe('signal');
+    expect(result.categories).toEqual([]);
   });
 
   it('never leaks a saved draft template into the public fallback', async () => {
@@ -138,5 +140,6 @@ describe('404 system page contracts', () => {
     });
     const result = await service.getPagePreview('site-1', 'page-404', actor);
     expect(result.notFoundDisplay?.key).toBe('editorial');
+    expect(result.categories).toEqual([]);
   });
 });

@@ -24,12 +24,13 @@ describe('ContentService authenticated preview', () => {
     };
     const sites = { findOne: jest.fn().mockResolvedValue(site) };
     const articles = { findOne: jest.fn(), find: jest.fn() };
+    const categories = { find: jest.fn().mockResolvedValue([]) };
     const pages = { findOne: jest.fn(), find: jest.fn() };
     const banners = { find: jest.fn().mockResolvedValue([]) };
     const service = new ContentService(
       sites as never,
       {} as never,
-      {} as never,
+      categories as never,
       {} as never,
       articles as never,
       {} as never,
@@ -60,6 +61,7 @@ describe('ContentService authenticated preview', () => {
 
     expect(result.article).toBe(draft);
     expect(result.site.noIndex).toBe(true);
+    expect(result.categories).toEqual([]);
     expect(articles.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ id: 'article-id', siteId: 'site-id' }),
@@ -90,6 +92,7 @@ describe('ContentService authenticated preview', () => {
 
     expect(result.pages).toEqual([homepage, navigationPage]);
     expect(result.site.noIndex).toBe(true);
+    expect(result.categories).toEqual([]);
     expect(pages.find).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
