@@ -32,11 +32,15 @@ describe('ContentService Media site toolkit', () => {
       findOne: jest.fn().mockResolvedValue({
         id: 'banner-id',
         siteId: 'site-id',
+        placement: null,
         mediaId: null,
         mobileMediaId: null,
         title: 'Акция',
         subtitle: null,
         buttonText: null,
+        linkUrl: null,
+        sortOrder: 0,
+        isActive: true,
       }),
       create: jest.fn((value: Record<string, unknown>) => value),
       save: jest.fn((value: Record<string, unknown>) => Promise.resolve(value)),
@@ -268,6 +272,191 @@ describe('ContentService Media site toolkit', () => {
       'ожидается не меньше 1800 × 480 px, формат 15:4, получено 1200 × 400 px',
     );
     expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects removing the required desktop asset from an assigned active banner', async () => {
+    const { service, assignments, banners } = setup();
+    banners.findOne.mockResolvedValue({
+      id: 'banner-id',
+      siteId: 'site-id',
+      placement: null,
+      mediaId: 'media-id',
+      mobileMediaId: null,
+      title: null,
+      subtitle: null,
+      buttonText: null,
+      linkUrl: null,
+      sortOrder: 0,
+      isActive: true,
+    });
+    assignments.find.mockResolvedValue([
+      {
+        siteId: 'site-id',
+        pageId: 'page-id',
+        bannerId: 'banner-id',
+        zone: 'homepage_middle',
+        page: {
+          id: 'page-id',
+          siteId: 'site-id',
+          kind: 'homepage',
+          systemTemplateKey: 'skinova-home',
+          systemTemplateVersion: '1',
+        },
+      },
+    ]);
+
+    await expect(
+      service.updateBanner('site-id', 'banner-id', actor, { mediaId: null }),
+    ).rejects.toThrow('Для этой зоны требуется изображение для компьютера');
+    expect(banners.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects incompatible geometry when replacing an assigned banner asset', async () => {
+    const { service, assignments, banners, media } = setup();
+    banners.findOne.mockResolvedValue({
+      id: 'banner-id',
+      siteId: 'site-id',
+      placement: null,
+      mediaId: 'media-id',
+      mobileMediaId: null,
+      title: null,
+      subtitle: null,
+      buttonText: null,
+      linkUrl: null,
+      sortOrder: 0,
+      isActive: true,
+    });
+    assignments.find.mockResolvedValue([
+      {
+        siteId: 'site-id',
+        pageId: 'page-id',
+        bannerId: 'banner-id',
+        zone: 'homepage_middle',
+        page: {
+          id: 'page-id',
+          siteId: 'site-id',
+          kind: 'homepage',
+          systemTemplateKey: 'skinova-home',
+          systemTemplateVersion: '1',
+        },
+      },
+    ]);
+    media.findOne.mockResolvedValue({
+      id: 'bad-media-id',
+      workspaceId: 'workspace-id',
+      width: 1200,
+      height: 400,
+    });
+
+    await expect(
+      service.updateBanner('site-id', 'banner-id', actor, {
+        mediaId: 'bad-media-id',
+      }),
+    ).rejects.toThrow(
+      'ожидается не меньше 1800 × 480 px, формат 15:4, получено 1200 × 400 px',
+    );
+    expect(banners.save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['image-only', { title: null, mediaId: 'media-id' }],
+    ['empty', { title: null }],
+  ])('rejects making an assigned top banner %s', async (_name, update) => {
+    const { service, assignments, banners } = setup();
+    assignments.find.mockResolvedValue([
+      {
+        siteId: 'site-id',
+        pageId: 'page-id',
+        bannerId: 'banner-id',
+        zone: 'homepage_top',
+        page: {
+          id: 'page-id',
+          siteId: 'site-id',
+          kind: 'homepage',
+          systemTemplateKey: 'skinova-home',
+          systemTemplateVersion: '1',
+        },
+      },
+    ]);
+
+    await expect(
+      service.updateBanner('site-id', 'banner-id', actor, update),
+    ).rejects.toBeInstanceOf(Error);
+    expect(banners.save).not.toHaveBeenCalled();
+  });
+
+  it('accepts a compatible update to an assigned active banner', async () => {
+    const { service, assignments, banners } = setup();
+    assignments.find.mockResolvedValue([
+      {
+        siteId: 'site-id',
+        pageId: 'page-id',
+        bannerId: 'banner-id',
+        zone: 'homepage_top',
+        page: {
+          id: 'page-id',
+          siteId: 'site-id',
+          kind: 'homepage',
+          systemTemplateKey: 'skinova-home',
+          systemTemplateVersion: '1',
+        },
+      },
+    ]);
+
+    await expect(
+      service.updateBanner('site-id', 'banner-id', actor, {
+        title: 'Новая акция',
+      }),
+    ).resolves.toEqual(expect.objectContaining({ title: 'Новая акция' }));
+    expect(banners.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows an invalid assigned draft only while inactive and validates reactivation', async () => {
+    const { service, assignments, banners } = setup();
+    const existing = {
+      id: 'banner-id',
+      siteId: 'site-id',
+      placement: null,
+      mediaId: null,
+      mobileMediaId: null,
+      title: 'Акция',
+      subtitle: null,
+      buttonText: null,
+      linkUrl: null,
+      sortOrder: 0,
+      isActive: true,
+    };
+    banners.findOne.mockResolvedValue(existing);
+    assignments.find.mockResolvedValue([
+      {
+        siteId: 'site-id',
+        pageId: 'page-id',
+        bannerId: 'banner-id',
+        zone: 'homepage_top',
+        page: {
+          id: 'page-id',
+          siteId: 'site-id',
+          kind: 'homepage',
+          systemTemplateKey: 'skinova-home',
+          systemTemplateVersion: '1',
+        },
+      },
+    ]);
+
+    await expect(
+      service.updateBanner('site-id', 'banner-id', actor, {
+        title: null,
+        isActive: false,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ isActive: false, title: null }),
+    );
+    banners.save.mockClear();
+
+    await expect(
+      service.updateBanner('site-id', 'banner-id', actor, { isActive: true }),
+    ).rejects.toBeInstanceOf(Error);
+    expect(banners.save).not.toHaveBeenCalled();
   });
 
   it('keeps the legacy article sidebar placement while editing its content', async () => {

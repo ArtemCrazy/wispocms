@@ -1894,24 +1894,37 @@ export class ContentService {
     await this.validateBannerMedia(siteId, dto.mediaId, dto.mobileMediaId);
     if (!isAllowedBannerLink(dto.linkUrl))
       throw new BadRequestException('Недопустимый адрес баннера');
-    if (dto.name !== undefined) banner.name = dto.name.trim();
-    if (
-      site.siteType === SiteType.MEDIA &&
-      banner.placement !== BannerPlacement.ARTICLE_SIDEBAR
-    )
-      banner.placement = null;
-    else if (dto.placement !== undefined) banner.placement = dto.placement;
-    if (dto.title !== undefined) banner.title = dto.title?.trim() || null;
-    if (dto.subtitle !== undefined)
-      banner.subtitle = dto.subtitle?.trim() || null;
-    if (dto.buttonText !== undefined)
-      banner.buttonText = dto.buttonText?.trim() || null;
-    if (dto.linkUrl !== undefined) banner.linkUrl = dto.linkUrl?.trim() || null;
-    if (dto.mediaId !== undefined) banner.mediaId = dto.mediaId || null;
-    if (dto.mobileMediaId !== undefined)
-      banner.mobileMediaId = dto.mobileMediaId || null;
-    if (dto.sortOrder !== undefined) banner.sortOrder = dto.sortOrder;
-    if (dto.isActive !== undefined) banner.isActive = dto.isActive;
+    const prospective = {
+      ...banner,
+      ...(dto.name !== undefined && { name: dto.name.trim() }),
+      placement:
+        site.siteType === SiteType.MEDIA
+          ? banner.placement === BannerPlacement.ARTICLE_SIDEBAR
+            ? banner.placement
+            : null
+          : dto.placement !== undefined
+            ? dto.placement
+            : banner.placement,
+      ...(dto.title !== undefined && { title: dto.title?.trim() || null }),
+      ...(dto.subtitle !== undefined && {
+        subtitle: dto.subtitle?.trim() || null,
+      }),
+      ...(dto.buttonText !== undefined && {
+        buttonText: dto.buttonText?.trim() || null,
+      }),
+      ...(dto.linkUrl !== undefined && {
+        linkUrl: dto.linkUrl?.trim() || null,
+      }),
+      ...(dto.mediaId !== undefined && { mediaId: dto.mediaId || null }),
+      ...(dto.mobileMediaId !== undefined && {
+        mobileMediaId: dto.mobileMediaId || null,
+      }),
+      ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+      ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+    };
+    if (prospective.isActive)
+      await this.validateExistingBannerAssignments(siteId, prospective);
+    Object.assign(banner, prospective);
     return this.banners.save(banner);
   }
 
@@ -2091,6 +2104,30 @@ export class ContentService {
         candidate.constraints,
       );
       if (geometryError) throw new BadRequestException(geometryError);
+    }
+  }
+
+  private async validateExistingBannerAssignments(
+    siteId: string,
+    banner: BannerEntity,
+  ) {
+    const assignments =
+      (await this.bannerAssignments?.find({
+        where: { siteId, bannerId: banner.id },
+        relations: { page: true },
+      })) ?? [];
+    for (const assignment of assignments) {
+      const slot = bannerSlotsForPage(assignment.page).find(
+        (item) => item.id === assignment.zone,
+      );
+      if (!slot)
+        throw new BadRequestException(
+          `Зона ${assignment.zone} больше не объявлена шаблоном страницы`,
+        );
+      const compatibilityError = bannerSlotCompatibilityError(slot, banner);
+      if (compatibilityError)
+        throw new BadRequestException(`${slot.name}: ${compatibilityError}`);
+      await this.validateBannerSlotMedia(siteId, banner, slot);
     }
   }
 
