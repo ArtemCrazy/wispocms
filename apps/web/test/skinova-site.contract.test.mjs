@@ -90,6 +90,10 @@ test("approved Skinova assets and responsive styles are shipped", async () => {
     "utf8",
   );
   assert.match(styles, /@media \(max-width:\s*640px\)/);
+  assert.match(
+    styles,
+    /\.skinova-site \.sidebar \.category-nav \{ display:flex; \}/,
+  );
   assert.match(renderer, /family=Cormorant\+Garamond/);
   assert.match(renderer, /family=Onest/);
 });
