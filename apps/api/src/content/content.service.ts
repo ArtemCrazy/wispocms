@@ -59,6 +59,10 @@ import {
 } from '../platform/site-domain';
 import { buildPublicIntegrationManifest } from './public-integration-manifest';
 import {
+  bannerSlotsForPage,
+  isAllowedBannerLink,
+} from './banner-slot-registry';
+import {
   getSiteContentCapabilities,
   SiteContentModule,
   siteSupportsContentModule,
@@ -1844,6 +1848,8 @@ export class ContentService {
       SitePermission.EDIT_CONTENT,
     );
     await this.validateBannerMedia(siteId, dto.mediaId, dto.mobileMediaId);
+    if (!isAllowedBannerLink(dto.linkUrl))
+      throw new BadRequestException('Недопустимый адрес баннера');
     if (site.siteType !== SiteType.MEDIA && !dto.placement)
       throw new BadRequestException(
         'Для этого типа сайта требуется позиция баннера',
@@ -1883,6 +1889,8 @@ export class ContentService {
     });
     if (!banner) throw new NotFoundException('Баннер не найден');
     await this.validateBannerMedia(siteId, dto.mediaId, dto.mobileMediaId);
+    if (!isAllowedBannerLink(dto.linkUrl))
+      throw new BadRequestException('Недопустимый адрес баннера');
     if (dto.name !== undefined) banner.name = dto.name.trim();
     if (site.siteType === SiteType.MEDIA) banner.placement = null;
     else if (dto.placement !== undefined) banner.placement = dto.placement;
@@ -1964,10 +1972,15 @@ export class ContentService {
     dto: AssignPageBannerDto,
   ) {
     await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
-    if (!(await this.pages.existsBy({ id: pageId, siteId })))
-      throw new NotFoundException('Страница не найдена');
-    if (!(await this.banners.existsBy({ id: dto.bannerId, siteId })))
-      throw new NotFoundException('Баннер этого сайта не найден');
+    const slot = await this.requirePageBannerSlot(siteId, pageId, dto.zone);
+    const banner = await this.banners.findOne({
+      where: { id: dto.bannerId, siteId },
+    });
+    if (!banner) throw new NotFoundException('Баннер этого сайта не найден');
+    if (slot.supports.desktopImage && !banner.mediaId)
+      throw new BadRequestException(
+        'Для этой зоны требуется изображение для компьютера',
+      );
     if (!this.bannerAssignments)
       throw new ServiceUnavailableException('Назначения баннеров недоступны');
     await this.bannerAssignments.upsert(
@@ -1992,6 +2005,7 @@ export class ContentService {
     actor: Actor,
   ) {
     await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
+    await this.requirePageBannerSlot(siteId, pageId, zone);
     if (!this.bannerAssignments)
       throw new ServiceUnavailableException('Назначения баннеров недоступны');
     await this.bannerAssignments.delete({ siteId, pageId, zone });
@@ -2004,6 +2018,21 @@ export class ContentService {
       { zone },
     );
     return { pageId, zone };
+  }
+
+  private async requirePageBannerSlot(
+    siteId: string,
+    pageId: string,
+    zone: string,
+  ) {
+    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
+    if (!page) throw new NotFoundException('Страница не найдена');
+    const slot = bannerSlotsForPage(page).find((item) => item.id === zone);
+    if (!slot)
+      throw new BadRequestException(
+        'Шаблон страницы не содержит такой зоны баннера',
+      );
+    return slot;
   }
 
   private async variableUsageCount(siteId: string, identifier: string) {
@@ -3590,10 +3619,14 @@ export class ContentService {
 
   async listPages(siteId: string, actor: Actor) {
     await this.requireSite(siteId, actor);
-    return this.pages.find({
+    const pages = await this.pages.find({
       where: { siteId },
       order: { kind: 'ASC', title: 'ASC' },
     });
+    return pages.map((page) => ({
+      ...page,
+      bannerSlots: bannerSlotsForPage(page),
+    }));
   }
 
   async getNotFoundPage(siteId: string, actor: Actor) {

@@ -62,6 +62,15 @@ test("homepage and Media assignments override bundled fallback content", () => {
   assert.match(renderer, /homepageHero\?\.text \|\| hero\.excerpt/);
   assert.match(renderer, /article\.previewMedia \|\| article\.coverMedia/);
   assert.match(renderer, /consultation\?\.media && mediaBaseUrl/);
+  assert.match(renderer, /consultation\?\.mobileMedia && mediaBaseUrl/);
+  assert.match(renderer, /<picture className="consultation__media">/);
+  assert.match(
+    renderer,
+    /resolvePublicBannerHref\(siteSlug, banner\.linkUrl\)/,
+  );
+  assert.match(renderer, /assigned\s*\?\s*banner\?\.title/);
+  assert.match(renderer, /assigned\s*\?\s*banner\?\.subtitle/);
+  assert.match(renderer, /assigned\s*\?\s*banner\?\.buttonText/);
   assert.match(renderer, /banner\?\.title/);
   assert.match(renderer, /mediaFileSuffix/);
   assert.match(renderer, /displayTemplateConfig\?\.dateLabel/);
@@ -83,7 +92,8 @@ test("approved Skinova assets and responsive styles are shipped", async () => {
     "../public/skinova/assets/images/hero-bioprevitalization.webp",
     "../public/skinova/assets/images/article-biorevitalization-cover.webp",
     "../public/skinova/assets/icons/sprite.svg",
-  ]) await access(new URL(relative, import.meta.url));
+  ])
+    await access(new URL(relative, import.meta.url));
 
   const styles = await readFile(
     new URL("../public/skinova/styles.css", import.meta.url),

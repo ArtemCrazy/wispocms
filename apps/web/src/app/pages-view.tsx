@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArmaturexHomeEditor } from "./armaturex-home-editor";
+import type { BannerSlotDefinition } from "./banner-slot";
 import { isArmaturexHomepage } from "./homepage-templates";
 
 type BlockType = "hero" | "text" | "cta";
@@ -30,6 +31,7 @@ type PageItem = {
   updatedAt: string;
   systemTemplateKey: string | null;
   systemTemplateVersion: string | null;
+  bannerSlots?: BannerSlotDefinition[];
 };
 type MediaItem = { id: string; originalName: string; altText: string | null };
 
@@ -82,7 +84,12 @@ export function PagesView({
   openRequestId?: number;
   onDirtyChange?: (dirty: boolean) => void;
   onPagesChange?: (
-    pages: Array<Pick<PageItem, "id" | "title" | "slug" | "kind" | "status">>,
+    pages: Array<
+      Pick<
+        PageItem,
+        "id" | "title" | "slug" | "kind" | "status" | "bannerSlots"
+      >
+    >,
   ) => void;
   hideSeo?: boolean;
 }) {
@@ -122,12 +129,13 @@ export function PagesView({
     setPages(pageRows);
     setMedia(mediaRows);
     onPagesChange?.(
-      pageRows.map(({ id, title, slug, kind, status }) => ({
+      pageRows.map(({ id, title, slug, kind, status, bannerSlots }) => ({
         id,
         title,
         slug,
         kind,
         status,
+        bannerSlots,
       })),
     );
   }, [onPagesChange, siteId]);

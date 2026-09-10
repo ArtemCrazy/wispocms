@@ -2,9 +2,17 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
+import {
+  bannerAssetRequirement,
+  type BannerSlotDefinition,
+} from "./banner-slot";
 import type { MediaBanner } from "./media-banner-library-view";
 
-type Page = { id: string; kind: "homepage" | "page" };
+type Page = {
+  id: string;
+  kind: "homepage" | "page";
+  bannerSlots?: BannerSlotDefinition[];
+};
 type Assignment = {
   id: string;
   zone: string;
@@ -28,19 +36,6 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-const zones = [
-  {
-    id: "homepage_top",
-    name: "Верх главной",
-    hint: "Первый баннер после шапки",
-  },
-  {
-    id: "homepage_middle",
-    name: "Середина главной",
-    hint: "Баннер между блоками материалов",
-  },
-];
-
 export function PageBannerAssignmentsView({
   siteId,
   canEdit,
@@ -48,9 +43,10 @@ export function PageBannerAssignmentsView({
 }: {
   siteId: string;
   canEdit: boolean;
-  onOpenLibrary?: () => void;
+  onOpenLibrary?: (options?: { create?: boolean }) => void;
 }) {
   const [pageId, setPageId] = useState("");
+  const [slots, setSlots] = useState<BannerSlotDefinition[]>([]);
   const [banners, setBanners] = useState<MediaBanner[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [message, setMessage] = useState("");
@@ -60,8 +56,10 @@ export function PageBannerAssignmentsView({
       request<Page[]>(`/api/sites/${siteId}/content/pages`),
       request<MediaBanner[]>(`/api/sites/${siteId}/content/banners`),
     ]);
-    const homepageId = pages.find((item) => item.kind === "homepage")?.id ?? "";
+    const homepage = pages.find((item) => item.kind === "homepage");
+    const homepageId = homepage?.id ?? "";
     setPageId(homepageId);
+    setSlots(homepage?.bannerSlots ?? []);
     setBanners(bannerRows.filter((item) => item.isActive));
     setAssignments(
       homepageId
@@ -131,14 +129,28 @@ export function PageBannerAssignmentsView({
           <h2>Баннеры главной</h2>
         </div>
         {onOpenLibrary ? (
-          <button type="button" className="secondary" onClick={onOpenLibrary}>
-            Открыть библиотеку
-          </button>
+          <div className="media-editor-actions">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => onOpenLibrary()}
+            >
+              Открыть библиотеку
+            </button>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => onOpenLibrary({ create: true })}
+              >
+                + Создать баннер
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </header>
       {message ? <p className="inline-message">{message}</p> : null}
       <div className="banner-zone-list">
-        {zones.map((zone) => {
+        {slots.map((zone) => {
           const assigned = assignments.find((item) => item.zone === zone.id);
           return (
             <article key={zone.id}>
@@ -155,9 +167,17 @@ export function PageBannerAssignmentsView({
                 )}
               </div>
               <div>
-                <small>{zone.hint}</small>
+                <small>{zone.description}</small>
                 <h3>{zone.name}</h3>
                 <strong>{assigned?.banner.name ?? "Баннер не назначен"}</strong>
+                <p className="banner-zone-requirement">
+                  Компьютер: {bannerAssetRequirement(zone.desktop)}
+                  <br />
+                  Телефон: {bannerAssetRequirement(zone.mobile)}
+                  {zone.mobile.fallbackToDesktop
+                    ? " · запасной вариант — изображение для компьютера"
+                    : ""}
+                </p>
               </div>
               <label>
                 Выбрать или заменить
@@ -178,6 +198,11 @@ export function PageBannerAssignmentsView({
           );
         })}
       </div>
+      {!slots.length ? (
+        <p className="inline-message">
+          В текущем шаблоне главной нет баннерных зон.
+        </p>
+      ) : null}
     </section>
   );
 }

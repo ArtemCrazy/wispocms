@@ -248,8 +248,12 @@ function Dashboard({
       slug: string;
       kind: "homepage" | "page";
       status: "draft" | "published";
+      bannerSlots?: import("./banner-slot").BannerSlotDefinition[];
     }>
   >([]);
+  const [bannerLibraryContext, setBannerLibraryContext] = useState<{
+    createKey?: number;
+  } | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     null,
   );
@@ -361,12 +365,13 @@ function Dashboard({
         .then((rows) =>
           setStructurePages(
             (rows as typeof structurePages).map(
-              ({ id, title, slug, kind, status }) => ({
+              ({ id, title, slug, kind, status, bannerSlots }) => ({
                 id,
                 title,
                 slug,
                 kind,
                 status,
+                bannerSlots,
               }),
             ),
           ),
@@ -402,6 +407,7 @@ function Dashboard({
       !confirmDiscardChanges()
     )
       return false;
+    if (view !== "banners") setBannerLibraryContext(null);
     navigationSequence.current += 1;
     setActiveView(view);
     setNavigationTarget(
@@ -506,6 +512,9 @@ function Dashboard({
         ]
       : [];
   });
+  const hasBannerSlots = structurePages.some(
+    (page) => page.kind === "homepage" && Boolean(page.bannerSlots?.length),
+  );
   const siteMenus: Record<string, SiteMenuItem[]> = {
     media: [
       { id: "site", icon: "template", label: "Сайт" },
@@ -556,17 +565,20 @@ function Dashboard({
     siteMenus[site?.siteType ?? "media"] ?? siteMenus.media
   ).filter(
     (item) =>
-      !["settings", "integration"].includes(item.id) || canManageSettings,
+      (item.id !== "banners" || hasBannerSlots) &&
+      (!["settings", "integration"].includes(item.id) || canManageSettings),
   );
-  const siteTopTabs: Array<{
-    id: View;
-    label: string;
-    icon: "template" | "categories" | "banners";
-  }> = [
-    { id: "homepage", label: "Шаблон", icon: "template" },
-    { id: "categories", label: "Категории", icon: "categories" },
-    { id: "banners", label: "Баннеры", icon: "banners" },
-  ];
+  const siteTopTabs = (
+    [
+      { id: "homepage", label: "Шаблон", icon: "template" },
+      { id: "categories", label: "Категории", icon: "categories" },
+      { id: "banners", label: "Баннеры", icon: "banners" },
+    ] satisfies Array<{
+      id: View;
+      label: string;
+      icon: "template" | "categories" | "banners";
+    }>
+  ).filter((item) => item.id !== "banners" || hasBannerSlots);
   const siteSidebarGroups = [
     {
       label: "Сайт",
@@ -1860,6 +1872,7 @@ function Dashboard({
         ) : activeView === "site" && site?.siteType === "media" ? (
           <MediaSiteView
             siteName={site.name}
+            showBanners={hasBannerSlots}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "templates" && site?.siteType === "media" ? (
@@ -1892,7 +1905,13 @@ function Dashboard({
               canEditPublished={canEditPublished}
               onDirtyChange={setHasUnsavedChanges}
               onPagesChange={setStructurePages}
-              onOpenBanners={() => navigateTo("banners")}
+              hasBannerSlots={hasBannerSlots}
+              onOpenBanners={(options) => {
+                setBannerLibraryContext({
+                  createKey: options?.create ? Date.now() : undefined,
+                });
+                navigateTo("banners");
+              }}
             />
           ) : (
             <PagesView
@@ -1928,11 +1947,20 @@ function Dashboard({
             focusRequestId={navigationTarget?.requestId}
           />
         ) : activeView === "banners" ? (
-          site?.siteType === "media" ? (
+          !hasBannerSlots ? null : site?.siteType === "media" ? (
             <MediaBannerLibraryView
               siteId={site.id}
               siteName={site.name}
               canEdit={canEdit}
+              createOnOpenKey={bannerLibraryContext?.createKey}
+              onBackToAssignments={
+                bannerLibraryContext
+                  ? () => {
+                      setBannerLibraryContext(null);
+                      navigateTo("homepage");
+                    }
+                  : undefined
+              }
             />
           ) : (
             <SiteBannersView

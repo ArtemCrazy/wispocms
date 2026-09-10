@@ -45,6 +45,10 @@ const assignments = await readFile(
   new URL("../src/app/page-banner-assignments-view.tsx", import.meta.url),
   "utf8",
 );
+const bannerSlots = await readFile(
+  new URL("../../api/src/content/banner-slot-registry.ts", import.meta.url),
+  "utf8",
+);
 const variables = await readFile(
   new URL("../src/app/site-variables-view.tsx", import.meta.url),
   "utf8",
@@ -86,13 +90,7 @@ test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(templates, /headerTemplateKey/);
   assert.match(templates, /footerTemplateKey/);
   assert.doesNotMatch(templates, /current: "Общий шаблон сайта"/);
-  for (const label of [
-    "Главная",
-    "Статьи",
-    "Шапка и подвал",
-    "404",
-    "ПК",
-  ])
+  for (const label of ["Главная", "Статьи", "Шапка и подвал", "404", "ПК"])
     assert.match(mediaSite, new RegExp(label));
 });
 
@@ -104,8 +102,12 @@ test("Media Home owns exactly banner assignments, SEO, and page history", () => 
   assert.doesNotMatch(home, /\["template", "Шаблон"\]|<PagesView/);
   assert.doesNotMatch(home, /Категории|Рубрики|Авторы/);
   assert.match(home, /kind: "homepage"/);
-  assert.match(assignments, /homepage_top/);
-  assert.match(assignments, /homepage_middle/);
+  assert.match(assignments, /homepage\?\.bannerSlots \?\? \[\]/);
+  assert.doesNotMatch(assignments, /const zones/);
+  assert.match(bannerSlots, /id: 'homepage_top'/);
+  assert.match(bannerSlots, /id: 'homepage_middle'/);
+  assert.match(bannerSlots, /minWidth: 1800/);
+  assert.match(bannerSlots, /minHeight: 480/);
   assert.match(home, /ogImageMediaId/);
   assert.match(home, /structuredData/);
   assert.match(home, /redirects/);
@@ -116,6 +118,9 @@ test("Media libraries expose universal autosaved banners, protected variables, a
   assert.doesNotMatch(bannerLibrary, /name="placement"/);
   assert.match(bannerLibrary, /mobileMediaId/);
   assert.match(bannerLibrary, /buttonText/);
+  assert.match(bannerLibrary, /Зоны текущего шаблона/);
+  assert.match(bannerLibrary, /Предпросмотр содержимого/);
+  assert.doesNotMatch(bannerLibrary, /Сохранить/);
   assert.match(variables, /usageCount/);
   assert.match(variables, /\{\{\$\{item\.identifier\}\}\}/);
   assert.match(layout, /\["search", "Поиск"\]/);

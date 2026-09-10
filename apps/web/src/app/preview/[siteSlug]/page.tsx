@@ -350,11 +350,13 @@ export default async function PublicSitePage({
               className="public-banner-mobile"
             />
           ) : null}
-          <span className="public-banner-copy">
-            <strong>{banner.title || "Подробнее"}</strong>
-            {banner.subtitle ? <small>{banner.subtitle}</small> : null}
-          </span>
-          <b>{banner.buttonText || "Подробнее"} →</b>
+          {banner.title || banner.subtitle ? (
+            <span className="public-banner-copy">
+              {banner.title ? <strong>{banner.title}</strong> : null}
+              {banner.subtitle ? <small>{banner.subtitle}</small> : null}
+            </span>
+          ) : null}
+          {banner.buttonText ? <b>{banner.buttonText} →</b> : null}
         </a>
       ))}
 
@@ -426,11 +428,13 @@ export default async function PublicSitePage({
                 className="public-banner-mobile"
               />
             ) : null}
-            <span className="public-banner-copy">
-              <strong>{banner.title || "Подробнее"}</strong>
-              {banner.subtitle ? <small>{banner.subtitle}</small> : null}
-            </span>
-            <b>{banner.buttonText || "Подробнее"} →</b>
+            {banner.title || banner.subtitle ? (
+              <span className="public-banner-copy">
+                {banner.title ? <strong>{banner.title}</strong> : null}
+                {banner.subtitle ? <small>{banner.subtitle}</small> : null}
+              </span>
+            ) : null}
+            {banner.buttonText ? <b>{banner.buttonText} →</b> : null}
           </a>
         ))}
 

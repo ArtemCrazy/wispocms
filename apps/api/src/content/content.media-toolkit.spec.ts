@@ -16,8 +16,28 @@ describe('ContentService Media site toolkit', () => {
         siteType: SiteType.MEDIA,
       }),
     };
-    const pages = { existsBy: jest.fn().mockResolvedValue(true) };
-    const banners = { existsBy: jest.fn().mockResolvedValue(true) };
+    const pages = {
+      existsBy: jest.fn().mockResolvedValue(true),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'page-id',
+        siteId: 'site-id',
+        kind: 'homepage',
+        systemTemplateKey: 'skinova-home',
+        systemTemplateVersion: '1',
+      }),
+    };
+    const banners = {
+      existsBy: jest.fn().mockResolvedValue(true),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'banner-id',
+        siteId: 'site-id',
+        mediaId: 'media-id',
+      }),
+      create: jest.fn((value: Record<string, unknown>) => value),
+      save: jest.fn(),
+    };
+    const media = { existsBy: jest.fn().mockResolvedValue(true) };
     const assignments = {
       upsert: jest.fn().mockResolvedValue(undefined),
       find: jest.fn().mockResolvedValue([]),
@@ -45,7 +65,7 @@ describe('ContentService Media site toolkit', () => {
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
+      media as never,
       pages as never,
       banners as never,
       undefined,
@@ -58,7 +78,15 @@ describe('ContentService Media site toolkit', () => {
       undefined,
       pageActivities as never,
     );
-    return { service, assignments, variables, pageActivities };
+    return {
+      service,
+      assignments,
+      variables,
+      pageActivities,
+      banners,
+      media,
+      pages,
+    };
   }
 
   it('upserts one banner per page zone and records page history', async () => {
@@ -79,6 +107,82 @@ describe('ContentService Media site toolkit', () => {
       ['pageId', 'zone'],
     );
     expect(pageActivities.save).toHaveBeenCalled();
+  });
+
+  it('returns developer-owned slots with the bound homepage', async () => {
+    const { service, pages } = setup();
+    const page = {
+      id: 'page-id',
+      siteId: 'site-id',
+      kind: 'homepage',
+      systemTemplateKey: 'skinova-home',
+      systemTemplateVersion: '1',
+    };
+    pages.find.mockResolvedValue([page]);
+    const result = await service.listPages('site-id', actor);
+    expect(result[0]?.id).toBe('page-id');
+    expect(result[0]?.bannerSlots.map((slot) => slot.id)).toEqual([
+      'homepage_top',
+      'homepage_middle',
+    ]);
+  });
+
+  it('rejects a zone not declared by the bound page template', async () => {
+    const { service, assignments } = setup();
+    await expect(
+      service.assignPageBanner('site-id', 'page-id', actor, {
+        zone: 'invented_zone',
+        bannerId: 'banner-id',
+      }),
+    ).rejects.toThrow('Шаблон страницы не содержит такой зоны баннера');
+    expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects assigning a banner owned by another site', async () => {
+    const { service, assignments, banners } = setup();
+    banners.findOne.mockResolvedValue(null);
+    await expect(
+      service.assignPageBanner('site-id', 'page-id', actor, {
+        zone: 'homepage_middle',
+        bannerId: 'foreign-banner-id',
+      }),
+    ).rejects.toThrow('Баннер этого сайта не найден');
+    expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
+  it('requires a desktop asset when the declared slot requires one', async () => {
+    const { service, assignments, banners } = setup();
+    banners.findOne.mockResolvedValue({
+      id: 'banner-id',
+      siteId: 'site-id',
+      mediaId: null,
+    });
+    await expect(
+      service.assignPageBanner('site-id', 'page-id', actor, {
+        zone: 'homepage_middle',
+        bannerId: 'banner-id',
+      }),
+    ).rejects.toThrow('Для этой зоны требуется изображение для компьютера');
+    expect(assignments.upsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects foreign media and executable links before banner creation', async () => {
+    const { service, media, banners } = setup();
+    media.existsBy.mockResolvedValue(false);
+    await expect(
+      service.createBanner('site-id', actor, {
+        name: 'Чужой файл',
+        mediaId: 'foreign-media-id',
+      }),
+    ).rejects.toThrow('Изображение рабочего пространства не найдено');
+    media.existsBy.mockResolvedValue(true);
+    await expect(
+      service.createBanner('site-id', actor, {
+        name: 'Опасная ссылка',
+        linkUrl: 'javascript:alert(1)',
+      }),
+    ).rejects.toThrow('Недопустимый адрес баннера');
+    expect(banners.save).not.toHaveBeenCalled();
   });
 
   it('protects variables used in SEO, structured data, or template config by scanning complete rows', async () => {

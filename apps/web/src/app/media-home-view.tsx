@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageBannerAssignmentsView } from "./page-banner-assignments-view";
+import type { BannerSlotDefinition } from "./banner-slot";
 
 type HomeTab = "banners" | "seo" | "history";
 type HomePage = {
@@ -330,6 +331,7 @@ export function MediaHomeView({
   siteId,
   canEdit,
   onOpenBanners,
+  hasBannerSlots = true,
 }: {
   siteId: string;
   siteName: string;
@@ -345,11 +347,13 @@ export function MediaHomeView({
       slug: string;
       kind: "homepage" | "page";
       status: "draft" | "published";
+      bannerSlots?: BannerSlotDefinition[];
     }>,
   ) => void;
-  onOpenBanners?: () => void;
+  onOpenBanners?: (options?: { create?: boolean }) => void;
+  hasBannerSlots?: boolean;
 }) {
-  const [tab, setTab] = useState<HomeTab>("banners");
+  const [tab, setTab] = useState<HomeTab>(hasBannerSlots ? "banners" : "seo");
   return (
     <section className="media-module-shell media-home-module-shell">
       <header className="media-module-heading">
@@ -366,19 +370,21 @@ export function MediaHomeView({
             ["seo", "SEO"],
             ["history", "История"],
           ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            className={tab === id ? "active" : ""}
-            aria-current={tab === id ? "page" : undefined}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
+        )
+          .filter(([id]) => id !== "banners" || hasBannerSlots)
+          .map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={tab === id ? "active" : ""}
+              aria-current={tab === id ? "page" : undefined}
+              onClick={() => setTab(id)}
+            >
+              {label}
+            </button>
+          ))}
       </nav>
-      {tab === "banners" ? (
+      {tab === "banners" && hasBannerSlots ? (
         <PageBannerAssignmentsView
           siteId={siteId}
           canEdit={canEdit}

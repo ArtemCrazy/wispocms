@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { resolvePublicBannerHref } from "./public-banner-link";
 
 const ASSET_ROOT = "/skinova/assets";
 
@@ -61,6 +62,7 @@ export type SkinovaBanner = {
   buttonText: string | null;
   linkUrl: string | null;
   media?: { id: string; altText: string | null } | null;
+  mobileMedia?: { id: string; altText: string | null } | null;
 };
 
 type SkinovaGlobals = {
@@ -252,9 +254,42 @@ function SkinovaChrome({
   const [promoVisible, setPromoVisible] = useState(true);
   const [consultationOpen, setConsultationOpen] = useState(false);
   const openConsultation = () => setConsultationOpen(true);
-  const promoTitle = promo?.title || "Бесплатная консультация косметолога";
-  const promoSubtitle =
-    promo?.subtitle || "Фотодинамическая терапия Heleo4 за 0 ₽";
+  const promoTitle = promo
+    ? promo.title
+    : "Бесплатная консультация косметолога";
+  const promoSubtitle = promo
+    ? promo.subtitle
+    : "Фотодинамическая терапия Heleo4 за 0 ₽";
+  const promoButton = promo ? promo.buttonText : "Записаться";
+  const promoContent = (
+    <>
+      {promoTitle ? (
+        <p className="promo__lead">
+          {icon("gift")}
+          <span>{promoTitle}</span>
+        </p>
+      ) : null}
+      {promoSubtitle ? (
+        <>
+          <span className="promo__divider" aria-hidden="true" />
+          <p className="promo__offer">{promoSubtitle}</p>
+        </>
+      ) : null}
+      {promoButton ? (
+        promo ? (
+          <span className="button button--small">{promoButton}</span>
+        ) : (
+          <button
+            className="button button--small"
+            type="button"
+            onClick={openConsultation}
+          >
+            {promoButton}
+          </button>
+        )
+      ) : null}
+    </>
+  );
 
   return (
     <div className="skinova-site">
@@ -275,19 +310,16 @@ function SkinovaChrome({
       {promoVisible ? (
         <div className="promo">
           <div className="promo__inner shell">
-            <p className="promo__lead">
-              {icon("gift")}
-              <span>{promoTitle}</span>
-            </p>
-            <span className="promo__divider" aria-hidden="true" />
-            <p className="promo__offer">{promoSubtitle}</p>
-            <button
-              className="button button--small"
-              type="button"
-              onClick={openConsultation}
-            >
-              {promo?.buttonText || "Записаться"}
-            </button>
+            {promo?.linkUrl ? (
+              <a
+                className="promo__banner"
+                href={resolvePublicBannerHref(siteSlug, promo.linkUrl)}
+              >
+                {promoContent}
+              </a>
+            ) : (
+              <div className="promo__banner">{promoContent}</div>
+            )}
             <button
               className="icon-button promo__close"
               type="button"
@@ -538,12 +570,7 @@ function SkinovaCard({
       >
         <span className="article-card__media">
           <img
-            src={articleImage(
-              article,
-              index,
-              mediaBaseUrl,
-              mediaFileSuffix,
-            )}
+            src={articleImage(article, index, mediaBaseUrl, mediaFileSuffix)}
             alt={article.title}
             width="900"
             height="600"
@@ -572,6 +599,90 @@ function SkinovaCard({
         </div>
       </Link>
     </article>
+  );
+}
+
+function SkinovaConsultationBanner({
+  banner,
+  desktopImage,
+  mobileImage,
+  siteSlug,
+  onOpenFallback,
+}: {
+  banner: SkinovaBanner | null;
+  desktopImage: string;
+  mobileImage: string;
+  siteSlug: string;
+  onOpenFallback: () => void;
+}) {
+  const assigned = Boolean(banner);
+  const title = assigned ? banner?.title : "Консультация косметолога";
+  const subtitle = assigned
+    ? banner?.subtitle
+    : "Разберитесь, какие процедуры подходят именно вашей коже. Подберём индивидуальный план на консультации.";
+  const buttonText = assigned
+    ? banner?.buttonText
+    : "Записаться на консультацию";
+  const content = (
+    <>
+      <picture className="consultation__media">
+        {mobileImage !== desktopImage ? (
+          <source media="(max-width: 640px)" srcSet={mobileImage} />
+        ) : null}
+        <img
+          src={desktopImage}
+          alt=""
+          width="1800"
+          height="480"
+          loading="lazy"
+        />
+      </picture>
+      <div className="consultation__content">
+        {title || subtitle ? (
+          <>
+            <span className="consultation__icon">
+              {icon("calendar", "icon icon--large")}
+            </span>
+            <div>
+              {title ? <h2>{title}</h2> : null}
+              {subtitle ? <p>{subtitle}</p> : null}
+            </div>
+          </>
+        ) : null}
+        {buttonText ? (
+          assigned ? (
+            <span className="button consultation__button">{buttonText}</span>
+          ) : (
+            <button
+              className="button consultation__button"
+              type="button"
+              onClick={onOpenFallback}
+            >
+              {buttonText}
+            </button>
+          )
+        ) : null}
+      </div>
+    </>
+  );
+
+  if (assigned && banner?.linkUrl)
+    return (
+      <a
+        className="consultation consultation--assigned"
+        href={resolvePublicBannerHref(siteSlug, banner.linkUrl)}
+        aria-label={title || banner.title || banner.subtitle || "Баннер"}
+      >
+        {content}
+      </a>
+    );
+  return (
+    <aside
+      className={`consultation${assigned ? " consultation--assigned" : ""}`}
+      aria-label={title || "Баннер"}
+    >
+      {content}
+    </aside>
   );
 }
 
@@ -621,6 +732,10 @@ export function SkinovaHome({
     consultation?.media && mediaBaseUrl
       ? `${mediaBaseUrl}/${consultation.media.id}${mediaFileSuffix || ""}`
       : `${ASSET_ROOT}/images/consultation-banner.webp`;
+  const consultationMobileImage =
+    consultation?.mobileMedia && mediaBaseUrl
+      ? `${mediaBaseUrl}/${consultation.mobileMedia.id}${mediaFileSuffix || ""}`
+      : consultationImage;
   const [query, setQuery] = useState("");
   const visibleCards = useMemo(
     () =>
@@ -709,37 +824,13 @@ export function SkinovaHome({
                 />
               ))}
             </div>
-            <aside
-              className="consultation"
-              aria-label="Консультация косметолога"
-            >
-              <img
-                src={consultationImage}
-                alt=""
-                width="1800"
-                height="480"
-                loading="lazy"
-              />
-              <div className="consultation__content">
-                <span className="consultation__icon">
-                  {icon("calendar", "icon icon--large")}
-                </span>
-                <div>
-                  <h2>{consultation?.title || "Консультация косметолога"}</h2>
-                  <p>
-                    {consultation?.subtitle ||
-                      "Разберитесь, какие процедуры подходят именно вашей коже. Подберём индивидуальный план на консультации."}
-                  </p>
-                </div>
-                <button
-                  className="button consultation__button"
-                  type="button"
-                  onClick={openConsultation}
-                >
-                  {consultation?.buttonText || "Записаться на консультацию"}
-                </button>
-              </div>
-            </aside>
+            <SkinovaConsultationBanner
+              banner={consultation}
+              desktopImage={consultationImage}
+              mobileImage={consultationMobileImage}
+              siteSlug={siteSlug}
+              onOpenFallback={openConsultation}
+            />
             <div className="article-grid article-grid--more">
               {visibleCards.slice(3).map((article, index) => (
                 <SkinovaCard
@@ -882,12 +973,7 @@ export function SkinovaArticlePage({
                   src={
                     article.slug === "biorevitalizatsiya"
                       ? `${ASSET_ROOT}/images/article-biorevitalization-cover.webp`
-                      : articleImage(
-                          article,
-                          0,
-                          mediaBaseUrl,
-                          mediaFileSuffix,
-                        )
+                      : articleImage(article, 0, mediaBaseUrl, mediaFileSuffix)
                   }
                   alt={article.title}
                   width="1536"
@@ -1103,9 +1189,7 @@ export function SkinovaSystemPage({
       {() => (
         <main className={`skinova-system-content ${kind}`} id="main-content">
           <span>
-            {kind === "not-found"
-              ? "Ошибка навигации"
-              : "Правовая информация"}
+            {kind === "not-found" ? "Ошибка навигации" : "Правовая информация"}
           </span>
           {kind === "not-found" ? <strong>404</strong> : null}
           <h1>{title}</h1>

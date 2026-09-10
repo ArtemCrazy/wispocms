@@ -2,6 +2,10 @@
 
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  bannerAssetRequirement,
+  type BannerSlotDefinition,
+} from "./banner-slot";
 
 type MediaItem = { id: string; originalName: string };
 type LinkItem = {
@@ -10,6 +14,7 @@ type LinkItem = {
   name?: string;
   slug: string;
   kind?: "homepage" | "page";
+  bannerSlots?: BannerSlotDefinition[];
 };
 export type MediaBanner = {
   id: string;
@@ -58,10 +63,14 @@ export function MediaBannerLibraryView({
   siteId,
   siteName,
   canEdit = true,
+  onBackToAssignments,
+  createOnOpenKey,
 }: {
   siteId?: string;
   siteName?: string;
   canEdit?: boolean;
+  onBackToAssignments?: () => void;
+  createOnOpenKey?: number;
 }) {
   const [items, setItems] = useState<MediaBanner[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
@@ -72,7 +81,9 @@ export function MediaBannerLibraryView({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [slots, setSlots] = useState<BannerSlotDefinition[]>([]);
   const hydrated = useRef(false);
+  const createdForKey = useRef<number | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -85,8 +96,26 @@ export function MediaBannerLibraryView({
         request<LinkItem[]>(`/api/sites/${siteId}/content/categories`),
       ],
     );
-    setItems(banners);
+    let loadedBanners = banners;
+    if (
+      createOnOpenKey !== undefined &&
+      createdForKey.current !== createOnOpenKey &&
+      canEdit
+    ) {
+      const created = await request<MediaBanner>(
+        `/api/sites/${siteId}/content/banners`,
+        {
+          method: "POST",
+          body: JSON.stringify({ name: "Новый баннер", isActive: true }),
+        },
+      );
+      createdForKey.current = createOnOpenKey;
+      loadedBanners = [created, ...banners];
+      setMessage("Баннер создан — изменения дальше сохраняются автоматически");
+    }
+    setItems(loadedBanners);
     setMedia(mediaRows);
+    setSlots(pages.find((item) => item.kind === "homepage")?.bannerSlots ?? []);
     setLinks([
       ...pages.map((item) => ({
         value: item.kind === "homepage" ? "/" : `/pages/${item.slug}`,
@@ -102,7 +131,9 @@ export function MediaBannerLibraryView({
       })),
     ]);
     const active =
-      banners.find((item) => item.id === selectedId) ?? banners[0] ?? null;
+      loadedBanners.find((item) => item.id === selectedId) ??
+      loadedBanners[0] ??
+      null;
     if (active) {
       setSelectedId(active.id);
       setDraft({
@@ -117,7 +148,7 @@ export function MediaBannerLibraryView({
       });
     }
     hydrated.current = true;
-  }, [selectedId, siteId]);
+  }, [canEdit, createOnOpenKey, selectedId, siteId]);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -234,7 +265,37 @@ export function MediaBannerLibraryView({
           Универсальная библиотека {siteName ? `сайта «${siteName}»` : "сайта"}.
           Место показа назначается на странице.
         </p>
+        {onBackToAssignments ? (
+          <button
+            type="button"
+            className="secondary"
+            onClick={onBackToAssignments}
+          >
+            ← Вернуться к назначениям
+          </button>
+        ) : null}
       </header>
+      {slots.length ? (
+        <section
+          className="media-banner-slot-guide"
+          aria-label="Требования зон шаблона"
+        >
+          <strong>Зоны текущего шаблона</strong>
+          {slots.map((slot) => (
+            <div key={slot.id}>
+              <b>{slot.name}</b>
+              <span>{slot.description}</span>
+              <small>Компьютер: {bannerAssetRequirement(slot.desktop)}</small>
+              <small>
+                Телефон: {bannerAssetRequirement(slot.mobile)}
+                {slot.mobile.fallbackToDesktop
+                  ? " · без отдельного файла используется изображение для компьютера"
+                  : ""}
+              </small>
+            </div>
+          ))}
+        </section>
+      ) : null}
       <div className="media-list-toolbar">
         <span>{items.length} баннеров</span>
         {canEdit ? (
@@ -291,6 +352,51 @@ export function MediaBannerLibraryView({
                 onChange={(event) => field("name", event.target.value)}
               />
             </label>
+            <section
+              className="media-banner-previews"
+              aria-label="Предпросмотр баннера"
+            >
+              <strong>Предпросмотр содержимого</strong>
+              <div className="media-banner-preview-grid">
+                <figure>
+                  <figcaption>Компьютер</figcaption>
+                  {draft.mediaId ? (
+                    <Image
+                      src={`/api/sites/${siteId}/content/media/${draft.mediaId}/file`}
+                      width={600}
+                      height={160}
+                      alt=""
+                    />
+                  ) : (
+                    <span>Изображение не выбрано</span>
+                  )}
+                </figure>
+                <figure className="mobile">
+                  <figcaption>Телефон</figcaption>
+                  {draft.mobileMediaId || draft.mediaId ? (
+                    <Image
+                      src={`/api/sites/${siteId}/content/media/${draft.mobileMediaId || draft.mediaId}/file`}
+                      width={320}
+                      height={180}
+                      alt=""
+                    />
+                  ) : (
+                    <span>Изображение не выбрано</span>
+                  )}
+                </figure>
+              </div>
+              {draft.title || draft.subtitle || draft.buttonText ? (
+                <div className="media-banner-copy-preview">
+                  {draft.title ? <b>{draft.title}</b> : null}
+                  {draft.subtitle ? <span>{draft.subtitle}</span> : null}
+                  {draft.buttonText ? <em>{draft.buttonText}</em> : null}
+                </div>
+              ) : (
+                <small>
+                  Текстовые элементы пусты — на сайте будет только изображение.
+                </small>
+              )}
+            </section>
             <label>
               Изображение для компьютера
               <select

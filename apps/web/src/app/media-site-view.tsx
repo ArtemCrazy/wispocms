@@ -13,35 +13,39 @@ type MediaSiteTarget =
 export function MediaSiteView({
   siteName,
   onOpen,
+  showBanners = true,
 }: {
   siteName?: string;
   onOpen: (target: MediaSiteTarget) => void;
+  showBanners?: boolean;
 }) {
-  const cards: Array<{
-    id: "templates" | "banners" | "variables";
-    icon: "template" | "banners" | "company-data";
-    title: string;
-    description: string;
-  }> = [
-    {
-      id: "templates",
-      icon: "template",
-      title: "Шаблоны",
-      description: "Страницы, общие области и системные шаблоны сайта.",
-    },
-    {
-      id: "banners",
-      icon: "banners",
-      title: "Библиотека баннеров",
-      description: "Единая библиотека баннеров без привязки к месту показа.",
-    },
-    {
-      id: "variables",
-      icon: "company-data",
-      title: "Библиотека переменных",
-      description: "Повторно используемые значения для шаблонов и контента.",
-    },
-  ];
+  const cards = (
+    [
+      {
+        id: "templates",
+        icon: "template",
+        title: "Шаблоны",
+        description: "Страницы, общие области и системные шаблоны сайта.",
+      },
+      {
+        id: "banners",
+        icon: "banners",
+        title: "Библиотека баннеров",
+        description: "Единая библиотека баннеров без привязки к месту показа.",
+      },
+      {
+        id: "variables",
+        icon: "company-data",
+        title: "Библиотека переменных",
+        description: "Повторно используемые значения для шаблонов и контента.",
+      },
+    ] satisfies Array<{
+      id: "templates" | "banners" | "variables";
+      icon: "template" | "banners" | "company-data";
+      title: string;
+      description: string;
+    }>
+  ).filter((card) => card.id !== "banners" || showBanners);
 
   const templates: Array<[MediaSiteTarget, string, string]> = [
     ["homepage", "Главная", "Баннеры, SEO и история страницы"],
