@@ -33,6 +33,10 @@ const mediaSite = await readFile(
   new URL("../src/app/media-site-view.tsx", import.meta.url),
   "utf8",
 );
+const globalStyles = await readFile(
+  new URL("../src/app/globals.css", import.meta.url),
+  "utf8",
+);
 const bannerLibrary = await readFile(
   new URL("../src/app/media-banner-library-view.tsx", import.meta.url),
   "utf8",
@@ -64,6 +68,14 @@ test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(shell, /slug: "privacy-policy"[\s\S]*?label: "ПК"/);
   assert.match(shell, /id: "header", icon: "header", label: "Шапка"/);
   assert.match(shell, /id: "footer", icon: "footer", label: "Подвал"/);
+  assert.match(
+    globalStyles,
+    /\.media-site-cards\s*\{[^}]*grid-template-columns: 1fr;/,
+  );
+  assert.match(
+    globalStyles,
+    /\.media-site-card\s*\{[^}]*grid-template-columns: 44px minmax\(0, 1fr\) auto;/,
+  );
   assert.match(shell, /activeView === "templates"/);
   assert.match(shell, /activeView === "homepage-template"/);
   assert.match(templates, /Текущий:/);
