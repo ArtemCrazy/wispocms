@@ -19,7 +19,11 @@ import {
   NotFoundTemplate,
   type NotFoundTemplateData,
 } from "../../../../not-found-template";
-import { SkinovaSystemPage } from "../../../../skinova-site";
+import {
+  SkinovaSystemPage,
+  type SkinovaBanner,
+  type SkinovaCategory,
+} from "../../../../skinova-site";
 import { SKINOVA_HEADER_TEMPLATE_KEY } from "../../../../skinova-template";
 
 type PageBlock = {
@@ -61,6 +65,8 @@ type PublicPageData = {
     structuredData: Record<string, unknown> | null;
   };
   pages: Array<{ id: string; title: string; slug: string }>;
+  banners: SkinovaBanner[];
+  categories: SkinovaCategory[];
   privacyDisplay: {
     key: "system-policy" | "compact-policy";
     version: string;
@@ -227,6 +233,10 @@ export default async function PublicInnerPage({
             "Проверьте адрес или вернитесь на главную страницу."
           }
           kind={page.slug === "404" ? "not-found" : "privacy"}
+          categories={data.categories}
+          banners={data.banners}
+          globals={site.globalData}
+          layout={site.layoutSettings}
         />
       </>
     );

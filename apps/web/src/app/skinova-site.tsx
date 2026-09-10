@@ -1045,53 +1045,76 @@ export function SkinovaSystemPage({
   title,
   text,
   kind,
+  categories,
+  banners,
+  globals,
+  layout,
 }: {
   siteSlug: string;
   title: string;
   text: string;
   kind: "privacy" | "not-found";
+  categories: SkinovaCategory[];
+  banners: SkinovaBanner[];
+  globals?: SkinovaGlobals;
+  layout?: SkinovaLayout;
 }) {
   const lines = text
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const body: ReactNode[] = [];
+  let list: string[] = [];
+  const flushList = () => {
+    if (!list.length) return;
+    body.push(
+      <ul key={`list-${body.length}`}>
+        {list.map((item, index) => (
+          <li key={`${index}-${item}`}>{item}</li>
+        ))}
+      </ul>,
+    );
+    list = [];
+  };
+  lines.forEach((line, index) => {
+    if (line.startsWith("- ")) {
+      list.push(line.slice(2));
+      return;
+    }
+    flushList();
+    if (line.startsWith("## "))
+      body.push(<h2 key={`${index}-${line}`}>{line.slice(3)}</h2>);
+    else if (line.startsWith("# ")) return;
+    else if (line.startsWith("> "))
+      body.push(<aside key={`${index}-${line}`}>{line.slice(2)}</aside>);
+    else body.push(<p key={`${index}-${line}`}>{line}</p>);
+  });
+  flushList();
+  const promo =
+    banners.find((item) => item.placement === "homepage_top") ?? null;
   return (
-    <div className="skinova-site skinova-system-page">
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Onest:wght@400;500;600&display=swap"
-        rel="stylesheet"
-      />
-      <link rel="stylesheet" href="/skinova/styles.css" />
-      <header className="masthead">
-        <div className="masthead__inner shell">
-          <Link className="brand" href={`/preview/${siteSlug}`}>
-            <img
-              src={`${ASSET_ROOT}/logo.svg`}
-              width="196"
-              height="64"
-              alt="Skinova"
-            />
+    <SkinovaChrome
+      siteSlug={siteSlug}
+      categories={categories}
+      globals={globals}
+      layout={layout}
+      promo={promo}
+    >
+      {() => (
+        <main className={`skinova-system-content ${kind}`} id="main-content">
+          <span>
+            {kind === "not-found"
+              ? "Ошибка навигации"
+              : "Правовая информация"}
+          </span>
+          {kind === "not-found" ? <strong>404</strong> : null}
+          <h1>{title}</h1>
+          {body}
+          <Link className="button" href={`/preview/${siteSlug}`}>
+            Вернуться на главную
           </Link>
-        </div>
-      </header>
-      <main className={`skinova-system-content ${kind}`} id="main-content">
-        <span>
-          {kind === "not-found" ? "Ошибка навигации" : "Правовая информация"}
-        </span>
-        {kind === "not-found" ? <strong>404</strong> : null}
-        <h1>{title}</h1>
-        {lines.map((line, index) =>
-          line.startsWith("## ") ? (
-            <h2 key={index}>{line.slice(3)}</h2>
-          ) : line.startsWith("# ") ? null : (
-            <p key={index}>{line}</p>
-          ),
-        )}
-        <Link className="button" href={`/preview/${siteSlug}`}>
-          Вернуться на главную
-        </Link>
-      </main>
-    </div>
+        </main>
+      )}
+    </SkinovaChrome>
   );
 }

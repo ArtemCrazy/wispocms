@@ -858,7 +858,7 @@ export class ContentService {
       throw new NotFoundException('Материал не найден');
     if (!this.categoryIsPublic(article.category, true))
       throw new NotFoundException('Материал не найден');
-    const [related, pages, banners] = await Promise.all([
+    const [related, pages, banners, categories] = await Promise.all([
       this.lifecycle?.resolveRelatedArticles(site.id, article.id, true) ??
         Promise.resolve([]),
       this.pages.find({
@@ -877,6 +877,14 @@ export class ContentService {
           placement: BannerPlacement.ARTICLE_SIDEBAR,
         },
         relations: { media: true },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      }),
+      this.categories.find({
+        where: {
+          siteId: site.id,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
+        },
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
@@ -905,6 +913,9 @@ export class ContentService {
       pages,
       banners,
       related,
+      categories: categories.filter((category) =>
+        this.categoryIsPublic(category),
+      ),
     });
   }
 
@@ -1035,21 +1046,41 @@ export class ContentService {
         };
       throw new NotFoundException('Страница не найдена');
     }
-    const pages = await this.pages.find({
-      where: {
-        siteId: site.id,
-        status: PageStatus.PUBLISHED,
-        kind: PageKind.PAGE,
-      },
-      select: { id: true, title: true, slug: true },
-      order: { title: 'ASC' },
-    });
+    const [pages, banners, categories] = await Promise.all([
+      this.pages.find({
+        where: {
+          siteId: site.id,
+          status: PageStatus.PUBLISHED,
+          kind: PageKind.PAGE,
+        },
+        select: { id: true, title: true, slug: true },
+        order: { title: 'ASC' },
+      }),
+      this.banners.find({
+        where: { siteId: site.id, isActive: true },
+        relations: { media: true },
+        order: { placement: 'ASC', sortOrder: 'ASC' },
+      }),
+      this.categories.find({
+        where: {
+          siteId: site.id,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
+        },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      }),
+    ]);
     const privacyDisplay =
       page.slug === 'privacy-policy'
         ? await this.privacyPolicyStates?.findOne({
             where: { siteId: site.id, pageId: page.id },
           })
         : null;
+    const pageBanners = await this.pageBannerData(
+      site,
+      page ?? undefined,
+      banners,
+    );
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
@@ -1065,6 +1096,10 @@ export class ContentService {
       },
       page,
       pages,
+      banners: pageBanners.banners,
+      categories: categories.filter((category) =>
+        this.categoryIsPublic(category),
+      ),
       privacyDisplay: privacyDisplay
         ? {
             key: privacyDisplay.publishedDisplayTemplateKey ?? 'system-policy',
@@ -1080,7 +1115,7 @@ export class ContentService {
       where: { slug: siteSlug.trim().toLowerCase(), isActive: true },
     });
     if (!site) throw new NotFoundException('Сайт не найден');
-    const [page, pages] = await Promise.all([
+    const [page, pages, banners, categories] = await Promise.all([
       this.pages.findOne({ where: { siteId: site.id, slug: '404' } }),
       this.pages.find({
         where: {
@@ -1091,6 +1126,19 @@ export class ContentService {
         select: { id: true, title: true, slug: true },
         order: { title: 'ASC' },
       }),
+      this.banners.find({
+        where: { siteId: site.id, isActive: true },
+        relations: { media: true },
+        order: { placement: 'ASC', sortOrder: 'ASC' },
+      }),
+      this.categories.find({
+        where: {
+          siteId: site.id,
+          publicationState: PublicationState.PUBLISHED,
+          deletedAt: IsNull(),
+        },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      }),
     ]);
     const active = page?.status === PageStatus.PUBLISHED;
     const template = active
@@ -1099,6 +1147,11 @@ export class ContentService {
           page.publishedSystemTemplateVersion,
         )
       : getNotFoundTemplate();
+    const pageBanners = await this.pageBannerData(
+      site,
+      page ?? undefined,
+      banners,
+    );
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
@@ -1108,6 +1161,10 @@ export class ContentService {
         layoutSettings: site.layoutSettings,
       },
       pages: pages.filter((item) => item.slug !== '404'),
+      banners: pageBanners.banners,
+      categories: categories.filter((category) =>
+        this.categoryIsPublic(category),
+      ),
       active,
       template,
     });
@@ -1127,7 +1184,7 @@ export class ContentService {
       },
     });
     if (!article) throw new NotFoundException('Материал не найден');
-    const [related, pages, banners] = await Promise.all([
+    const [related, pages, banners, categories] = await Promise.all([
       this.lifecycle?.resolveRelatedArticles(siteId, article.id, false) ??
         Promise.resolve([]),
       this.pages.find({
@@ -1146,6 +1203,10 @@ export class ContentService {
           placement: BannerPlacement.ARTICLE_SIDEBAR,
         },
         relations: { media: true },
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
+      }),
+      this.categories.find({
+        where: { siteId, deletedAt: IsNull() },
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
@@ -1173,6 +1234,7 @@ export class ContentService {
       pages,
       banners,
       related,
+      categories,
     };
   }
 

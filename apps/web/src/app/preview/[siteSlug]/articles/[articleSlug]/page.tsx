@@ -69,6 +69,7 @@ type Article = {
 };
 type PublicBanner = {
   id: string;
+  placement: string | null;
   title: string | null;
   subtitle: string | null;
   buttonText: string | null;
@@ -92,6 +93,7 @@ type ArticleData = {
   pages: Array<{ id: string; title: string; slug: string }>;
   related: Article[];
   banners: PublicBanner[];
+  categories: SkinovaCategory[];
   redirectTo: string | null;
 };
 
@@ -195,7 +197,7 @@ export default async function PublicArticlePage({
     permanentRedirect(
       `/preview/${encodeURIComponent(siteSlug)}/articles/${encodeURIComponent(data.redirectTo)}`,
     );
-  const { article, site, pages, related, banners } = data;
+  const { article, site, pages, related, banners, categories } = data;
   const mediaUrl = (mediaId: string) =>
     cmsPreview
       ? `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/media/${mediaId}/file`
@@ -209,24 +211,6 @@ export default async function PublicArticlePage({
     article.displayTemplateKey === SKINOVA_ARTICLE_TEMPLATE_KEY &&
     article.displayTemplateVersion === SKINOVA_TEMPLATE_VERSION
   ) {
-    const categoryRows = [article, ...related]
-      .map((item) => item.category)
-      .filter((category): category is NonNullable<Article["category"]> =>
-        Boolean(category?.name),
-      );
-    const categories = Array.from(
-      new Map(
-        categoryRows.map((category) => [
-          category.id || category.slug || category.name,
-          {
-            id: category.id || category.slug || category.name,
-            name: category.name,
-            slug: category.slug || "",
-            parentId: null,
-          },
-        ]),
-      ).values(),
-    ) as SkinovaCategory[];
     return (
       <>
         {cmsPreview ? (

@@ -8,6 +8,8 @@ describe('ImportSkinovaMediaSite1789848000000', () => {
         calls.push({ sql, parameters });
         if (sql.includes('FROM "workspaces"')) return [];
         if (sql.includes('FROM "sites"')) return [];
+        if (sql.includes('FROM "privacy_legal_models"'))
+          return [{ id: 'legal-model-id', version: 'approved-v1' }];
         return [];
       }),
     };
@@ -20,12 +22,22 @@ describe('ImportSkinovaMediaSite1789848000000', () => {
     expect(parameters).toContain('Skinova');
     expect(parameters).toContain('skinova');
     expect(sql).toContain('"site_type"');
+    expect(sql).toMatch(/NULL, 'media', \$5, \$6, true,/);
+    expect(sql).toContain('INSERT INTO "privacy_policy_states"');
+    expect(parameters).toContain('approved-v1');
+    expect(parameters).toContainEqual(
+      expect.stringContaining('## 11. Контакты'),
+    );
+    expect(parameters).toContainEqual(
+      expect.stringContaining('## 6. Передача третьим лицам'),
+    );
     expect(parameters).toContain('skinova-home');
     expect(parameters).toContain('skinova-article');
     expect(parameters).toContain('skinova-category');
     expect(parameters).toContain('skinova-header');
     expect(parameters).toContain('skinova-footer');
     expect(sql).toContain('"page_banner_assignments"');
+    expect(sql).toContain("($1, $4, $5, 'homepage_top')");
     expect(sql).toContain('"site_variables"');
     expect(sql).toContain('"site_search_settings"');
     expect(sql).toContain('"article_activities"');
