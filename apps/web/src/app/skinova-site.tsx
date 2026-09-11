@@ -233,6 +233,83 @@ function SkinovaConsultationForm({ siteSlug }: { siteSlug: string }) {
   );
 }
 
+export function SkinovaPromoBanner({
+  banner,
+  siteSlug,
+  onOpenFallback,
+  onClose,
+}: {
+  banner: SkinovaBanner | null;
+  siteSlug: string;
+  onOpenFallback: () => void;
+  onClose?: () => void;
+}) {
+  const assigned = Boolean(banner);
+  const title = assigned
+    ? banner?.title
+    : "Бесплатная консультация косметолога";
+  const subtitle = assigned
+    ? banner?.subtitle
+    : "Фотодинамическая терапия Heleo4 за 0 ₽";
+  const buttonText = assigned ? banner?.buttonText : "Записаться";
+  const content = (
+    <>
+      {title ? (
+        <p className="promo__lead">
+          {icon("gift")}
+          <span>{title}</span>
+        </p>
+      ) : null}
+      {subtitle ? (
+        <>
+          <span className="promo__divider" aria-hidden="true" />
+          <p className="promo__offer">{subtitle}</p>
+        </>
+      ) : null}
+      {buttonText ? (
+        assigned ? (
+          <span className="button button--small">{buttonText}</span>
+        ) : (
+          <button
+            className="button button--small"
+            type="button"
+            onClick={onOpenFallback}
+          >
+            {buttonText}
+          </button>
+        )
+      ) : null}
+    </>
+  );
+
+  return (
+    <div className="promo">
+      <div className="promo__inner shell">
+        {assigned && banner?.linkUrl ? (
+          <a
+            className="promo__banner"
+            href={resolvePublicBannerHref(siteSlug, banner.linkUrl)}
+          >
+            {content}
+          </a>
+        ) : (
+          <div className="promo__banner">{content}</div>
+        )}
+        {onClose ? (
+          <button
+            className="icon-button promo__close"
+            type="button"
+            aria-label="Закрыть предложение"
+            onClick={onClose}
+          >
+            {icon("close")}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function SkinovaChrome({
   siteSlug,
   categories,
@@ -254,42 +331,6 @@ function SkinovaChrome({
   const [promoVisible, setPromoVisible] = useState(true);
   const [consultationOpen, setConsultationOpen] = useState(false);
   const openConsultation = () => setConsultationOpen(true);
-  const promoTitle = promo
-    ? promo.title
-    : "Бесплатная консультация косметолога";
-  const promoSubtitle = promo
-    ? promo.subtitle
-    : "Фотодинамическая терапия Heleo4 за 0 ₽";
-  const promoButton = promo ? promo.buttonText : "Записаться";
-  const promoContent = (
-    <>
-      {promoTitle ? (
-        <p className="promo__lead">
-          {icon("gift")}
-          <span>{promoTitle}</span>
-        </p>
-      ) : null}
-      {promoSubtitle ? (
-        <>
-          <span className="promo__divider" aria-hidden="true" />
-          <p className="promo__offer">{promoSubtitle}</p>
-        </>
-      ) : null}
-      {promoButton ? (
-        promo ? (
-          <span className="button button--small">{promoButton}</span>
-        ) : (
-          <button
-            className="button button--small"
-            type="button"
-            onClick={openConsultation}
-          >
-            {promoButton}
-          </button>
-        )
-      ) : null}
-    </>
-  );
 
   return (
     <div className="skinova-site">
@@ -308,28 +349,12 @@ function SkinovaChrome({
         Перейти к материалам
       </a>
       {promoVisible ? (
-        <div className="promo">
-          <div className="promo__inner shell">
-            {promo?.linkUrl ? (
-              <a
-                className="promo__banner"
-                href={resolvePublicBannerHref(siteSlug, promo.linkUrl)}
-              >
-                {promoContent}
-              </a>
-            ) : (
-              <div className="promo__banner">{promoContent}</div>
-            )}
-            <button
-              className="icon-button promo__close"
-              type="button"
-              aria-label="Закрыть предложение"
-              onClick={() => setPromoVisible(false)}
-            >
-              {icon("close")}
-            </button>
-          </div>
-        </div>
+        <SkinovaPromoBanner
+          banner={promo ?? null}
+          siteSlug={siteSlug}
+          onOpenFallback={openConsultation}
+          onClose={() => setPromoVisible(false)}
+        />
       ) : null}
       <header className="masthead">
         <div className="masthead__inner shell">
@@ -602,7 +627,7 @@ function SkinovaCard({
   );
 }
 
-function SkinovaConsultationBanner({
+export function SkinovaConsultationBanner({
   banner,
   desktopImage,
   mobileImage,
@@ -625,18 +650,20 @@ function SkinovaConsultationBanner({
     : "Записаться на консультацию";
   const content = (
     <>
-      <picture className="consultation__media">
-        {mobileImage !== desktopImage ? (
-          <source media="(max-width: 640px)" srcSet={mobileImage} />
-        ) : null}
-        <img
-          src={desktopImage}
-          alt=""
-          width="1800"
-          height="480"
-          loading="lazy"
-        />
-      </picture>
+      {desktopImage ? (
+        <picture className="consultation__media">
+          {mobileImage && mobileImage !== desktopImage ? (
+            <source media="(max-width: 640px)" srcSet={mobileImage} />
+          ) : null}
+          <img
+            src={desktopImage}
+            alt=""
+            width="1800"
+            height="480"
+            loading="lazy"
+          />
+        </picture>
+      ) : null}
       <div className="consultation__content">
         {title || subtitle ? (
           <>
@@ -682,6 +709,73 @@ function SkinovaConsultationBanner({
       aria-label={title || "Баннер"}
     >
       {content}
+    </aside>
+  );
+}
+
+export function SkinovaArticleBanner({
+  banner,
+  mediaBaseUrl,
+  mediaFileSuffix,
+  onOpenFallback,
+  useDefaultAsset = true,
+  useDefaultContent = true,
+}: {
+  banner: SkinovaBanner | null;
+  mediaBaseUrl?: string;
+  mediaFileSuffix?: string;
+  onOpenFallback: () => void;
+  useDefaultAsset?: boolean;
+  useDefaultContent?: boolean;
+}) {
+  const assigned = Boolean(banner);
+  const image =
+    banner?.media && mediaBaseUrl
+      ? `${mediaBaseUrl}/${banner.media.id}${mediaFileSuffix || ""}`
+      : useDefaultAsset
+        ? `${ASSET_ROOT}/images/article-vials-cta.webp`
+        : null;
+  const title = assigned
+    ? banner?.title ||
+      (useDefaultContent
+        ? "Подберём препарат и схему процедуры после консультации специалиста"
+        : null)
+    : "Подберём препарат и схему процедуры после консультации специалиста";
+  const buttonText = assigned
+    ? banner?.buttonText ||
+      (useDefaultContent ? "Записаться на консультацию" : null)
+    : "Записаться на консультацию";
+  const subtitle = assigned
+    ? banner?.subtitle ||
+      (useDefaultContent
+        ? "Есть противопоказания. Необходима консультация специалиста."
+        : null)
+    : "Есть противопоказания. Необходима консультация специалиста.";
+
+  return (
+    <aside className="article-ad">
+      {image ? (
+        <img src={image} alt="" width="840" height="1050" />
+      ) : null}
+      {title || buttonText ? (
+        <div>
+          {title ? <h2>{title}</h2> : null}
+          {buttonText ? (
+            <button
+              className="button button--small"
+              type="button"
+              onClick={onOpenFallback}
+            >
+              {buttonText}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {subtitle ? (
+        <p>
+          <span>{subtitle}</span>
+        </p>
+      ) : null}
     </aside>
   );
 }
@@ -993,37 +1087,12 @@ export function SkinovaArticlePage({
                     </a>
                   ))}
               </nav>
-              <aside className="article-ad">
-                <img
-                  src={
-                    banner?.media && mediaBaseUrl
-                      ? `${mediaBaseUrl}/${banner.media.id}${mediaFileSuffix || ""}`
-                      : `${ASSET_ROOT}/images/article-vials-cta.webp`
-                  }
-                  alt=""
-                  width="840"
-                  height="1050"
-                />
-                <div>
-                  <h2>
-                    {banner?.title ||
-                      "Подберём препарат и схему процедуры после консультации специалиста"}
-                  </h2>
-                  <button
-                    className="button button--small"
-                    type="button"
-                    onClick={openConsultation}
-                  >
-                    {banner?.buttonText || "Записаться на консультацию"}
-                  </button>
-                </div>
-                <p>
-                  <span>
-                    {banner?.subtitle ||
-                      "Есть противопоказания. Необходима консультация специалиста."}
-                  </span>
-                </p>
-              </aside>
+              <SkinovaArticleBanner
+                banner={banner ?? null}
+                mediaBaseUrl={mediaBaseUrl}
+                mediaFileSuffix={mediaFileSuffix}
+                onOpenFallback={openConsultation}
+              />
             </aside>
           </div>
           {related.length ? (

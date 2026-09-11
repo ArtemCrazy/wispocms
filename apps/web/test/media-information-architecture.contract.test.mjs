@@ -118,8 +118,10 @@ test("Media libraries expose universal autosaved banners, protected variables, a
   assert.doesNotMatch(bannerLibrary, /name="placement"/);
   assert.match(bannerLibrary, /mobileMediaId/);
   assert.match(bannerLibrary, /buttonText/);
-  assert.match(bannerLibrary, /Зоны текущего шаблона/);
-  assert.match(bannerLibrary, /Предпросмотр содержимого/);
+  assert.doesNotMatch(bannerLibrary, /Зоны текущего шаблона/);
+  assert.doesNotMatch(bannerLibrary, /Предпросмотр содержимого/);
+  assert.match(bannerLibrary, /SkinovaBannerPreviewFrame/);
+  assert.match(bannerLibrary, /Показать как/);
   assert.doesNotMatch(bannerLibrary, /Сохранить/);
   assert.match(variables, /usageCount/);
   assert.match(variables, /\{\{\$\{item\.identifier\}\}\}/);

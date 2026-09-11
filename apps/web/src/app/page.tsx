@@ -253,6 +253,7 @@ function Dashboard({
   >([]);
   const [bannerLibraryContext, setBannerLibraryContext] = useState<{
     createKey?: number;
+    previewRenderer?: string;
   } | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
     null,
@@ -1909,6 +1910,7 @@ function Dashboard({
               onOpenBanners={(options) => {
                 setBannerLibraryContext({
                   createKey: options?.create ? Date.now() : undefined,
+                  previewRenderer: options?.previewRenderer,
                 });
                 navigateTo("banners");
               }}
@@ -1953,6 +1955,7 @@ function Dashboard({
               siteName={site.name}
               canEdit={canEdit}
               createOnOpenKey={bannerLibraryContext?.createKey}
+              initialPreviewRenderer={bannerLibraryContext?.previewRenderer}
               onBackToAssignments={
                 bannerLibraryContext
                   ? () => {

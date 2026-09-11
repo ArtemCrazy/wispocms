@@ -44,7 +44,10 @@ export function PageBannerAssignmentsView({
 }: {
   siteId: string;
   canEdit: boolean;
-  onOpenLibrary?: (options?: { create?: boolean }) => void;
+  onOpenLibrary?: (options?: {
+    create?: boolean;
+    previewRenderer?: string;
+  }) => void;
 }) {
   const [pageId, setPageId] = useState("");
   const [slots, setSlots] = useState<BannerSlotDefinition[]>([]);
@@ -180,32 +183,50 @@ export function PageBannerAssignmentsView({
                     : ""}
                 </p>
               </div>
-              <label>
-                Выбрать или заменить
-                <select
-                  value={assigned?.bannerId ?? ""}
-                  disabled={!canEdit}
-                  onChange={(event) => void assign(zone.id, event.target.value)}
-                >
-                  <option value="">Не назначен</option>
-                  {banners.map((banner) => {
-                    const incompatibility = bannerCompatibilityError(
-                      zone,
-                      banner,
-                    );
-                    return (
-                      <option
-                        key={banner.id}
-                        value={banner.id}
-                        disabled={Boolean(incompatibility)}
-                      >
-                        {banner.name}
-                        {incompatibility ? ` — ${incompatibility}` : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
+              <div className="banner-zone-control">
+                <label>
+                  Выбрать или заменить
+                  <select
+                    value={assigned?.bannerId ?? ""}
+                    disabled={!canEdit}
+                    onChange={(event) =>
+                      void assign(zone.id, event.target.value)
+                    }
+                  >
+                    <option value="">Не назначен</option>
+                    {banners.map((banner) => {
+                      const incompatibility = bannerCompatibilityError(
+                        zone,
+                        banner,
+                      );
+                      return (
+                        <option
+                          key={banner.id}
+                          value={banner.id}
+                          disabled={Boolean(incompatibility)}
+                        >
+                          {banner.name}
+                          {incompatibility ? ` — ${incompatibility}` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+                {canEdit && onOpenLibrary ? (
+                  <button
+                    type="button"
+                    className="secondary banner-zone-create"
+                    onClick={() =>
+                      onOpenLibrary({
+                        create: true,
+                        previewRenderer: zone.renderer,
+                      })
+                    }
+                  >
+                    + Создать для этой зоны
+                  </button>
+                ) : null}
+              </div>
             </article>
           );
         })}

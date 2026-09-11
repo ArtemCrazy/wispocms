@@ -350,7 +350,10 @@ export function MediaHomeView({
       bannerSlots?: BannerSlotDefinition[];
     }>,
   ) => void;
-  onOpenBanners?: (options?: { create?: boolean }) => void;
+  onOpenBanners?: (options?: {
+    create?: boolean;
+    previewRenderer?: string;
+  }) => void;
   hasBannerSlots?: boolean;
 }) {
   const [tab, setTab] = useState<HomeTab>(hasBannerSlots ? "banners" : "seo");
