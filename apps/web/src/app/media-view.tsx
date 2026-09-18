@@ -246,7 +246,7 @@ export function MediaView({
     <section className="media-section">
       <div className="section-heading">
         <div>
-          <h1>Контентный центр</h1>
+          <h1>Медиатека</h1>
           <p>
             Общая библиотека рабочего пространства {workspaceName ?? "не выбрано"}
             {siteName ? ` · загрузка из сайта ${siteName}` : ""}

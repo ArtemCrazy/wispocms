@@ -30,13 +30,14 @@ test("ecommerce is labeled consistently and reuses the corporate page shell", as
   assert.match(shell, /siteMenus\.ecommerce = siteMenus\.corporate/);
 });
 
-test("the site shell names the workspace library Content Center", async () => {
+test("the site media library stays separate from the workspace AI content center", async () => {
   const [page, media] = await Promise.all([
     source("../src/app/page.tsx"),
     source("../src/app/media-view.tsx"),
   ]);
-  assert.match(page, /label: "Контентный центр"/);
-  assert.match(media, /<h1>Контентный центр<\/h1>/);
+  assert.match(page, /label: "Медиатека"/);
+  assert.match(page, /<ContentCenterView/);
+  assert.match(media, /<h1>Медиатека<\/h1>/);
   assert.match(media, /Общая библиотека рабочего пространства/);
   assert.match(media, /Источ(?:ник|ный сайт)/);
 });

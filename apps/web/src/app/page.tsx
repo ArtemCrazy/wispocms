@@ -38,6 +38,7 @@ import { MediaBannerLibraryView } from "./media-banner-library-view";
 import { SiteVariablesView } from "./site-variables-view";
 import { MediaLayoutView } from "./media-layout-view";
 import { MediaTemplatesView } from "./media-templates-view";
+import { ContentCenterView } from "./content-center/content-center-view";
 
 type SessionData = {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -229,6 +230,7 @@ function Dashboard({
     | "layout"
     | "variables"
     | "media"
+    | "content-center"
     | "globals"
     | "seo"
     | "integration"
@@ -329,6 +331,16 @@ function Dashboard({
       const url = new URL(window.location.href);
       const siteId = url.searchParams.get("site");
       const view = url.searchParams.get("view");
+      if (view === "content-center") {
+        const workspaceId = url.searchParams.get("workspace");
+        if (session.workspaces.some((item) => item.id === workspaceId)) {
+          setSelectedWorkspaceId(workspaceId);
+          setSelectedSiteId(null);
+          setActiveView("content-center");
+          setNavigationTarget(null);
+        }
+        return;
+      }
       if (!siteId || !view) return;
       const restorableViews: View[] = [
         "site",
@@ -409,6 +421,11 @@ function Dashboard({
     )
       return false;
     if (view !== "banners") setBannerLibraryContext(null);
+    if (activeView === "content-center" && view !== "content-center") {
+      const url = new URL(window.location.href);
+      for (const key of ["cc", "ccVersion", "workspace", "view"]) url.searchParams.delete(key);
+      window.history.replaceState({}, "", url);
+    }
     navigationSequence.current += 1;
     setActiveView(view);
     setNavigationTarget(
@@ -435,6 +452,7 @@ function Dashboard({
         "workspaces",
         "team",
         "audit",
+        "content-center",
       ].includes(view)
     ) {
       const url = new URL(window.location.href);
@@ -466,7 +484,7 @@ function Dashboard({
   const isSiteNavigationActive =
     Boolean(selectedSiteId) &&
     !isPlatform &&
-    !["projects", "all-projects", "global-search"].includes(activeView);
+    !["projects", "all-projects", "global-search", "content-center"].includes(activeView);
   type SiteMenuItem = {
     id: View;
     icon: string;
@@ -525,7 +543,7 @@ function Dashboard({
       { id: "layout", icon: "header", label: "Шапка и подвал" },
       { id: "banners", icon: "banners", label: "Баннеры" },
       { id: "variables", icon: "company-data", label: "Переменные" },
-      { id: "media", icon: "content-center", label: "Контентный центр" },
+      { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Общие данные" },
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
@@ -544,7 +562,7 @@ function Dashboard({
       { id: "banners", icon: "banners", label: "Баннеры" },
       { id: "header", icon: "header", label: "Шапка" },
       { id: "footer", icon: "footer", label: "Подвал" },
-      { id: "media", icon: "content-center", label: "Контентный центр" },
+      { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Данные компании" },
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
@@ -553,7 +571,7 @@ function Dashboard({
     ],
     landing: [
       { id: "homepage", icon: "home", label: "Структура лендинга" },
-      { id: "media", icon: "content-center", label: "Контентный центр" },
+      { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Контакты" },
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
@@ -991,7 +1009,7 @@ function Dashboard({
 
   function openProject(workspaceId: string) {
     if (
-      (workspaceId !== selectedWorkspaceId || selectedSiteId !== null) &&
+      (workspaceId !== selectedWorkspaceId || selectedSiteId !== null || activeView !== "projects") &&
       hasUnsavedChanges &&
       !confirmDiscardChanges()
     )
@@ -1031,6 +1049,20 @@ function Dashboard({
     url.searchParams.set("site", siteId);
     url.searchParams.set("view", initialView);
     window.history.pushState({}, "", url);
+  }
+
+  function openContentCenter(workspaceId: string) {
+    if (hasUnsavedChanges && !confirmDiscardChanges()) return;
+    setSelectedWorkspaceId(workspaceId);
+    setSelectedSiteId(null);
+    setStructurePages([]);
+    navigateTo("content-center", undefined, true);
+    const url = new URL(window.location.href);
+    for (const key of ["site", "subview", "cc", "ccVersion"]) url.searchParams.delete(key);
+    url.searchParams.set("workspace", workspaceId);
+    url.searchParams.set("view", "content-center");
+    window.history.pushState({}, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
   function showAllProjects() {
@@ -1357,6 +1389,15 @@ function Dashboard({
                       aria-hidden={!expanded}
                     >
                       <div className="workspace-site-tree-inner">
+                        <button
+                          className={`nav-item workspace-site-item ${expanded && activeView === "content-center" ? "active" : ""}`}
+                          tabIndex={expanded ? 0 : -1}
+                          aria-current={expanded && activeView === "content-center" ? "page" : undefined}
+                          onClick={() => openContentCenter(workspaceItem.id)}
+                        >
+                          <span className="site-system-icon content-center" aria-hidden="true" />
+                          <span className="nav-text">Контент-центр</span>
+                        </button>
                         {workspaceItem.sites.map((siteItem, index) => (
                           <button
                             key={siteItem.id}
@@ -1624,7 +1665,7 @@ function Dashboard({
                   const active = activeView === item.id;
                   const label =
                     item.id === "media"
-                      ? "Контентный центр"
+                      ? "Медиатека"
                       : item.id === "settings"
                         ? "Управление"
                         : item.label;
@@ -1754,7 +1795,7 @@ function Dashboard({
                               setHelpOpen(false);
                             }}
                           >
-                            Контентный центр
+                            Медиатека
                           </button>
                           <a
                             href={`/preview/${site.slug}`}
@@ -1798,6 +1839,13 @@ function Dashboard({
             onSelectSite={openSite}
             onChanged={onSessionRefresh}
             canCreateSite={hasWorkspaceAccess}
+          />
+        ) : activeView === "content-center" && workspace ? (
+          <ContentCenterView
+            key={workspace.id}
+            workspaceId={workspace.id}
+            workspaceName={workspace.name}
+            onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "articles" ? (
           site?.siteType === "media" ? (
