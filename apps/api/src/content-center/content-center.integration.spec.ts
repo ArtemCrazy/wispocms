@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
+import type { Server } from 'node:http';
 import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
+import { SourceRefreshJobs1790832000000 } from '../database/migrations/1790832000000-SourceRefreshJobs';
 import { PreparationRequestLabels1790659200000 } from '../database/migrations/1790659200000-PreparationRequestLabels';
 import { PreparationReadablePrompts1790745600000 } from '../database/migrations/1790745600000-PreparationReadablePrompts';
 import { SiteCrawler, type SitePage } from './site-crawler';
@@ -77,6 +79,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       await new GlobalPromptLibrary1790486400000().up(runner);
       await new ContentCenterSiteImports1790572800000().up(runner);
       await new PreparationRequestLabels1790659200000().up(runner);
+      await new SourceRefreshJobs1790832000000().up(runner);
     } finally {
       await runner.release();
     }
@@ -936,6 +939,232 @@ integration('Content Center / isolated PostgreSQL', () => {
     await expect(
       service.restore(workspace, first.versions[0].id, employee, 2),
     ).rejects.toThrow('Появилась новая версия');
+  });
+
+  it('refreshes source snapshots through an authorized queued HTTP action without AI or version writes', async () => {
+    const page: SitePage = {
+      url: 'https://example.com/about',
+      title: 'Компания',
+      group: 'О компании',
+      recommended: true,
+      status: 'loaded',
+      content: 'Свежие факты',
+    };
+    const discover = jest
+      .spyOn(SiteCrawler.prototype, 'discover')
+      .mockResolvedValue({
+        root: 'https://example.com/',
+        pages: [page],
+        warnings: [],
+        discovery: {
+          state: 'finished',
+          checkedPages: 1,
+          pendingPages: 0,
+          pendingSitemaps: 0,
+          reasons: [],
+        },
+      });
+    const collect = jest
+      .spyOn(SiteCrawler.prototype, 'collect')
+      .mockResolvedValue([page]);
+    const offline = new ContentCenterService(
+      db,
+      new PreparationAiService({
+        name: 'offline',
+        configured: false,
+        generate,
+      }),
+    );
+    const module = await Test.createTestingModule({
+      controllers: [ContentCenterController],
+      providers: [{ provide: ContentCenterService, useValue: offline }],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate(context: ExecutionContext) {
+          context.switchToHttp().getRequest<AuthenticatedRequest>().auth =
+            employee;
+          return true;
+        },
+      })
+      .compile();
+    const app = module.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
+    );
+    await app.init();
+    offline.onModuleDestroy();
+    try {
+      const material = await service.saveMaterial(workspace, admin, {
+        kind: 'url',
+        title: 'Сайт',
+        sourceUrl: 'https://example.com/',
+        urlCategory: 'site',
+      });
+      await db.query(
+        `INSERT INTO cc_preparation_versions(workspace_id,number,content,actor_name,reason,sources) VALUES ($1,1,'Старый результат','Автор','Обработка',$2::jsonb)`,
+        [workspace, JSON.stringify([{ title: 'Старый снимок', pages: [] }])],
+      );
+      const [before] = await db.query<
+        Array<{ sources: unknown; content: string }>
+      >(
+        `SELECT sources,content FROM cc_preparation_versions WHERE workspace_id=$1`,
+        [workspace],
+      );
+      const path = `/api/workspaces/${workspace}/content-center/materials/${material.id}/refresh`;
+      const http = app.getHttpServer() as Server;
+      await request(http).post(path).send({}).expect(400);
+      await request(http).post(path).send({ revision: 2 }).expect(409);
+      await request(http)
+        .post(
+          `/api/workspaces/${otherWorkspace}/content-center/materials/${material.id}/refresh`,
+        )
+        .send({ revision: 1 })
+        .expect(404);
+      await expect(
+        offline.refreshSource(otherWorkspace, material.id, admin, 1),
+      ).rejects.toThrow('Материал не найден');
+      const attempts = await Promise.all([
+        request(http).post(path).send({ revision: 1 }),
+        request(http).post(path).send({ revision: 1 }),
+      ]);
+      expect(attempts.map((r) => r.status).sort()).toEqual([202, 409]);
+      expect(discover).not.toHaveBeenCalled();
+      expect(
+        (await offline.getMaterial(workspace, material.id, employee))
+          .collection_run?.status,
+      ).toBe('queued');
+      expect((await offline.overview(workspace, employee)).run).toBeNull();
+      await offline.processNext();
+      const refreshed = await offline.getMaterial(
+        workspace,
+        material.id,
+        employee,
+      );
+      expect(refreshed.collection_run?.status).toBe('succeeded');
+      expect(refreshed.site_pages?.pages[0].content).toBe('Свежие факты');
+      expect(refreshed.revision).toBe(1);
+      expect(refreshed.site_checked_at).toBeTruthy();
+      expect(generate).not.toHaveBeenCalled();
+      const versions = await db.query<
+        Array<{ sources: unknown; content: string }>
+      >(
+        `SELECT sources,content FROM cc_preparation_versions WHERE workspace_id=$1`,
+        [workspace],
+      );
+      expect(versions).toEqual([before]);
+      const jobs = await db.query<
+        Array<{ input_context: unknown; operation: string }>
+      >(
+        `SELECT input_context,operation FROM cc_preparation_runs WHERE workspace_id=$1`,
+        [workspace],
+      );
+      expect(jobs).toEqual([{ input_context: null, operation: 'collect' }]);
+      await expect(
+        offline.getMaterial(otherWorkspace, material.id, employee),
+      ).rejects.toThrow();
+    } finally {
+      discover.mockRestore();
+      collect.mockRestore();
+      await app.close();
+    }
+  });
+
+  it('does not apply a refresh after source edits, deletion or an abandoned job', async () => {
+    const page: SitePage = {
+      url: 'https://example.com/',
+      title: 'Компания',
+      group: 'Главная',
+      recommended: true,
+      status: 'loaded',
+      content: 'Старая ссылка',
+    };
+    const discover = jest
+      .spyOn(SiteCrawler.prototype, 'discover')
+      .mockResolvedValue({
+        root: page.url,
+        pages: [page],
+        warnings: [],
+        discovery: {
+          state: 'finished',
+          checkedPages: 1,
+          pendingPages: 0,
+          pendingSitemaps: 0,
+          reasons: [],
+        },
+      });
+    const collect = jest.spyOn(SiteCrawler.prototype, 'collect');
+    const offline = new ContentCenterService(
+      db,
+      new PreparationAiService({
+        name: 'offline',
+        configured: false,
+        generate,
+      }),
+    );
+    try {
+      const material = await service.saveMaterial(workspace, admin, {
+        kind: 'url',
+        title: 'Сайт',
+        sourceUrl: page.url,
+        urlCategory: 'site',
+      });
+      collect.mockImplementationOnce(async () => {
+        await service.saveMaterial(
+          workspace,
+          admin,
+          {
+            kind: 'url',
+            title: 'Другой сайт',
+            sourceUrl: 'https://other.example.com/',
+            urlCategory: 'site',
+            revision: 1,
+          },
+          material.id,
+        );
+        return [page];
+      });
+      await offline.refreshSource(workspace, material.id, employee, 1);
+      await offline.processNext();
+      const changed = await offline.getMaterial(
+        workspace,
+        material.id,
+        employee,
+      );
+      expect(changed.collection_run?.status).toBe('failed');
+      expect(changed.site_pages).toBeNull();
+      expect(changed.source_url).toBe('https://other.example.com/');
+      await offline.refreshSource(workspace, material.id, employee, 2);
+      await service.deleteMaterial(workspace, material.id, 2, employee);
+      const calls = discover.mock.calls.length;
+      await offline.processNext();
+      expect(discover).toHaveBeenCalledTimes(calls);
+      const next = await service.saveMaterial(workspace, admin, {
+        kind: 'url',
+        title: 'Сайт',
+        sourceUrl: page.url,
+        urlCategory: 'site',
+      });
+      const job = await offline.refreshSource(workspace, next.id, employee, 1);
+      await db.query(
+        `UPDATE cc_preparation_runs SET status='processing',heartbeat_at=now()-interval '6 minutes',started_at=now()-interval '6 minutes' WHERE id=$1`,
+        [job.id],
+      );
+      await offline.processNext();
+      expect(
+        (await offline.getMaterial(workspace, next.id, employee)).collection_run
+          ?.status,
+      ).toBe('failed');
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      discover.mockRestore();
+      collect.mockRestore();
+    }
   });
 
   it('collects a website on launch, keeps archived sources after edits and preserves them on restore', async () => {

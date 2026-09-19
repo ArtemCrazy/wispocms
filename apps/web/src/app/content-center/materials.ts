@@ -80,6 +80,12 @@ export type ProjectMaterial = {
   source_error: string | null;
   site_checked_at?: string | null;
   site_pages?: SourceSnapshot | null;
+  collection_run?: {
+    id: string;
+    status: "queued" | "processing" | "succeeded" | "failed";
+    error: string | null;
+    progress?: { message: string } | null;
+  } | null;
 };
 export const FILE_ACCEPT =
   ".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv";

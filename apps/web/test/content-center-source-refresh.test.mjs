@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import test from 'node:test';
+import ts from 'typescript';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+const require = createRequire(import.meta.url);
+const compile = async (name, imports = {}) => {
+  const source = await readFile(new URL(`../src/app/content-center/${name}.tsx`, import.meta.url), 'utf8');
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+  const target = { exports: {} };
+  new Function('require', 'module', 'exports', compiled.outputText)(id => imports[id] ?? (id.endsWith('.css') ? { default: {} } : require(id)), target, target.exports);
+  return target.exports;
+};
+const component = await compile('source-refresh', { './source-registry': await compile('source-registry') });
+const initial = { id: 'site', title: 'Сайт', url_category: 'site', revision: 1,
+  site_pages: { sourceId: 'S1', title: 'Сохранённый снимок', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages: [] } };
+const render = changes => renderToStaticMarkup(React.createElement(component.SourceRefresh, {
+  initial: { ...initial, ...changes }, base: '/api/workspaces/one/content-center',
+  request: () => { throw new Error('render must not start a request'); }, onUpdated: async () => {},
+}));
+
+test('refresh is available before the first crawl and explicitly does not start AI or change versions', () => {
+  const html = render({ site_pages: null });
+  assert.match(html, /<button type="button">Обновить сбор<\/button>/);
+  assert.match(html, /без AI и изменения версий/);
+  assert.match(html, /Сохранённого сбора пока нет/);
+});
+test('queued and processing states disable resubmission and keep the previous snapshot readable', () => {
+  for (const status of ['queued', 'processing']) {
+    const html = render({ collection_run: { id: 'run', status, error: null, progress: { message: 'Найдено 100 страниц' } } });
+    assert.match(html, /disabled="">Сбор выполняется/);
+    assert.match(html, /role="status">Найдено 100 страниц/);
+    assert.match(html, /Сохранённый снимок/);
+  }
+});
+test('failed refresh can be retried without hiding the saved sources', () => {
+  const html = render({ collection_run: { id: 'run', status: 'failed', error: 'Источник изменён' } });
+  assert.match(html, /role="alert">Источник изменён/);
+  assert.match(html, /<button type="button">Обновить сбор/);
+  assert.match(html, /Сохранённый снимок/);
+});
+test('non-site source has no refresh action', () => {
+  assert.doesNotMatch(render({ url_category: 'social' }), /Обновить сбор|Сбор выполняется/);
+});

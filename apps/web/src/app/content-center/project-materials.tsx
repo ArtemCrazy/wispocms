@@ -65,37 +65,38 @@ export function ProjectMaterials({
                       >
                         {m.source_url}
                       </button>
-                      {m.site_checked_at && showSources && (
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => showSources(m)}
-                          title="Информация об источнике"
-                          aria-label={`Информация об источнике «${m.title}»`}
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.75"
-                            strokeLinecap="round"
-                            aria-hidden="true"
-                            focusable="false"
+                      {(m.site_checked_at || m.url_category === "site") &&
+                        showSources && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => showSources(m)}
+                            title="Информация об источнике"
+                            aria-label={`Информация об источнике «${m.title}»`}
                           >
-                            <circle cx="12" cy="12" r="9" />
-                            <path d="M12 11v6" />
-                            <circle
-                              cx="12"
-                              cy="7.5"
-                              r=".75"
-                              fill="currentColor"
-                              stroke="none"
-                            />
-                          </svg>
-                        </button>
-                      )}
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinecap="round"
+                              aria-hidden="true"
+                              focusable="false"
+                            >
+                              <circle cx="12" cy="12" r="9" />
+                              <path d="M12 11v6" />
+                              <circle
+                                cx="12"
+                                cy="7.5"
+                                r=".75"
+                                fill="currentColor"
+                                stroke="none"
+                              />
+                            </svg>
+                          </button>
+                        )}
                       <button
                         type="button"
                         disabled={busy}

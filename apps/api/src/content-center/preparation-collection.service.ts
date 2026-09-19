@@ -26,6 +26,7 @@ export class PreparationCollectionService {
     input: PreparationInput,
     progress: (value: PreparationProgress) => Promise<void>,
     signal: AbortSignal,
+    options: { persistSnapshots?: boolean; allowUnread?: boolean } = {},
   ): Promise<PreparationInput> {
     const materials: PreparationInput['materials'] = [];
     const sources: SourceSnapshot[] = [];
@@ -198,6 +199,7 @@ export class PreparationCollectionService {
       });
       sources.push(snapshot);
       if (
+        options.persistSnapshots !== false &&
         material.id &&
         material.sourceUrl &&
         material.urlCategory === 'site'
@@ -215,7 +217,12 @@ export class PreparationCollectionService {
         );
       }
     }
-    if (input.materials.length && !readable && !input.files?.length)
+    if (
+      !options.allowUnread &&
+      input.materials.length &&
+      !readable &&
+      !input.files?.length
+    )
       throw new AiProviderError(
         'Не удалось прочитать ни один источник. Проверьте ссылки или добавьте текст вручную. Новая версия не создана.',
       );

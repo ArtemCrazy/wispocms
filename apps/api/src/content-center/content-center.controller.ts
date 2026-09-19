@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   ParseUUIDPipe,
@@ -37,6 +38,12 @@ class RestoreVersionDto {
   @IsInt()
   @Min(1)
   currentNumber!: number;
+}
+
+class RefreshSourceDto {
+  @IsInt()
+  @Min(1)
+  revision!: number;
 }
 
 @Controller('workspaces/:workspaceId/content-center')
@@ -98,6 +105,16 @@ export class ContentCenterController {
     @Body() dto: MaterialDto,
   ) {
     return this.service.saveMaterial(workspaceId, req.auth!, dto);
+  }
+  @Post('materials/:id/refresh')
+  @HttpCode(202)
+  refreshSource(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: RefreshSourceDto,
+  ) {
+    return this.service.refreshSource(workspaceId, id, req.auth!, dto.revision);
   }
   @Put('materials/:id')
   updateMaterial(

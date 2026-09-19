@@ -91,6 +91,8 @@ type Run = {
   actor_name: string;
   input_context: PreparationInput;
   status: string;
+  operation: 'prepare' | 'collect';
+  source_material_id: string | null;
 };
 const RUN_FIELDS =
   'id, status, actor_name, error, progress, created_at, started_at, finished_at';
@@ -166,7 +168,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         [workspaceId],
       ),
       this.db.query<RunSummary[]>(
-        `SELECT ${RUN_FIELDS} FROM cc_preparation_runs WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 1`,
+        `SELECT ${RUN_FIELDS} FROM cc_preparation_runs WHERE workspace_id=$1 AND operation='prepare' ORDER BY created_at DESC LIMIT 1`,
         [workspaceId],
       ),
       this.db.query<Draft[]>(
@@ -196,7 +198,79 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       [workspaceId, id],
     );
     if (!row) throw new NotFoundException('Материал не найден');
-    return row;
+    const [collectionRun] = await this.db.query<RunSummary[]>(
+      `SELECT ${RUN_FIELDS} FROM cc_preparation_runs WHERE workspace_id=$1 AND source_material_id=$2 AND operation='collect' ORDER BY created_at DESC LIMIT 1`,
+      [workspaceId, id],
+    );
+    return { ...row, collection_run: collectionRun ?? null };
+  }
+
+  async refreshSource(
+    workspaceId: string,
+    id: string,
+    actor: Actor,
+    revision: number,
+  ) {
+    const actorName = await this.access(workspaceId, actor);
+    return this.db.transaction(async (manager) => {
+      await this.lock(manager, workspaceId);
+      await this.requireIdle(manager, workspaceId);
+      const [material] = await manager.query<Material[]>(
+        `SELECT id,title,kind,source_url,revision,url_category FROM cc_materials WHERE workspace_id=$1 AND id=$2`,
+        [workspaceId, id],
+      );
+      if (!material) throw new NotFoundException('Материал не найден');
+      if (
+        material.kind !== 'url' ||
+        material.url_category !== 'site' ||
+        !material.source_url
+      )
+        throw new BadRequestException('Обновить сбор можно только для сайта');
+      if (material.revision !== revision)
+        throw new ConflictException(
+          'Ссылка изменилась. Откройте источник заново.',
+        );
+      publicMaterialUrl(material.source_url);
+      const input: PreparationInput = {
+        previousResult: null,
+        materials: [
+          {
+            id: material.id,
+            revision: material.revision,
+            title: material.title,
+            sourceUrl: material.source_url,
+            urlCategory: 'site',
+            content: '',
+          },
+        ],
+      };
+      const [run] = await manager.query<RunSummary[]>(
+        `INSERT INTO cc_preparation_runs(workspace_id,status,actor_name,instruction,input_context,provider,operation,source_material_id)
+         VALUES ($1,'queued',$2,'',$3::jsonb,'source-collection','collect',$4) RETURNING ${RUN_FIELDS}`,
+        [workspaceId, actorName, JSON.stringify(input), material.id],
+      );
+      return run;
+    });
+  }
+
+  private async requireRefreshSource(
+    run: Run,
+    manager: Pick<EntityManager, 'query'> = this.db,
+  ) {
+    const source = run.input_context.materials[0];
+    const rows = await manager.query<Array<{ id: string }>>(
+      `SELECT id FROM cc_materials WHERE workspace_id=$1 AND id=$2 AND revision=$3 AND source_url=$4 AND kind='url' AND url_category='site'`,
+      [
+        run.workspace_id,
+        run.source_material_id,
+        source.revision,
+        source.sourceUrl,
+      ],
+    );
+    if (!rows.length)
+      throw new AiProviderError(
+        'Источник изменён или удалён. Сбор не применён; запустите его заново для актуальной ссылки.',
+      );
   }
 
   async uploadFile(workspaceId: string, actor: Actor, upload?: MaterialUpload) {
@@ -555,10 +629,9 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       await this.db.query(
         `UPDATE cc_preparation_runs SET status='failed', error='Истекло время ожидания обработки. Повторите запуск.', input_context=NULL, finished_at=now() WHERE status='queued' AND created_at < now()-interval '30 minutes'`,
       );
-      if (!this.ai.configured) return;
       const [run] = await this.db.query<Run[]>(
-        `WITH claimed AS (UPDATE cc_preparation_runs SET status='processing',started_at=now(),heartbeat_at=now() WHERE id=(SELECT id FROM cc_preparation_runs WHERE status='queued' AND provider=$1 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *) SELECT * FROM claimed`,
-        [this.ai.name],
+        `WITH claimed AS (UPDATE cc_preparation_runs SET status='processing',started_at=now(),heartbeat_at=now() WHERE id=(SELECT id FROM cc_preparation_runs WHERE status='queued' AND (operation='collect' OR ($2::boolean AND provider=$1)) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *) SELECT * FROM claimed`,
+        [this.ai.name, this.ai.configured],
       );
       if (!run) return;
       const heartbeat = setInterval(() => {
@@ -579,12 +652,49 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           if (!rows.length)
             throw new AiProviderError('Запуск больше не активен');
         };
+        if (run.operation === 'collect') await this.requireRefreshSource(run);
         const resolved = await this.collection.collect(
           run.workspace_id,
           run.input_context,
           progress,
           AbortSignal.timeout(6 * 60_000),
+          run.operation === 'collect'
+            ? { persistSnapshots: false, allowUnread: true }
+            : {},
         );
+        if (run.operation === 'collect') {
+          await this.db.transaction(async (manager) => {
+            await this.lock(manager, run.workspace_id);
+            const active = await manager.query<Array<{ id: string }>>(
+              `SELECT id FROM cc_preparation_runs WHERE id=$1 AND status='processing' FOR UPDATE`,
+              [run.id],
+            );
+            if (!active.length) return;
+            await this.requireRefreshSource(run, manager);
+            const snapshot = resolved.sources?.[0];
+            if (!snapshot)
+              throw new AiProviderError('Не удалось получить результат сбора');
+            await manager.query(
+              `UPDATE cc_materials SET site_pages=$3::jsonb,site_checked_at=now() WHERE workspace_id=$1 AND id=$2`,
+              [
+                run.workspace_id,
+                run.source_material_id,
+                JSON.stringify(snapshot),
+              ],
+            );
+            await manager.query(
+              `UPDATE cc_preparation_runs SET status='succeeded', input_context=NULL, progress=$2::jsonb, finished_at=now() WHERE id=$1 AND status='processing'`,
+              [
+                run.id,
+                JSON.stringify({
+                  stage: 'collecting',
+                  message: 'Сбор обновлён. AI не запускался.',
+                }),
+              ],
+            );
+          });
+          return;
+        }
         await this.db.query(
           `UPDATE cc_preparation_runs SET input_context=$2::jsonb WHERE id=$1 AND status='processing'`,
           [run.id, JSON.stringify(resolved)],
@@ -624,9 +734,11 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             run.id,
             error instanceof AiProviderError
               ? error.message
-              : this.ai.configured
-                ? 'Не удалось завершить обработку. Текущая версия сохранена. Повторите запуск.'
-                : 'AI ещё не подключён. Повторите запуск после подключения.',
+              : run.operation === 'collect'
+                ? 'Не удалось завершить сбор. AI не запускался. Повторите попытку.'
+                : this.ai.configured
+                  ? 'Не удалось завершить обработку. Текущая версия сохранена. Повторите запуск.'
+                  : 'AI ещё не подключён. Повторите запуск после подключения.',
           ],
         );
       } finally {

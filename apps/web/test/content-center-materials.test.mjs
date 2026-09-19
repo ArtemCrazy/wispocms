@@ -27,11 +27,11 @@ test('checked website groups URL, source information icon and remove action in t
   assert.match(html.slice(info, remove), /<\/button><button type="button"/);
 });
 
-test('unchecked website keeps edit and remove, without a dead information button', () => {
+test('unchecked website exposes the source dialog to start collection without AI', () => {
   const html = render([{ id: 'site', kind: 'url', url_category: materials.SOURCE_CATEGORIES[0].id, title: 'Сайт', source_url: 'https://example.com/' }], { showSources() {} });
   assert.match(html, /Изменить ссылку/);
   assert.match(html, /Удалить ссылку/);
-  assert.doesNotMatch(html, /Информация об источнике/);
+  assert.match(html, /Информация об источнике/);
 });
 
 test('source information remains disabled during a pending operation', () => {

@@ -13,6 +13,7 @@ import { ContentCenterBreadcrumbs } from "./content-center-breadcrumbs";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
 import { SourceRegistry } from "./source-registry";
+import { SourceRefresh } from "./source-refresh";
 import { ResearchView } from "./research-view";
 import { CreationView } from "./creation-view";
 import {
@@ -178,9 +179,9 @@ export function ContentCenterView({
   const [screen, setScreen] = useState<Screen>("root");
   const [versionId, setVersionId] = useState<string | null>(null);
   const [document, setDocument] = useState<Version | null>(null);
-  const [sourceDetails, setSourceDetails] = useState<SourceSnapshot | null>(
-    null,
-  );
+  const [sourceDetails, setSourceDetails] = useState<
+    (Material & { sourceBase: string }) | null
+  >(null);
   const [instruction, setInstruction] = useState("");
   const [promptTitle, setPromptTitle] = useState("");
   const instructionRef = useRef("");
@@ -494,7 +495,7 @@ export function ContentCenterView({
                       const row = await request<Material>(
                         `${base}/materials/${item.id}`,
                       );
-                      setSourceDetails(row.site_pages ?? null);
+                      setSourceDetails({ ...row, sourceBase: base });
                     })
                   }
                   add={(kind, urlCategory) => {
@@ -882,13 +883,19 @@ export function ContentCenterView({
         </>
       )}
 
-      {sourceDetails && (
+      {sourceDetails && sourceDetails.sourceBase === base && (
         <Dialog
           title="Источники и охват"
           busy={false}
           close={() => setSourceDetails(null)}
         >
-          <SourceRegistry sources={[sourceDetails]} />
+          <SourceRefresh
+            key={`${base}-${sourceDetails.id}`}
+            initial={sourceDetails}
+            base={base}
+            request={request}
+            onUpdated={load}
+          />
         </Dialog>
       )}
       {material && (

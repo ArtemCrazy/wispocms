@@ -33,6 +33,7 @@ import { GlobalPromptLibrary1790486400000 } from './migrations/1790486400000-Glo
 import { ContentCenterSiteImports1790572800000 } from './migrations/1790572800000-ContentCenterSiteImports';
 import { PreparationRequestLabels1790659200000 } from './migrations/1790659200000-PreparationRequestLabels';
 import { PreparationReadablePrompts1790745600000 } from './migrations/1790745600000-PreparationReadablePrompts';
+import { SourceRefreshJobs1790832000000 } from './migrations/1790832000000-SourceRefreshJobs';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -72,6 +73,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       ContentCenterSiteImports1790572800000,
       PreparationRequestLabels1790659200000,
       PreparationReadablePrompts1790745600000,
+      SourceRefreshJobs1790832000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',
