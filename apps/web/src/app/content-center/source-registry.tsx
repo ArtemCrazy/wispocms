@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { SourceSnapshot } from "./materials";
 import styles from "./content-center-view.module.css";
 
 const statusLabel = {
-  loaded: "Прочитана",
+  loaded: "Включена в сбор",
   found: "Не включена",
   failed: "Недоступна",
   duplicate: "Дубликат",
@@ -17,8 +17,7 @@ type SourceFilter =
 
 const filters = [
   ["all", "Все"],
-  ["loaded", "Прочитано"],
-  ["unread", "Не прочитано"],
+  ["loaded", "Включено"],
   ["found", "Не включено"],
   ["failed", "Недоступно"],
   ["pending", "Не проверено"],
@@ -42,6 +41,8 @@ export function filterSourcePages(
 
 /** Archived plain text, never rendered as source-provided HTML. */
 export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
+  const hintId = useId();
+  const [openHints, setOpenHints] = useState<Record<string, boolean>>({});
   const [selectedFilters, setSelectedFilters] = useState<
     Record<string, SourceFilter>
   >({});
@@ -51,6 +52,8 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
       {sources.map((source) => {
         const selectedFilter = selectedFilters[source.sourceId] ?? "all";
         const visiblePages = filterSourcePages(source.pages, selectedFilter);
+        const hintOpen = Boolean(openHints[source.sourceId]);
+        const panelId = `${hintId}-${source.sourceId}`;
         return (
           <details
             className={styles.sourceCard}
@@ -65,54 +68,52 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 </span>
               </span>
               <span className={styles.sourceCoverage}>
-                Прочитано{" "}
+                Включено{" "}
                 {source.pages.filter((p) => p.status === "loaded").length} из{" "}
                 {source.pages.length}
               </span>
+              <button
+                type="button"
+                className={styles.sourceInfo}
+                aria-label={`Пояснение об охвате: ${source.title}`}
+                aria-expanded={hintOpen}
+                aria-controls={panelId}
+                title="Что означают эти числа"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const card = event.currentTarget.closest("details");
+                  if (card) card.open = true;
+                  setOpenHints((current) => ({
+                    ...current,
+                    [source.sourceId]: !current[source.sourceId],
+                  }));
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 11v6" />
+                  <circle cx="12" cy="7.5" r=".75" fill="currentColor" stroke="none" />
+                </svg>
+              </button>
               <span className={styles.sourceChevron} aria-hidden="true" />
             </summary>
             <div className={styles.sourceBody}>
-              <dl className={styles.sourceStats} aria-label="Охват источника">
-                <div>
-                  <dt>Обнаружено</dt>
-                  <dd>{source.pages.length}</dd>
-                </div>
-                {(
-                  [
-                    ["loaded", "Прочитано"],
-                    ["found", "Не включено"],
-                    ["failed", "Недоступно"],
-                    ["pending", "Не проверено"],
-                    ["duplicate", "Дубликаты"],
-                  ] as const
-                ).map(([state, label]) => {
-                  const count = source.pages.filter(
-                    (page) => page.status === state,
-                  ).length;
-                  return count > 0 || state === "loaded" ? (
-                    <div key={state} data-status={state}>
-                      <dt>{label}</dt>
-                      <dd>{count}</dd>
-                    </div>
-                  ) : null;
-                })}
-              </dl>
-              <div className={styles.sourceNote}>
+              <div id={panelId} className={styles.sourceNote} hidden={!hintOpen}>
                 <p>
-                  <strong>
-                    {source.coverage
-                      ? source.coverage.state === "partial"
-                        ? "Охват неполный"
-                        : "Проверка найденной структуры завершена"
-                      : "Охват этого запуска, не полный аудит сайта."}
-                  </strong>
+                  Найдено адресов: {source.pages.length}. «Включено» — страницы,
+                  полный доступный текст которых вошёл в выбранный набор для
+                  обработки. «Не включено» — страницы вне выбранного набора;
+                  «Недоступно» — страницы, текст которых получить не удалось.
+                </p>
+                <p>
+                  Это результат конкретного обхода, а не подтверждение, что
+                  найдены все страницы сайта. Даже если включены все найденные
+                  страницы, другие адреса могли остаться необнаруженными.
+                  Обновление сбора само по себе не запускает AI-анализ.
                 </p>
                 {source.coverage && (
                   <>
-                    <p>
-                      Выбрано для обработки: {source.coverage.selected}. Не
-                      удалось включить: {source.coverage.unread}.
-                    </p>
                     {source.coverage.reasons.map((reason) => (
                       <p key={reason}>{reason}</p>
                     ))}
@@ -123,7 +124,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                           <li key={section.title}>
                             <strong>{section.title}</strong>:{" "}
                             {section.found
-                              ? `учтено ${section.read} из ${section.found}${section.unread ? `, не прочитано ${section.unread}` : ""}`
+                              ? `собрано ${section.read} из ${section.found}${section.unread ? `, не удалось собрать ${section.unread}` : ""}`
                               : "не найдено в обходе"}
                           </li>
                         ))}
