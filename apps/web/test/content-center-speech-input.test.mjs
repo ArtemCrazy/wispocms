@@ -24,6 +24,9 @@ test('dictation uses an accessible icon-only microphone button with a tooltip', 
   assert.equal(button.replace(/<[^>]*>/g, '').trim(), '');
   assert.doesNotMatch(button, /disabled=/);
   assert.match(html, /Микрофон пока выключен/);
+  assert.match(html, /Браузер может передавать речь своему сервису распознавания/);
+  assert.doesNotMatch(html, /Распознавание выполняет браузер/);
+  assert.doesNotMatch(html, /Текст сохраняется только кнопкой/);
 });
 
 test('microphone button retains the disabled state', () => {

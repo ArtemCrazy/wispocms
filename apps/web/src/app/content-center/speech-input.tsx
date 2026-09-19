@@ -30,12 +30,10 @@ export function SpeechInput({
   disabled,
   onTranscript,
   onActiveChange,
-  persistenceHint,
 }: {
   disabled: boolean;
   onTranscript: (text: string) => void;
   onActiveChange: (active: boolean) => void;
-  persistenceHint?: string;
 }) {
   const recognition = useRef<Recognition | null>(null);
   const consentDialog = useRef<HTMLDialogElement | null>(null);
@@ -208,12 +206,6 @@ export function SpeechInput({
           {error}
         </p>
       )}
-      <p className={styles.muted}>
-        Распознавание выполняет браузер; оно может использовать внешний сервис.
-        Аудио не сохраняется в CMS.{" "}
-        {persistenceHint ??
-          "Текст сохраняется только кнопкой «Сохранить задачу»."}
-      </p>
       <dialog
         ref={consentDialog}
         className={styles.dialog}

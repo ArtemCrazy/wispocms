@@ -155,7 +155,6 @@ export function CreationInstruction({
           setValue(appendDictation(valueRef.current, text).value)
         }
         onActiveChange={onVoice}
-        persistenceHint="Текст будет передан вместе с инструкцией только при запуске обработки."
       />
       {error && (
         <p className={styles.error} role="alert">
