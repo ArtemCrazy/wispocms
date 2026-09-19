@@ -12,6 +12,8 @@ import { PlatformAdminGuard } from './platform-admin.guard';
 import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 import { WorkspaceController } from './workspace.controller';
+import { PlatformPromptsController } from './platform-prompts.controller';
+import { PlatformPromptsService } from './platform-prompts.service';
 
 @Module({
   imports: [
@@ -24,7 +26,11 @@ import { WorkspaceController } from './workspace.controller';
     ]),
     AuthModule,
   ],
-  controllers: [PlatformController, WorkspaceController],
-  providers: [PlatformService, PlatformAdminGuard],
+  controllers: [
+    PlatformController,
+    WorkspaceController,
+    PlatformPromptsController,
+  ],
+  providers: [PlatformService, PlatformAdminGuard, PlatformPromptsService],
 })
 export class PlatformModule {}

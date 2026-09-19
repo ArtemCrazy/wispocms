@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import styles from "./platform-ai-settings.module.css";
+import { PlatformPromptSettings } from "./platform-prompt-settings";
 
 type Settings = {
   configured: boolean; hasKey: boolean; storageReady: boolean;
@@ -30,7 +31,9 @@ export function PlatformAiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: 
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const dirty = Boolean(apiKey || (settings && model !== settings.model));
+  const aiDirty = Boolean(apiKey || (settings && model !== settings.model));
+  const [promptsDirty, setPromptsDirty] = useState(false);
+  const dirty = aiDirty || promptsDirty;
 
   useEffect(() => {
     let active = true;
@@ -66,7 +69,7 @@ export function PlatformAiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: 
 
   function save(event: FormEvent) { event.preventDefault(); void act("save"); }
   return <section className={styles.root} aria-label="Настройки платформы">
-    <header><h1>Настройки платформы</h1><p>Подключения для всех рабочих пространств. Доступно только администратору.</p></header>
+    <header><h1>Настройки платформы</h1><p>Подключения и общая библиотека промптов для всех рабочих пространств. Доступно только администратору.</p></header>
     {error && <p className={styles.error} role="alert">{error}</p>}
     {message && <p className={styles.notice} role="status">{message}</p>}
     {!settings ? <p>{error ? "Обновите страницу, чтобы повторить загрузку." : "Загружаем настройки…"}</p> : <article className={styles.card}>
@@ -80,8 +83,8 @@ export function PlatformAiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: 
           <label htmlFor="deepseek-model">Модель</label>
           <select id="deepseek-model" value={model} onChange={(event) => setModel(event.target.value)}>{settings.models.map((item) => <option key={item} value={item}>{item}</option>)}</select>
           <div className={styles.actions}>
-            <button className={styles.primary} disabled={!dirty || (!settings.hasKey && !apiKey.trim())} type="submit">{busy === "save" ? "Сохраняем…" : "Сохранить"}</button>
-            <button type="button" disabled={!settings.configured || dirty} onClick={() => void act("check")}>{busy === "check" ? "Проверяем…" : "Проверить подключение"}</button>
+            <button className={styles.primary} disabled={!aiDirty || (!settings.hasKey && !apiKey.trim())} type="submit">{busy === "save" ? "Сохраняем…" : "Сохранить"}</button>
+            <button type="button" disabled={!settings.configured || aiDirty} onClick={() => void act("check")}>{busy === "check" ? "Проверяем…" : "Проверить подключение"}</button>
           </div>
         </fieldset>
       </form>
@@ -91,7 +94,8 @@ export function PlatformAiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: 
         <p>Сейчас поддерживаются текстовые материалы. PDF, Office, изображения и вложения в генерацию пока не поддерживаются. Ссылки сами по себе не загружаются; автоматический поиск источников не подключён.</p>
         {settings.verifiedAt && <p>Последняя успешная проверка: {new Date(settings.verifiedAt).toLocaleString("ru-RU")}</p>}
       </div>
-      {settings.hasKey && <button type="button" className={styles.remove} disabled={Boolean(busy) || dirty} onClick={() => void act("remove")}>{busy === "remove" ? "Удаляем…" : "Удалить ключ"}</button>}
+      {settings.hasKey && <button type="button" className={styles.remove} disabled={Boolean(busy) || aiDirty} onClick={() => void act("remove")}>{busy === "remove" ? "Удаляем…" : "Удалить ключ"}</button>}
     </article>}
+    <PlatformPromptSettings onDirtyChange={setPromptsDirty} />
   </section>;
 }

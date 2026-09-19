@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SpeechInput } from "./speech-input";
 import { appendDictation } from "./preparation-state";
 import styles from "./content-center-view.module.css";
+import { GlobalPromptPicker } from "./global-prompt-picker";
 export const creationDate = (value: string) =>
   new Date(value).toLocaleString("ru-RU", {
     dateStyle: "medium",
@@ -71,7 +72,6 @@ export function CreationDialog({
   );
 }
 export function CreationInstruction({
-  base,
   value,
   setValue,
   file,
@@ -89,39 +89,18 @@ export function CreationInstruction({
   onVoice: (a: boolean) => void;
   children?: ReactNode;
 }) {
-  const [prompts, setPrompts] = useState<Array<{
-    id: string;
-    title: string;
-    content: string;
-  }> | null>(null);
-  const [selected, setSelected] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [title, setTitle] = useState(""),
-    [text, setText] = useState(""),
-    [error, setError] = useState(""),
-    [saving, setSaving] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(false);
+  const [error, setError] = useState("");
   const valueRef = useRef(value);
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const open = async () => {
-    try {
-      setError("");
-      const data = await creationRequest<{
-        prompts: Array<{ id: string; title: string; content: string }>;
-      }>(base);
-      setPrompts(data.prompts);
-      setSelected(data.prompts[0]?.id ?? "");
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  };
   return (
     <>
       <div className={styles.cardHead}>
         <h3>Дополнительная инструкция</h3>
-        <button disabled={disabled} onClick={() => void open()}>
+        <button disabled={disabled} onClick={() => setPromptsOpen(true)}>
           Список промптов
         </button>
       </div>
@@ -183,112 +162,15 @@ export function CreationInstruction({
           {error}
         </p>
       )}
-      {prompts && (
-        <CreationDialog
-          title="Список промптов"
-          close={() => {
-            setPrompts(null);
-            setAdding(false);
+      {promptsOpen && (
+        <GlobalPromptPicker
+          close={() => setPromptsOpen(false)}
+          onSelect={(content) => {
+            if (value.trim() && !window.confirm("Заменить текущую инструкцию текстом промпта?")) return;
+            setValue(content);
+            setPromptsOpen(false);
           }}
-          busy={saving}
-        >
-          {adding ? (
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setSaving(true);
-                try {
-                  const p = await creationRequest<{
-                    id: string;
-                    title: string;
-                    content: string;
-                  }>(`${base}/prompts`, "POST", { title, content: text });
-                  setPrompts([...prompts, p]);
-                  setSelected(p.id);
-                  setAdding(false);
-                  setTitle("");
-                  setText("");
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setSaving(false);
-                }
-              }}
-            >
-              <label className={styles.field}>
-                Название промпта
-                <input
-                  required
-                  maxLength={160}
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </label>
-              <label className={styles.field}>
-                Текст промпта
-                <textarea
-                  required
-                  rows={6}
-                  maxLength={8000}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                />
-              </label>
-              <div className={styles.actions}>
-                <button className={styles.primary} disabled={saving}>
-                  Сохранить промпт
-                </button>
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => setAdding(false)}
-                >
-                  Отмена
-                </button>
-              </div>
-            </form>
-          ) : (
-            <>
-              <div className={styles.promptGrid}>
-                <div className={styles.promptList}>
-                  {prompts.length ? (
-                    prompts.map((p) => (
-                      <button
-                        key={p.id}
-                        className={
-                          selected === p.id ? styles.selected : undefined
-                        }
-                        onClick={() => setSelected(p.id)}
-                      >
-                        {p.title}
-                      </button>
-                    ))
-                  ) : (
-                    <p>Промптов пока нет.</p>
-                  )}
-                </div>
-                <div className={styles.promptText}>
-                  {prompts.find((p) => p.id === selected)?.content ??
-                    "Выберите промпт"}
-                </div>
-              </div>
-              <div className={styles.actions}>
-                <button
-                  className={styles.primary}
-                  disabled={!selected}
-                  onClick={() => {
-                    setValue(prompts.find((p) => p.id === selected)!.content);
-                    setPrompts(null);
-                  }}
-                >
-                  Скопировать в инструкцию
-                </button>
-                <button onClick={() => setAdding(true)}>Добавить промпт</button>
-              </div>
-            </>
-          )}
-          {error && <p className={styles.error}>{error}</p>}
-        </CreationDialog>
+        />
       )}
     </>
   );

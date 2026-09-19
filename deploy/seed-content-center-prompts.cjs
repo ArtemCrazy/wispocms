@@ -1,6 +1,6 @@
 /*
  * Editable starter content, not system instructions or approved client methodology.
- * Run inside the API container, with explicit --workspace=<uuid> arguments.
+ * Run inside the API container, with explicit --global-library acknowledgement.
  * Default is a read-only preview; --apply inserts missing titles only.
  * Never updates existing prompts, invokes AI or changes project materials/results.
  */
@@ -123,32 +123,25 @@ ${rules}`,
   },
 ];
 
-async function seed(client, workspaceIds, apply) {
-  if (!workspaceIds.length || workspaceIds.some((id) => !/^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(id)))
-    throw new Error('Explicit valid workspace UUIDs are required');
+async function seed(client, globalLibrary, apply) {
+  if (globalLibrary !== true) throw new Error('Explicit --global-library acknowledgement is required; workspace copies are retired');
   for (const prompt of prompts) {
     if (!prompt.title.trim() || prompt.title.length > 160 || !prompt.content.trim() || prompt.content.length > 12000) throw new Error('Invalid starter prompt');
   }
   await client.query(apply ? 'BEGIN' : 'BEGIN READ ONLY');
-  const report = [];
   try {
-    for (const workspaceId of [...new Set(workspaceIds)]) {
-      const { rows: workspaces } = await client.query('SELECT id,name FROM workspaces WHERE id=$1', [workspaceId]);
-      if (workspaces.length !== 1) throw new Error('Workspace not found');
-      if (apply) await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`cc:${workspaceId}`]);
-      const { rows: existing } = await client.query('SELECT title FROM cc_prompts WHERE workspace_id=$1', [workspaceId]);
-      const titles = new Set(existing.map((row) => row.title.trim().toLocaleLowerCase('ru')));
-      const missing = prompts.filter((prompt) => !titles.has(prompt.title.toLocaleLowerCase('ru')));
-      if (existing.length + missing.length > 100) throw new Error('Workspace prompt limit would be exceeded; nothing changed');
-      if (apply) {
-        for (const [index, prompt] of missing.entries()) {
-          await client.query("INSERT INTO cc_prompts (workspace_id,title,content,created_at) VALUES ($1,$2,$3,now()-($4::integer * interval '1 millisecond'))", [workspaceId, prompt.title, prompt.content, index]);
-        }
+    if (apply) await client.query("SELECT pg_advisory_xact_lock(hashtext('platform-prompts'))");
+    const { rows: existing } = await client.query('SELECT title FROM platform_prompts');
+    const titles = new Set(existing.map((row) => row.title.trim().toLocaleLowerCase('ru')));
+    const missing = prompts.filter((prompt) => !titles.has(prompt.title.toLocaleLowerCase('ru')));
+    if (existing.length + missing.length > 100) throw new Error('Platform prompt limit would be exceeded; nothing changed');
+    if (apply) {
+      for (const [index, prompt] of missing.entries()) {
+        await client.query("INSERT INTO platform_prompts (title,content,created_at) VALUES ($1,$2,now()-($3::integer * interval '1 millisecond'))", [prompt.title, prompt.content, index]);
       }
-      report.push({ workspaceId, workspace: workspaces[0].name, existing: existing.length, [apply ? 'added' : 'planned']: missing.map((p) => p.title) });
     }
     await client.query(apply ? 'COMMIT' : 'ROLLBACK');
-    return report;
+    return { scope: 'platform', existing: existing.length, [apply ? 'added' : 'planned']: missing.map((p) => p.title) };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -158,15 +151,15 @@ async function seed(client, workspaceIds, apply) {
 module.exports = { prompts, seed };
 if (require.main === module || process.argv[1] === '-') {
   const args = process.argv.slice(2);
-  const workspaceIds = args.filter((arg) => arg.startsWith('--workspace=')).map((arg) => arg.slice('--workspace='.length));
+  if (args.some((arg) => !['--global-library', '--apply'].includes(arg))) throw new Error('Only --global-library and --apply are supported; no workspace copies');
   const { Client } = require('/app/apps/api/node_modules/pg');
   const client = new Client({ connectionString: process.env.DATABASE_URL });
   (async () => {
     try {
       await client.connect();
-      console.log(JSON.stringify(await seed(client, workspaceIds, args.includes('--apply')), null, 2));
+      console.log(JSON.stringify(await seed(client, args.includes('--global-library'), args.includes('--apply')), null, 2));
     } catch {
-      console.error('Prompt seeding failed; the transaction was rolled back. Check workspace IDs, prompt limit and database connectivity.');
+      console.error('Global prompt seeding failed; no changes committed. Check acknowledgement, prompt limit and database connectivity.');
       process.exitCode = 1;
     } finally { await client.end(); }
   })();

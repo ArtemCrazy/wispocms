@@ -25,6 +25,7 @@ import {
   type ContentCenterScreen as Screen,
 } from "./navigation";
 import styles from "./content-center-view.module.css";
+import { GlobalPromptPicker } from "./global-prompt-picker";
 
 type Prompt = { id: string; title: string; content: string };
 type Version = {
@@ -172,11 +173,6 @@ export function ContentCenterView({
   const [notice, setNotice] = useState("");
   const [material, setMaterial] = useState<MaterialDraft | null>(null);
   const [promptsOpen, setPromptsOpen] = useState(false);
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
-  const [newPrompt, setNewPrompt] = useState<{
-    title: string;
-    content: string;
-  } | null>(null);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
   const [removeMaterial, setRemoveMaterial] = useState<Material | null>(null);
@@ -320,7 +316,6 @@ export function ContentCenterView({
   }
 
   const latest = data?.versions[0];
-  const selectedPrompt = data?.prompts.find((p) => p.id === selectedPromptId);
   const title = {
     root: "Контент-центр",
     preparation: "Подготовка информации",
@@ -536,8 +531,6 @@ export function ContentCenterView({
                       onClick={() => {
                         setPromptsOpen(true);
                         setDialogError("");
-                        setNewPrompt(null);
-                        setSelectedPromptId(data.prompts[0]?.id ?? null);
                       }}
                     >
                       Список промптов
@@ -1016,132 +1009,14 @@ export function ContentCenterView({
       )}
 
       {promptsOpen && (
-        <Dialog
-          title="Список промптов"
-          busy={busy}
+        <GlobalPromptPicker
           close={() => setPromptsOpen(false)}
-        >
-          {dialogError && (
-            <div className={styles.error} role="alert">
-              {dialogError}
-            </div>
-          )}
-          <div className={styles.promptGrid}>
-            <div className={styles.promptList}>
-              <button onClick={() => setNewPrompt({ title: "", content: "" })}>
-                + Новый промпт
-              </button>
-              {data?.prompts.map((p) => (
-                <button
-                  className={
-                    selectedPromptId === p.id && !newPrompt
-                      ? styles.selected
-                      : ""
-                  }
-                  key={p.id}
-                  onClick={() => {
-                    setSelectedPromptId(p.id);
-                    setNewPrompt(null);
-                  }}
-                >
-                  {p.title}
-                </button>
-              ))}
-            </div>
-            <div>
-              {newPrompt ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void act(async () => {
-                      const row = await request<{ id: string }>(
-                        `${base}/prompts`,
-                        "POST",
-                        newPrompt,
-                      );
-                      await load();
-                      setSelectedPromptId(row.id);
-                      setNewPrompt(null);
-                    }, true);
-                  }}
-                >
-                  <fieldset disabled={busy} className={styles.formFields}>
-                    <label className={styles.field}>
-                      Название
-                      <input
-                        autoFocus
-                        required
-                        maxLength={160}
-                        value={newPrompt.title}
-                        onChange={(e) =>
-                          setNewPrompt({ ...newPrompt, title: e.target.value })
-                        }
-                      />
-                    </label>
-                    <label className={styles.field}>
-                      Текст промпта
-                      <textarea
-                        required
-                        maxLength={12000}
-                        value={newPrompt.content}
-                        onChange={(e) =>
-                          setNewPrompt({
-                            ...newPrompt,
-                            content: e.target.value,
-                          })
-                        }
-                      />
-                    </label>
-                    <div className={styles.actions}>
-                      <button className={styles.primary} disabled={busy}>
-                        Сохранить промпт
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setNewPrompt(null)}
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  </fieldset>
-                </form>
-              ) : selectedPrompt ? (
-                <>
-                  <h3>{selectedPrompt.title}</h3>
-                  <div className={styles.promptText}>
-                    {selectedPrompt.content}
-                  </div>
-                  <button
-                    className={styles.primary}
-                    style={{ marginTop: 16 }}
-                    onClick={() => {
-                      if (
-                        instruction.trim() &&
-                        !window.confirm(
-                          "Заменить текущую инструкцию текстом промпта?",
-                        )
-                      )
-                        return;
-                      changeInstruction(selectedPrompt.content);
-                      setPromptsOpen(false);
-                    }}
-                  >
-                    Использовать в задаче
-                  </button>
-                  <p className={styles.muted}>
-                    Текст скопируется в инструкцию. Сам промпт останется без
-                    изменений.
-                  </p>
-                </>
-              ) : (
-                <p className={styles.muted}>
-                  Создайте первый промпт для повторяющейся задачи.
-                </p>
-              )}
-            </div>
-          </div>
-        </Dialog>
+          onSelect={(content) => {
+            if (instruction.trim() && !window.confirm("Заменить текущую инструкцию текстом промпта?")) return;
+            changeInstruction(content);
+            setPromptsOpen(false);
+          }}
+        />
       )}
 
       {removeMaterial && (

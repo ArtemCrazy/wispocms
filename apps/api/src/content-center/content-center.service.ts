@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  GoneException,
   Injectable,
   Logger,
   NotFoundException,
@@ -137,8 +138,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         [workspaceId],
       ),
       this.db.query<Array<{ id: string; title: string; content: string }>>(
-        `SELECT id, title, content FROM cc_prompts WHERE workspace_id=$1 ORDER BY created_at DESC`,
-        [workspaceId],
+        `SELECT id, title, content FROM platform_prompts ORDER BY created_at DESC,id`,
       ),
       this.db.query<Array<Omit<Version, 'workspace_id' | 'content'>>>(
         `SELECT id, number, actor_name, reason, restored_from, created_at FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC`,
@@ -317,20 +317,10 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
 
   async createPrompt(workspaceId: string, actor: Actor, dto: PromptDto) {
     await this.access(workspaceId, actor);
-    return this.db.transaction(async (manager) => {
-      await this.lock(manager, workspaceId);
-      const [count] = await manager.query<Array<{ total: string }>>(
-        `SELECT count(*) AS total FROM cc_prompts WHERE workspace_id=$1`,
-        [workspaceId],
-      );
-      if (Number(count.total) >= 100)
-        throw new BadRequestException('В списке уже 100 промптов');
-      const [row] = await manager.query<Array<{ id: string }>>(
-        `INSERT INTO cc_prompts (workspace_id,title,content) VALUES ($1,$2,$3) RETURNING id`,
-        [workspaceId, dto.title, dto.content],
-      );
-      return row;
-    });
+    void dto; // Retired route retained for a clear response to cached clients.
+    throw new GoneException(
+      'Библиотека промптов теперь общая. Обновите страницу; редактирование доступно администратору в настройках платформы.',
+    );
   }
 
   async saveDraft(workspaceId: string, actor: Actor, dto: PreparationDraftDto) {

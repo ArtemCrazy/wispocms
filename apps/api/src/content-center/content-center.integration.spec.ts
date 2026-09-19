@@ -1,3 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { GlobalPromptLibrary1790486400000 } from '../database/migrations/1790486400000-GlobalPromptLibrary';
+import { PlatformPromptsService } from '../platform/platform-prompts.service';
 import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import type { ExecutionContext } from '@nestjs/common';
@@ -61,6 +66,7 @@ integration('Content Center / isolated PostgreSQL', () => {
     try {
       await new ContentCenterPreparation1790020800000().up(runner);
       await new ContentCenterSourceFiles1790107200000().up(runner);
+      await new GlobalPromptLibrary1790486400000().up(runner);
     } finally {
       await runner.release();
     }
@@ -96,11 +102,120 @@ integration('Content Center / isolated PostgreSQL', () => {
 
   beforeEach(async () => {
     await db.query(
-      `TRUNCATE cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts`,
+      `TRUNCATE cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts,platform_prompts`,
     );
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
+  });
+
+  it('shares prompts across workspaces without sharing project data or rewriting copied tasks', async () => {
+    const library = new PlatformPromptsService(db);
+    const prompt = await library.create({
+      title: 'Shared',
+      content: 'Original instruction',
+    });
+    await service.saveDraft(workspace, employee, {
+      instruction: prompt.content,
+      withoutMaterials: true,
+      revision: 0,
+    });
+    await service.start(workspace, employee, {
+      instruction: prompt.content,
+      withoutMaterials: true,
+    });
+    await service.processNext();
+    await expect(
+      service.createPrompt(workspace, employee, {
+        title: 'Local',
+        content: 'Private',
+      }),
+    ).rejects.toThrow('теперь общая');
+    await library.update(prompt.id, {
+      title: 'Updated',
+      content: 'Shared new instruction',
+      revision: 1,
+    });
+    expect((await service.overview(workspace, employee)).prompts).toEqual(
+      (await service.overview(otherWorkspace, admin)).prompts,
+    );
+    expect(
+      (await service.overview(workspace, employee)).prompts[0].content,
+    ).toBe('Shared new instruction');
+    expect(
+      (await service.overview(workspace, employee)).draft.instruction,
+    ).toBe('Original instruction');
+    expect(
+      (await service.overview(otherWorkspace, admin)).draft.instruction,
+    ).toBe('');
+    expect(
+      (await service.overview(otherWorkspace, admin)).versions,
+    ).toHaveLength(0);
+    await expect(
+      library.update(prompt.id, {
+        title: 'Stale',
+        content: 'Lost',
+        revision: 1,
+      }),
+    ).rejects.toThrow('другим администратором');
+    await expect(library.remove(prompt.id, 1)).rejects.toThrow(
+      'другим администратором',
+    );
+    await library.remove(prompt.id, 2);
+    expect(await library.list()).toEqual([]);
+    const runs = await db.query<Array<{ instruction: string; status: string }>>(
+      'SELECT instruction,status FROM cc_preparation_runs',
+    );
+    expect(runs[0].instruction).toBe('Original instruction');
+    expect((await service.overview(workspace, employee)).versions).toHaveLength(
+      1,
+    );
+    await expect(library.remove(prompt.id, 2)).rejects.toThrow('уже удалён');
+    expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it('migrates only exact generic starter texts once; retains private legacy data', async () => {
+    const code = readFileSync(
+      resolve(__dirname, '../../../../deploy/seed-content-center-prompts.cjs'),
+      'utf8',
+    );
+    const box = {
+      module: { exports: {} },
+      require: { main: null },
+      process: { argv: ['node', 'test'] },
+    };
+    runInNewContext(code, box);
+    const { prompts } = box.module.exports as {
+      prompts: Array<{ title: string; content: string }>;
+    };
+    for (const [index, p] of prompts.entries())
+      for (const id of [workspace, otherWorkspace]) {
+        await db.query(
+          `INSERT INTO cc_prompts (workspace_id,title,content,created_at) VALUES ($1,$2,$3,'2026-09-19 10:00:00+00'::timestamptz - ($4::int * interval '1 second'))`,
+          [id, p.title, p.content, index],
+        );
+      }
+    await db.query(
+      'INSERT INTO cc_prompts (workspace_id,title,content) VALUES ($1,$2,$3)',
+      [workspace, prompts[0].title, 'Private changed client text'],
+    );
+    await db.query('DROP TABLE platform_prompts');
+    const runner = db.createQueryRunner();
+    try {
+      await new GlobalPromptLibrary1790486400000().up(runner);
+    } finally {
+      await runner.release();
+    }
+    const shared = await new PlatformPromptsService(db).list();
+    expect(shared.map(({ title, content }) => ({ title, content }))).toEqual(
+      prompts,
+    );
+    expect(
+      await db.query('SELECT count(*)::int AS total FROM cc_prompts'),
+    ).toEqual([{ total: 13 }]);
+    expect(shared.some((p) => p.content.includes('Private changed'))).toBe(
+      false,
+    );
   });
 
   it('stores link categories and distinguishes inaccessible pages from extracted content', async () => {
@@ -400,7 +515,7 @@ integration('Content Center / isolated PostgreSQL', () => {
 
   it('persists draft and prompts without connecting any API and protects draft revisions', async () => {
     const offline = new ContentCenterService(db, new PreparationAiService());
-    await offline.createPrompt(workspace, admin, {
+    await new PlatformPromptsService(db).create({
       title: 'Бриф',
       content: 'Подготовь бриф',
     });

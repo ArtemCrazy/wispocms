@@ -38,8 +38,8 @@ function load(name) {
           ? preparation
           : id.endsWith(".css")
             ? {}
-            : id.startsWith("./")
-              ? load(id.slice(2))
+            : id.startsWith("./") || id.startsWith("../")
+              ? load(id.startsWith("../") ? id : id.slice(2))
               : require(id),
     module,
     module.exports,
