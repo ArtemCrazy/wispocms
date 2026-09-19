@@ -27,6 +27,7 @@ import { ContentCenterPreparation1790020800000 } from './migrations/179002080000
 import { ContentCenterSourceFiles1790107200000 } from './migrations/1790107200000-ContentCenterSourceFiles';
 import { ContentCenterResearch1790193600000 } from './migrations/1790193600000-ContentCenterResearch';
 import { ContentCenterCreation1790280000000 } from './migrations/1790280000000-ContentCenterCreation';
+import { CreationPublicationTargets1790340000000 } from './migrations/1790340000000-CreationPublicationTargets';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -60,6 +61,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       ContentCenterSourceFiles1790107200000,
       ContentCenterResearch1790193600000,
       ContentCenterCreation1790280000000,
+      CreationPublicationTargets1790340000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

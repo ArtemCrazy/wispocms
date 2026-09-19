@@ -96,8 +96,8 @@ export type ArticleDetails = {
   versions: Omit<Version, "snapshot" | "changes">[];
   correction: { id: string; proposals: Proposal[] } | null;
   sites: { id: string; name: string; slug: string }[];
-  categories: { id: string; name: string }[];
-  templates: { key: string; version: string; name: string }[];
+  categories: { id: string; name: string; site_id: string }[];
+  templates: { key: string; version: string; name: string; site_id: string }[];
   media: { id: string; alt_text: string }[];
 };
 export type HistoryEvent = {

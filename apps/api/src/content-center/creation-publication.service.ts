@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { IsNull } from 'typeorm';
+import type { EntityManager } from 'typeorm';
 import {
   ArticleEntity,
   ArticleRedirectEntity,
@@ -28,6 +29,31 @@ export class CreationPublicationService {
     private readonly service: CreationService,
     private readonly lifecycle: ContentLifecycleService,
   ) {}
+  private async hide(
+    m: EntityManager,
+    cms: ArticleEntity,
+    actor: CreationActor,
+  ) {
+    const before = Object.assign(new ArticleEntity(), cms);
+    cms.publicationState = PublicationState.HIDDEN;
+    cms.status = ArticleStatus.DRAFT;
+    cms.revision++;
+    cms.updatedByUserId = actor.userId;
+    await m.save(cms);
+    await this.lifecycle.recordArticleChange(
+      before,
+      cms,
+      actor.userId,
+      ContentEventType.PUBLICATION_CHANGED,
+      'Снято с публикации из Контентного центра',
+      true,
+      m,
+    );
+    await m.query(
+      'UPDATE cc_article_publications SET cms_revision=$2 WHERE cms_article_id=$1',
+      [cms.id, cms.revision],
+    );
+  }
   async publish(
     w: string,
     a: CreationActor,
@@ -37,10 +63,27 @@ export class CreationPublicationService {
     return this.service.transaction(w, a, async (m, name) => {
       const item = await this.service.article(w, id, m);
       this.service.revision(item, dto.revision);
-      if (dto.siteId !== item.site_id)
-        throw new BadRequestException(
-          'Эта статья подготовлена для другой площадки; статьи площадок независимы',
+      const moving = dto.siteId !== item.site_id;
+      if (moving) {
+        const settings = await this.service.settings(w, m);
+        if (!settings.platforms.some((p) => p.siteId === dto.siteId))
+          throw new BadRequestException(
+            'Площадка не подключена к созданию контента',
+          );
+        const [occupied] = await m.query<Array<{ id: string }>>(
+          'SELECT id FROM cc_created_articles WHERE workspace_id=$1 AND cluster_id=$2 AND site_id=$3',
+          [w, item.cluster_id, dto.siteId],
         );
+        if (occupied)
+          throw new ConflictException(
+            'Для этого кластера на площадке уже есть независимая статья. Она не будет перезаписана.',
+          );
+        await this.service.noPendingCorrection(m, id);
+        if (item.status === 'published' && !dto.confirmMove)
+          throw new BadRequestException(
+            'Подтвердите перенос: прежняя публикация будет снята, история и версии сохранятся.',
+          );
+      }
       const site = await m.findOne(SiteEntity, {
         where: { id: dto.siteId, workspaceId: w },
       });
@@ -69,17 +112,42 @@ export class CreationPublicationService {
       if (!template) throw new BadRequestException('Шаблон статьи недоступен');
       const version = await this.service.version(item, item.current_number, m);
       await this.service.validateMedia(m, w, version.snapshot);
-      let cms = item.cms_article_id
+      const [destination] = await m.query<
+        Array<{ cms_article_id: string; cms_revision: number }>
+      >(
+        'SELECT cms_article_id,cms_revision FROM cc_article_publications WHERE article_id=$1 AND site_id=$2',
+        [id, site.id],
+      );
+      const previous =
+        moving && item.cms_article_id
+          ? await m.findOne(ArticleEntity, {
+              where: {
+                id: item.cms_article_id,
+                siteId: item.site_id,
+                deletedAt: IsNull(),
+              },
+              lock: { mode: 'pessimistic_write' },
+            })
+          : null;
+      if (
+        moving &&
+        item.cms_article_id &&
+        (!previous || previous.revision !== item.cms_revision)
+      )
+        throw new ConflictException(
+          'Прежняя публикация изменена в CMS сайта. Перенос остановлен.',
+        );
+      let cms = destination
         ? await m.findOne(ArticleEntity, {
             where: {
-              id: item.cms_article_id,
+              id: destination.cms_article_id,
               siteId: site.id,
               deletedAt: IsNull(),
             },
             lock: { mode: 'pessimistic_write' },
           })
         : null;
-      if (item.cms_article_id && (!cms || cms.revision !== item.cms_revision))
+      if (destination && (!cms || cms.revision !== destination.cms_revision))
         throw new ConflictException(
           'Связанная статья изменена в CMS сайта. Публикация остановлена, чтобы не перезаписать чужую работу.',
         );
@@ -133,9 +201,33 @@ export class CreationPublicationService {
         m,
       );
       const url = `/preview/${encodeURIComponent(site.slug)}/articles/${encodeURIComponent(saved.slug)}`;
+      if (previous && item.status === 'published') {
+        await this.hide(m, previous, a);
+        await this.service.event(
+          m,
+          w,
+          name,
+          'article',
+          'unpublished',
+          item.cluster_id,
+          id,
+          version.snapshot.title,
+          {
+            version: item.published_number,
+            siteId: item.site_id,
+            url: item.publication_url,
+          },
+          null,
+        );
+      }
       await m.query(
-        "UPDATE cc_created_articles SET status='published',published_number=current_number,cms_article_id=$2,cms_revision=$3,publication_url=$4,category_id=$5,revision=revision+1,updated_at=now() WHERE id=$1",
-        [id, saved.id, saved.revision, url, category.id],
+        `INSERT INTO cc_article_publications(article_id,site_id,cms_article_id,cms_revision) VALUES($1,$2,$3,$4)
+        ON CONFLICT(article_id,site_id) DO UPDATE SET cms_article_id=excluded.cms_article_id,cms_revision=excluded.cms_revision`,
+        [id, site.id, saved.id, saved.revision],
+      );
+      await m.query(
+        "UPDATE cc_created_articles SET site_id=$6,status='published',published_number=current_number,cms_article_id=$2,cms_revision=$3,publication_url=$4,category_id=$5,revision=revision+1,updated_at=now() WHERE id=$1",
+        [id, saved.id, saved.revision, url, category.id, site.id],
       );
       await this.service.event(
         m,
@@ -170,21 +262,7 @@ export class CreationPublicationService {
         throw new ConflictException(
           'Связанная статья изменена в CMS сайта. Обновите данные перед снятием.',
         );
-      const before = Object.assign(new ArticleEntity(), cms);
-      cms.publicationState = PublicationState.HIDDEN;
-      cms.status = ArticleStatus.DRAFT;
-      cms.revision++;
-      cms.updatedByUserId = a.userId;
-      await m.save(cms);
-      await this.lifecycle.recordArticleChange(
-        before,
-        cms,
-        a.userId,
-        ContentEventType.PUBLICATION_CHANGED,
-        'Снято с публикации из Контентного центра',
-        true,
-        m,
-      );
+      await this.hide(m, cms, a);
       await m.query(
         "UPDATE cc_created_articles SET status='unpublished',published_number=NULL,publication_url=NULL,cms_revision=$2,revision=revision+1,updated_at=now() WHERE id=$1",
         [id, cms.revision],

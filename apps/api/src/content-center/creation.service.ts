@@ -324,6 +324,10 @@ export class CreationService {
   async details(w: string, a: CreationActor, id: string) {
     await this.access(w, a);
     const article = await this.article(w, id);
+    const settings = await this.settings(w);
+    const siteIds = [
+      ...new Set([article.site_id, ...settings.platforms.map((p) => p.siteId)]),
+    ];
     const [version, versions, correction, sites, categories, templates, media] =
       await Promise.all([
         this.version(article),
@@ -343,16 +347,18 @@ export class CreationService {
           [id],
         ),
         this.db.query<Array<{ id: string; name: string; slug: string }>>(
-          'SELECT id,name,slug FROM sites WHERE workspace_id=$1 AND id=$2',
-          [w, article.site_id],
+          'SELECT id,name,slug FROM sites WHERE workspace_id=$1 AND id=ANY($2::uuid[]) AND is_active ORDER BY name',
+          [w, siteIds],
         ),
-        this.db.query<Array<{ id: string; name: string }>>(
-          `SELECT id,name FROM categories WHERE site_id=$1 AND deleted_at IS NULL AND publication_state='published' AND (published_at IS NULL OR published_at<=now()) ORDER BY sort_order,name`,
-          [article.site_id],
+        this.db.query<Array<{ id: string; name: string; site_id: string }>>(
+          `SELECT c.id,c.name,c.site_id FROM categories c JOIN sites s ON s.id=c.site_id WHERE s.workspace_id=$1 AND c.site_id=ANY($2::uuid[]) AND c.deleted_at IS NULL AND c.publication_state='published' AND (c.published_at IS NULL OR c.published_at<=now()) ORDER BY c.sort_order,c.name`,
+          [w, siteIds],
         ),
-        this.db.query<Array<{ key: string; version: string; name: string }>>(
-          `SELECT key,version,name FROM site_content_templates WHERE site_id=$1 AND kind='article' AND is_active ORDER BY name`,
-          [article.site_id],
+        this.db.query<
+          Array<{ key: string; version: string; name: string; site_id: string }>
+        >(
+          `SELECT t.key,t.version,t.name,t.site_id FROM site_content_templates t JOIN sites s ON s.id=t.site_id WHERE s.workspace_id=$1 AND t.site_id=ANY($2::uuid[]) AND t.kind='article' AND t.is_active ORDER BY t.name`,
+          [w, siteIds],
         ),
         this.db.query<Array<{ id: string; alt_text: string }>>(
           'SELECT id,alt_text FROM media WHERE workspace_id=$1',

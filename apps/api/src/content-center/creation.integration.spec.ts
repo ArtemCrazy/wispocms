@@ -17,6 +17,8 @@ import {
 import { ContentLifecycleService } from '../content/content-lifecycle.service';
 import { ContentCenterPreparation1790020800000 } from '../database/migrations/1790020800000-ContentCenterPreparation';
 import { ContentCenterCreation1790280000000 } from '../database/migrations/1790280000000-ContentCenterCreation';
+import { CreationPublicationTargets1790340000000 } from '../database/migrations/1790340000000-CreationPublicationTargets';
+import { containsCorrectionFragment } from './creation-model';
 import { ContentCenterService } from './content-center.service';
 import { PreparationAiService } from './preparation-ai.service';
 import { CreationService } from './creation.service';
@@ -41,7 +43,8 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       site = randomUUID(),
       site2 = randomUUID(),
       foreignSite = randomUUID(),
-      category = randomUUID();
+      category = randomUUID(),
+      category2 = randomUUID();
     const actor = { userId: randomUUID(), platformRole: PlatformRole.EMPLOYEE };
     let root: DataSource,
       db: DataSource,
@@ -90,6 +93,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       try {
         await new ContentCenterPreparation1790020800000().up(q);
         await new ContentCenterCreation1790280000000().up(q);
+        await new CreationPublicationTargets1790340000000().up(q);
       } finally {
         await q.release();
       }
@@ -116,6 +120,10 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       await db.query(
         "INSERT INTO categories(id,site_id,name,slug,display_template_key,display_template_version,publication_state) VALUES($1,$2,'Уход','care','editorial','1','published')",
         [category, site],
+      );
+      await db.query(
+        "INSERT INTO categories(id,site_id,name,slug,display_template_key,display_template_version,publication_state) VALUES($1,$2,'Раздел второго сайта','second-care','editorial','1','published')",
+        [category2, site2],
       );
       const access = new ContentCenterService(db, new PreparationAiService());
       service = new CreationService(db, access);
@@ -196,6 +204,226 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       templateVersion: '1',
     });
 
+    it('moves an explicit publication without losing old URLs, versions or independent platform articles', async () => {
+      const { article } = await create();
+      await service.saveSettings(workspace, actor, {
+        revision: 1,
+        rules: 'Rules',
+        platforms: [
+          { siteId: site, rules: '' },
+          { siteId: site2, rules: '' },
+        ],
+      });
+      const details = await service.details(workspace, actor, article.id);
+      expect(details.sites.map((s) => s.id).sort()).toEqual(
+        [site, site2].sort(),
+      );
+      expect(details.categories.find((c) => c.id === category2)?.site_id).toBe(
+        site2,
+      );
+      const first = await publication.publish(
+        workspace,
+        actor,
+        article.id,
+        publishDto(1),
+      );
+      const next = {
+        ...publishDto(2),
+        siteId: site2,
+        categoryId: category2,
+        slug: 'second-place',
+      };
+      await expect(
+        publication.publish(workspace, actor, article.id, next),
+      ).rejects.toThrow('Подтвердите перенос');
+      await expect(
+        publication.publish(workspace, actor, article.id, {
+          ...next,
+          confirmMove: true,
+          categoryId: category,
+        }),
+      ).rejects.toThrow('раздел');
+      expect((await service.article(workspace, article.id)).site_id).toBe(site);
+      const second = await publication.publish(workspace, actor, article.id, {
+        ...next,
+        confirmMove: true,
+      });
+      expect(second.url).toContain('/creation-second/');
+      const moved = await service.article(workspace, article.id);
+      expect(moved).toMatchObject({
+        site_id: site2,
+        current_number: 1,
+        published_number: 1,
+        status: 'published',
+      });
+      const copies = await db.query<
+        Array<{ site_id: string; publication_state: string }>
+      >(
+        'SELECT a.site_id,a.publication_state FROM articles a JOIN cc_article_publications p ON p.cms_article_id=a.id WHERE p.article_id=$1',
+        [article.id],
+      );
+      expect(copies.find((c) => c.site_id === site)?.publication_state).toBe(
+        'hidden',
+      );
+      expect(copies.find((c) => c.site_id === site2)?.publication_state).toBe(
+        'published',
+      );
+      const returned = await publication.publish(workspace, actor, article.id, {
+        ...publishDto(moved.revision),
+        confirmMove: true,
+        slug: 'must-not-change',
+      });
+      expect(returned.url).toBe(first.url);
+      expect(
+        (await service.details(workspace, actor, article.id)).versions,
+      ).toHaveLength(1);
+      const history = await service.history(workspace, actor);
+      expect(
+        history.events.filter((e) => e.type === 'unpublished'),
+      ).toHaveLength(2);
+    });
+    it('refuses occupied or foreign destinations and detects edits to an earlier publication', async () => {
+      const { article, cluster } = await create();
+      await service.saveSettings(workspace, actor, {
+        revision: 1,
+        rules: '',
+        platforms: [
+          { siteId: site, rules: '' },
+          { siteId: site2, rules: '' },
+        ],
+      });
+      await expect(
+        publication.publish(workspace, actor, article.id, {
+          ...publishDto(1),
+          siteId: foreignSite,
+        }),
+      ).rejects.toThrow();
+      await publication.publish(workspace, actor, article.id, publishDto(1));
+      await publication.publish(workspace, actor, article.id, {
+        ...publishDto(2),
+        siteId: site2,
+        categoryId: category2,
+        confirmMove: true,
+      });
+      await db.query(
+        'UPDATE articles SET revision=revision+1 WHERE site_id=$1',
+        [site],
+      );
+      await expect(
+        publication.publish(workspace, actor, article.id, {
+          ...publishDto(3),
+          confirmMove: true,
+        }),
+      ).rejects.toThrow('изменена');
+      produce.mockImplementation((input) =>
+        Promise.resolve(
+          input.article
+            ? {
+                relevant: true,
+                recommendation: 'keep',
+                rationale: 'Без изменений',
+              }
+            : {
+                relevant: true,
+                recommendation: 'create',
+                rationale: 'Новая независимая статья',
+                purpose: 'Информирование',
+                task: 'Объяснить',
+                need: 'Выбор',
+                contentRationale: 'По запросам',
+                article: snapshot(),
+              },
+        ),
+      );
+      await runs.start(workspace, actor, {
+        clusterIds: [cluster.id],
+        instruction: '',
+      });
+      await runs.processNext();
+      const current = await service.article(workspace, article.id);
+      await expect(
+        publication.publish(workspace, actor, article.id, {
+          ...publishDto(current.revision),
+          confirmMove: true,
+        }),
+      ).rejects.toThrow('независимая статья');
+      expect((await service.article(workspace, article.id)).site_id).toBe(
+        site2,
+      );
+    });
+    it('backfills publication ownership for existing CMS links', async () => {
+      const { article } = await create();
+      await publication.publish(workspace, actor, article.id, publishDto(1));
+      const q = db.createQueryRunner();
+      try {
+        await new CreationPublicationTargets1790340000000().down(q);
+        await new CreationPublicationTargets1790340000000().up(q);
+      } finally {
+        await q.release();
+      }
+      const [mapping] = await db.query<Array<{ site_id: string }>>(
+        'SELECT * FROM cc_article_publications WHERE article_id=$1',
+        [article.id],
+      );
+      expect(mapping.site_id).toBe(site);
+      await publication.unpublish(workspace, actor, article.id, 2);
+      expect((await service.article(workspace, article.id)).status).toBe(
+        'unpublished',
+      );
+    });
+    it('validates selected visible text rather than JSON escaping or internal document fields', async () => {
+      const value = snapshot();
+      value.document.blocks = [
+        {
+          id: 'intro',
+          type: 'paragraph',
+          text: 'Первый "фрагмент"\nна новой строке',
+        },
+      ];
+      expect(
+        containsCorrectionFragment(
+          value,
+          '"фрагмент"\nна новой',
+          'block:intro',
+        ),
+      ).toBe(true);
+      expect(
+        containsCorrectionFragment(value, '"фрагмент" на новой', 'block:intro'),
+      ).toBe(true);
+      expect(
+        containsCorrectionFragment(value, 'paragraph', 'block:intro'),
+      ).toBe(false);
+      expect(containsCorrectionFragment(value, 'Несуществующий текст')).toBe(
+        false,
+      );
+      produce.mockResolvedValueOnce({
+        relevant: true,
+        recommendation: 'create',
+        rationale: 'Контекст',
+        purpose: 'Информирование',
+        task: 'Объяснить',
+        need: 'Выбор',
+        contentRationale: 'По запросам',
+        article: value,
+      });
+      const { article } = await create();
+      await runs.correct(workspace, actor, article.id, {
+        revision: 1,
+        instruction: 'Сократи',
+        target: 'block:intro',
+        fragment: '"фрагмент" на новой',
+      });
+      const [run] = await db.query<
+        Array<{
+          input: { instruction: string; target: string; fragment: string };
+        }>
+      >("SELECT input FROM cc_creation_runs WHERE kind='correction'");
+      expect(run.input).toMatchObject({
+        instruction: 'Сократи',
+        target: 'block:intro',
+        fragment: '"фрагмент" на новой',
+      });
+    });
     it('isolates workspace access, rejects foreign platforms and stale settings/cluster writes', async () => {
       await expect(service.overview(other, actor)).rejects.toThrow(
         'недоступно',

@@ -99,7 +99,7 @@ test("article exposes per-proposal decisions, unpublished current-version notice
           ],
         },
       },
-      data: { ai: { connected: false }, run: null },
+      data: { ai: { connected: false }, run: null, articles: [] },
       location: { screen: "article" },
       navigate() {},
       async refresh() {},
@@ -275,4 +275,26 @@ test("history presentation tolerates empty events and never turns unsafe publica
       event({ type: "formed", after: cluster() }),
     ]).includes("Кластер ещё не создан."),
   );
+});
+
+test("article selection excludes surrounding controls and rejects selections outside the current article", () => {
+  const { articleSelection } = load("creation-selection");
+  const target = { dataset: { aiTarget: "block:intro" } };
+  const textNode = { nodeType: 3, parentElement: { closest: () => target } };
+  let removed = false;
+  const root = {
+    contains: (node) => node === textNode || node === target,
+    ownerDocument: { createTreeWalker: () => {
+      let index = -1;
+      const texts = ['Первый "фрагмент"', 'на новой строке'];
+      return { nextNode() { index++; return index < texts.length; }, get currentNode() { return {textContent:texts[index]}; } };
+    } },
+  };
+  const range = { startContainer: textNode, endContainer: textNode, cloneContents: () => ({querySelectorAll: () => [{remove(){removed=true;}}]}) };
+  const selected = { isCollapsed:false,rangeCount:1,getRangeAt:()=>range };
+  assert.deepEqual(articleSelection(root,selected),{target:'block:intro',fragment:'Первый "фрагмент"\nна новой строке'});
+  assert.equal(removed,true);
+  assert.equal(articleSelection(root,{...selected,isCollapsed:true}),null);
+  assert.equal(articleSelection(root,{...selected,getRangeAt:()=>({...range,endContainer:{}})}),null);
+  assert.equal(articleSelection(root,null),null);
 });

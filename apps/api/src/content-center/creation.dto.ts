@@ -73,6 +73,7 @@ export class RestoreCreatedVersionDto extends CreationRevisionDto {
   @IsInt() @Min(1) number!: number;
 }
 export class PublishCreatedArticleDto extends CreationRevisionDto {
+  @IsOptional() @IsBoolean() confirmMove?: boolean;
   @IsUUID() siteId!: string;
   @IsUUID() categoryId!: string;
   @IsString()

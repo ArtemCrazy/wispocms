@@ -1,4 +1,5 @@
 "use client";
+import { articleSelection, type ArticleSelection } from "./creation-selection";
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { ArticleDocumentBlock } from "../structured-article-editor";
@@ -138,8 +139,22 @@ export function CreationArticle({
   const [category, setCategory] = useState(article.category_id ?? ""),
     [slug, setSlug] = useState(`article-${article.id.slice(0, 8)}`),
     [template, setTemplate] = useState("");
+  const [siteId, setSiteId] = useState(article.site_id);
+  const [confirmMove, setConfirmMove] = useState(false);
   const [historical, setHistorical] = useState<Version | null>(null);
   const correctionRef = useRef<HTMLElement>(null);
+  const articleRef = useRef<HTMLElement>(null);
+  const [selection, setSelection] = useState<ArticleSelection | null>(null);
+  useEffect(() => {
+    const read = () =>
+      setSelection(
+        articleRef.current
+          ? articleSelection(articleRef.current, window.getSelection())
+          : null,
+      );
+    document.addEventListener("selectionchange", read);
+    return () => document.removeEventListener("selectionchange", read);
+  }, []);
   useEffect(() => {
     onDirtyChange(Boolean(instruction || file || voice || fragment));
     return () => onDirtyChange(false);
@@ -178,9 +193,9 @@ export function CreationArticle({
       setBusy(false);
     }
   }
-  function choose(target: string) {
+  function choose(target: string, fragment = "") {
     setTarget(target);
-    setFragment("");
+    setFragment(fragment);
     correctionRef.current?.scrollIntoView({
       behavior: "smooth",
       block: "start",
@@ -188,9 +203,16 @@ export function CreationArticle({
   }
   const running =
     data.run?.status === "queued" || data.run?.status === "processing";
+  const moving = siteId !== article.site_id;
+  const categories = details.categories.filter((c) => c.site_id === siteId);
+  const templates = details.templates.filter((t) => t.site_id === siteId);
+  const occupiedSites = new Set(
+    data.articles
+      .filter((a) => a.cluster_id === article.cluster_id && a.id !== article.id)
+      .map((a) => a.site_id),
+  );
   const publishTemplate =
-    template ||
-    [details.templates[0]?.key, details.templates[0]?.version].join(":");
+    template || [templates[0]?.key, templates[0]?.version].join(":");
   return (
     <>
       <div className={styles.actions}>
@@ -486,17 +508,30 @@ export function CreationArticle({
               ))}
             </section>
           )}
-          <section className={styles.card}>
+          <section className={styles.card} ref={articleRef}>
             <h2>Актуальная статья</h2>
+            <p className={styles.muted}>
+              Выделите текст статьи для точечной корректировки. Инструкция
+              вводится отдельно.
+            </p>
+            <button
+              disabled={!selection}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                if (selection) choose(selection.target, selection.fragment);
+              }}
+            >
+              Изменить выделенный фрагмент с помощью AI
+            </button>
             <div className={styles.creationElement}>
-              <h2>{version.snapshot.title}</h2>
+              <h2 data-ai-target="title">{version.snapshot.title}</h2>
               <button onClick={() => choose("title")}>
                 Изменить с помощью AI
               </button>
             </div>
             {version.snapshot.excerpt && (
               <div className={styles.creationElement}>
-                <p>{version.snapshot.excerpt}</p>
+                <p data-ai-target="excerpt">{version.snapshot.excerpt}</p>
                 <button onClick={() => choose("excerpt")}>
                   Изменить с помощью AI
                 </button>
@@ -504,7 +539,9 @@ export function CreationArticle({
             )}
             {version.snapshot.document.blocks.map((b) => (
               <div key={b.id} className={styles.creationElement}>
-                <Block block={b} siteSlug={article.site_id} />
+                <div data-ai-target={`block:${b.id}`}>
+                  <Block block={b} siteSlug={article.site_id} />
+                </div>
                 <button
                   aria-label={`Изменить с помощью AI: ${b.id}`}
                   onClick={() => choose(`block:${b.id}`)}
@@ -533,7 +570,8 @@ export function CreationArticle({
                   "POST",
                   {
                     revision: article.revision,
-                    siteId: article.site_id,
+                    siteId,
+                    confirmMove,
                     categoryId: category,
                     slug,
                     templateKey,
@@ -550,14 +588,50 @@ export function CreationArticle({
             </p>
             <label className={styles.field}>
               Целевая площадка
-              <select value={article.site_id} disabled>
+              <select
+                value={siteId}
+                disabled={busy}
+                onChange={(event) => {
+                  setSiteId(event.target.value);
+                  setCategory("");
+                  setTemplate("");
+                  setConfirmMove(false);
+                }}
+              >
                 {details.sites.map((s) => (
-                  <option key={s.id} value={s.id}>
+                  <option
+                    key={s.id}
+                    value={s.id}
+                    disabled={occupiedSites.has(s.id)}
+                  >
                     {s.name}
+                    {occupiedSites.has(s.id)
+                      ? " — уже есть статья кластера"
+                      : ""}
                   </option>
                 ))}
               </select>
             </label>
+            {moving && (
+              <div className={styles.notice}>
+                <p>
+                  Статья будет закреплена за выбранной площадкой. Её версии и
+                  история сохранятся. Правила другой площадки могут отличаться —
+                  проверьте текст перед публикацией.
+                </p>
+                {article.status === "published" && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={confirmMove}
+                      onChange={(event) => setConfirmMove(event.target.checked)}
+                    />
+                    Подтверждаю перенос: снять прежнюю публикацию и опубликовать
+                    текущую версию на выбранной площадке.
+                  </label>
+                )}
+              </div>
+            )}
             <label className={styles.field}>
               Раздел
               <select
@@ -566,7 +640,7 @@ export function CreationArticle({
                 onChange={(e) => setCategory(e.target.value)}
               >
                 <option value="">Выберите опубликованный раздел</option>
-                {details.categories.map((c) => (
+                {categories.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
                   </option>
@@ -580,7 +654,7 @@ export function CreationArticle({
                 value={publishTemplate}
                 onChange={(e) => setTemplate(e.target.value)}
               >
-                {details.templates.map((t) => (
+                {templates.map((t) => (
                   <option
                     key={`${t.key}:${t.version}`}
                     value={`${t.key}:${t.version}`}
@@ -590,7 +664,7 @@ export function CreationArticle({
                 ))}
               </select>
             </label>
-            {article.cms_article_id ? (
+            {article.cms_article_id && !moving ? (
               <p className={styles.muted}>Существующий URL сохранится.</p>
             ) : (
               <label className={styles.field}>
@@ -608,7 +682,12 @@ export function CreationArticle({
             <div className={styles.actions}>
               <button
                 className={styles.primary}
-                disabled={busy || !category || !details.templates.length}
+                disabled={
+                  busy ||
+                  !category ||
+                  !templates.length ||
+                  (moving && article.status === "published" && !confirmMove)
+                }
               >
                 Отправить в публикацию
               </button>

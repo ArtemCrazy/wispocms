@@ -162,6 +162,35 @@ export function targetValue(
   }
   throw new BadRequestException('Элемент статьи не найден');
 }
+export function containsCorrectionFragment(
+  snapshot: CreationSnapshot,
+  fragment: string,
+  target?: string,
+): boolean {
+  const value = target ? targetValue(snapshot, target) : snapshot;
+  const visibleText = (input: unknown): string => {
+    if (typeof input === 'string') return input;
+    if (Array.isArray(input)) return input.map(visibleText).join('\n');
+    if (!input || typeof input !== 'object') return '';
+    const object = input as Record<string, unknown>;
+    return [
+      'title',
+      'excerpt',
+      'document',
+      'blocks',
+      'text',
+      'items',
+      'caption',
+      'cite',
+    ]
+      .filter((key) => object[key] !== undefined)
+      .map((key) => visibleText(object[key]))
+      .join('\n');
+  };
+  const normalize = (text: string) => text.replace(/\s+/gu, ' ').trim();
+  const needle = normalize(fragment);
+  return Boolean(needle && normalize(visibleText(value)).includes(needle));
+}
 export function applyProposals(
   snapshot: CreationSnapshot,
   proposals: Proposal[],

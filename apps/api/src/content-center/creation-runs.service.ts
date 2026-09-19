@@ -17,6 +17,7 @@ import type { CreationProvider } from './creation-ai.service';
 import type { CorrectionDto, CreationRunDto } from './creation.dto';
 import {
   boundedText,
+  containsCorrectionFragment,
   creationSnapshot,
   eligibleArticle,
   normalizeProposals,
@@ -248,9 +249,7 @@ export class CreationRunsService implements OnModuleInit, OnModuleDestroy {
       if (target) targetValue(version.snapshot, target);
       if (
         dto.fragment &&
-        !JSON.stringify(
-          target ? targetValue(version.snapshot, target) : version.snapshot,
-        ).includes(dto.fragment)
+        !containsCorrectionFragment(version.snapshot, dto.fragment, target)
       )
         throw new BadRequestException(
           'Выбранный фрагмент не найден в актуальной статье',
