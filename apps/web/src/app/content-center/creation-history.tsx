@@ -1,14 +1,123 @@
 "use client";
 import { useState } from "react";
 import {
-  EVENT_TYPE,
-  RUN_STATUS,
-  valueText,
+  type Cluster,
   type CreationLocation,
   type History,
 } from "./creation-state";
+import {
+  clusterSnapshots,
+  historyLabels,
+  publicationDetails,
+} from "./creation-history-state";
 import { creationDate } from "./creation-shared";
 import styles from "./content-center-view.module.css";
+
+function ClusterSnapshots({
+  value,
+  navigate,
+}: {
+  value: unknown;
+  navigate: (l: Partial<CreationLocation>) => void;
+}) {
+  const clusters = clusterSnapshots(value);
+  if (!clusters.length)
+    return <p className={styles.muted}>Кластер ещё не создан.</p>;
+  return clusters.map((cluster: Cluster) => (
+    <section key={cluster.id} className={styles.creationEventSnapshot}>
+      <button
+        className={styles.link}
+        onClick={() => navigate({ screen: "cluster", id: cluster.id })}
+      >
+        № {cluster.number} · {cluster.title} ↗
+      </button>
+      <dl className={styles.creationEventFields}>
+        <dt>Направление</dt>
+        <dd>{cluster.direction || "Не указано"}</dd>
+        <dt>Состояние</dt>
+        <dd>{cluster.archived ? "В архиве" : "Актуальный"}</dd>
+        <dt>Запросов</dt>
+        <dd>{cluster.queries.length}</dd>
+      </dl>
+      <div className={styles.tableWrap}>
+        <table>
+          <caption>Запросы и частотность на момент события</caption>
+          <thead>
+            <tr>
+              <th>Запрос</th>
+              <th>Общая</th>
+              <th>Точная</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cluster.queries.map((query) => (
+              <tr key={query.text}>
+                <td>
+                  {query.text}
+                  {query.primary && <strong> · основной</strong>}
+                </td>
+                <td>{query.general}</td>
+                <td>{query.exact}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  ));
+}
+
+function PublicationDetails({
+  value,
+  articleId,
+  navigate,
+}: {
+  value: unknown;
+  articleId: string | null;
+  navigate: (l: Partial<CreationLocation>) => void;
+}) {
+  const publication = publicationDetails(value);
+  return (
+    <dl className={styles.creationEventFields}>
+      <dt>Опубликованная версия</dt>
+      <dd>
+        {publication.version !== null && articleId ? (
+          <button
+            className={styles.link}
+            onClick={() =>
+              navigate({
+                screen: "versions",
+                id: articleId,
+                version: publication.version,
+              })
+            }
+          >
+            Версия {publication.version} ↗
+          </button>
+        ) : (
+          "Не указана"
+        )}
+      </dd>
+      <dt>Площадка</dt>
+      <dd>{publication.siteName}</dd>
+      <dt>Адрес публикации</dt>
+      <dd>
+        {publication.href ? (
+          <a
+            className={styles.link}
+            href={publication.href}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {publication.href}
+          </a>
+        ) : (
+          "Не указан"
+        )}
+      </dd>
+    </dl>
+  );
+}
 
 export function CreationHistory({
   data,
@@ -23,8 +132,12 @@ export function CreationHistory({
     [from, setFrom] = useState(""),
     [to, setTo] = useState(""),
     [actor, setActor] = useState(""),
-    [type, setType] = useState("");
+    [types, setTypes] = useState<
+      Partial<Record<CreationLocation["historyTab"], string>>
+    >({});
   const tab = location.historyTab;
+  const type = types[tab] ?? "";
+  const labels = historyLabels(tab);
   const rows =
     tab === "runs"
       ? data.runs.map((r) => ({
@@ -57,7 +170,7 @@ export function CreationHistory({
     const end = to ? new Date(`${to}T23:59:59.999`) : null;
     return (
       (!search ||
-        `${r.title} ${r.actor_name} ${r.type}`
+        `${r.title} ${r.actor_name} ${labels[r.type] ?? r.type}`
           .toLocaleLowerCase()
           .includes(search.toLocaleLowerCase())) &&
       (!actor || r.actor_name === actor) &&
@@ -66,7 +179,6 @@ export function CreationHistory({
       (!end || date <= end)
     );
   });
-  const labels = tab === "runs" ? RUN_STATUS : EVENT_TYPE;
   return (
     <>
       <div
@@ -87,7 +199,6 @@ export function CreationHistory({
             className={tab === id ? styles.selected : undefined}
             key={id}
             onClick={() => {
-              setType("");
               navigate({ screen: "history", historyTab: id });
             }}
           >
@@ -148,7 +259,10 @@ export function CreationHistory({
           </label>
           <label className={styles.field}>
             {tab === "runs" ? "Результат" : "Тип события"}
-            <select value={type} onChange={(e) => setType(e.target.value)}>
+            <select
+              value={type}
+              onChange={(e) => setTypes({ ...types, [tab]: e.target.value })}
+            >
               <option value="">Все</option>
               {Object.entries(labels).map(([key, label]) => (
                 <option key={key} value={key}>
@@ -226,13 +340,26 @@ export function CreationHistory({
                           {r.event.kind === "cluster" ? (
                             <>
                               <b>Было</b>
-                              <pre>{valueText(r.event.before)}</pre>
+                              <ClusterSnapshots
+                                value={r.event.before}
+                                navigate={navigate}
+                              />
                               <b>Стало</b>
-                              <pre>{valueText(r.event.after)}</pre>
+                              <ClusterSnapshots
+                                value={r.event.after}
+                                navigate={navigate}
+                              />
+                              {(r.event.type === "split" ||
+                                r.event.type === "merge") && (
+                                <p className={styles.muted}>
+                                  Исходные кластеры перенесены в архив. Их
+                                  статьи и история сохранены.
+                                </p>
+                              )}
                               {r.event.related_ids.length > 0 && (
                                 <p>
                                   Связанные кластеры:{" "}
-                                  {r.event.related_ids.map((id, i) => (
+                                  {r.event.related_ids.map((id) => (
                                     <button
                                       className={styles.link}
                                       key={id}
@@ -240,19 +367,32 @@ export function CreationHistory({
                                         navigate({ screen: "cluster", id })
                                       }
                                     >
-                                      Кластер {i + 1} ↗{" "}
+                                      {(() => {
+                                        const cluster = [
+                                          ...clusterSnapshots(r.event!.before),
+                                          ...clusterSnapshots(r.event!.after),
+                                        ].find((item) => item.id === id);
+                                        return cluster
+                                          ? `№ ${cluster.number} · ${cluster.title}`
+                                          : "Открыть кластер";
+                                      })()}{" "}
+                                      ↗{" "}
                                     </button>
                                   ))}
                                 </p>
                               )}
                             </>
                           ) : (
-                            <pre>{valueText(r.event.after)}</pre>
+                            <PublicationDetails
+                              value={r.event.after}
+                              articleId={r.event.article_id}
+                              navigate={navigate}
+                            />
                           )}
                         </details>
                       )}
                   </td>
-                  <td>{labels[r.type as keyof typeof labels] ?? r.type}</td>
+                  <td>{labels[r.type] ?? r.type}</td>
                   {r.run && <td>{r.run.cluster_count}</td>}
                   <td>{r.actor_name}</td>
                 </tr>
