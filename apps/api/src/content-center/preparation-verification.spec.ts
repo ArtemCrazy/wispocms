@@ -6,6 +6,7 @@ import {
 import {
   checkedRegister,
   REGISTER_DRAFT_TITLE,
+  registerReviewBatches,
 } from './preparation-verification';
 import {
   preparationRequestSize,
@@ -115,14 +116,122 @@ describe('source-grounded intermediate verification', () => {
     expect(generate.mock.calls.some(([r]) => isReview(r))).toBe(true);
   });
 
-  it.each(['', 'bad\0text', 'x'.repeat(10001), '\n'.repeat(5000)])(
-    'rejects an invalid or excessively escaped register',
+  it.each(['', 'bad\0text', 'x'.repeat(80001), '\n'.repeat(5000)])(
+    'rejects an empty, corrupt or excessive register',
     (value) => {
-      expect(() => checkedRegister(value)).toThrow(
-        'не удалось безопасно проверить',
-      );
+      expect(() => checkedRegister(value)).toThrow('промежуточный реестр');
     },
   );
+
+  it('accepts a valid register above the planning reserve when the actual review fits', () => {
+    const draft = 'Подробный реестр. '.repeat(1500);
+    const sources = [{ title: '[S1.1]', content: 'Факты', sourceUrl: null }];
+    expect(checkedRegister(draft)).toBe(draft);
+    const parts = registerReviewBatches(
+      sources,
+      draft,
+      'Сверь',
+      preparationRequestSize,
+    );
+    expect(parts).toHaveLength(1);
+    expect(parts[0].at(-1)?.content).toBe(draft);
+  });
+
+  it('splits an escaped oversized draft without losing text or omitting original qualifiers', () => {
+    const sources = [
+      {
+        title: '[S1.1]',
+        content: 'Только внутри МКАД. ' + 'x'.repeat(35000),
+        sourceUrl: null,
+      },
+    ];
+    const draft = 'Факт \\"\n'.repeat(2800);
+    const parts = registerReviewBatches(
+      sources,
+      draft,
+      'Сверь',
+      preparationRequestSize,
+    );
+    expect(parts.length).toBeGreaterThan(1);
+    expect(
+      parts
+        .flatMap((p) => p.slice(sources.length))
+        .map((p) => p.content)
+        .join('') === draft,
+    ).toBe(true);
+    for (const part of parts) {
+      expect(part.slice(0, sources.length)).toEqual(sources);
+      expect(
+        preparationRequestSize('Сверь', {
+          materials: part,
+          previousResult: null,
+        }),
+      ).toBeLessThanOrEqual(60000);
+    }
+  });
+
+  it('bounds the number of review fragments before making any calls', () => {
+    const sources = [
+      { title: '[S1.1]', content: 'x'.repeat(55000), sourceUrl: null },
+    ];
+    expect(() =>
+      registerReviewBatches(
+        sources,
+        'Р'.repeat(79999),
+        'Сверь',
+        preparationRequestSize,
+      ),
+    ).toThrow('более 8 частей');
+  });
+
+  it('completes extraction, split verification and synthesis for a verbose model response', async () => {
+    const draft = 'Факты с подробными условиями. '.repeat(800);
+    const verified = 'Проверенные сведения. '.repeat(500); // Valid result above the former 10k ceiling.
+    const generate = jest
+      .fn<ReturnType<PreparationProvider['generate']>, [Request]>()
+      .mockImplementation((r) =>
+        Promise.resolve({
+          content: isExtraction(r)
+            ? draft
+            : isReview(r)
+              ? verified
+              : 'Готовый документ',
+        }),
+      );
+    await expect(
+      new PreparationAiService({ name: 'test', generate }).generate('Обзор', {
+        materials: [
+          { title: '[S1.1]', content: 'x'.repeat(70000), sourceUrl: null },
+        ],
+        previousResult: null,
+      }),
+    ).resolves.toBe('Готовый документ');
+    const requests = generate.mock.calls.map(([r]) => r);
+    const extracts = requests.filter(isExtraction);
+    const reviews = requests.filter(isReview);
+    expect(reviews.length).toBeGreaterThan(extracts.length);
+    expect(
+      requests.at(-1)?.context.materials.every((m) => m.content === verified),
+    ).toBe(true);
+    for (const extraction of extracts) {
+      const source = extraction.context.materials[0];
+      const matching = reviews.filter(
+        (r) => r.context.materials[0].content === source.content,
+      );
+      expect(
+        matching
+          .flatMap((r) =>
+            r.context.materials.slice(extraction.context.materials.length),
+          )
+          .map((m) => m.content)
+          .join('') === draft,
+      ).toBe(true);
+    }
+    for (const r of requests)
+      expect(
+        preparationRequestSize(r.instruction, r.context),
+      ).toBeLessThanOrEqual(60000);
+  });
 
   it('does not synthesize or silently use an unverified draft after verification fails', async () => {
     const generate = jest
@@ -154,7 +263,7 @@ describe('source-grounded intermediate verification', () => {
         'Обзор',
         input,
       ),
-    ).rejects.toThrow('не удалось безопасно проверить');
+    ).rejects.toThrow('промежуточный реестр');
     expect(
       generate.mock.calls.every(([r]) => isExtraction(r) || isReview(r)),
     ).toBe(true);

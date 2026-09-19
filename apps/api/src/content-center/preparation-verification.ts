@@ -1,8 +1,13 @@
 import { AiProviderError } from '../ai/ai-provider.error';
 import type { PreparationInput } from './preparation-ai.service';
+import {
+  preparationBatches,
+  PREPARATION_REQUEST_LIMIT,
+} from './preparation-budget';
 
 // Reserve serialized space before extraction, so the original batch and its draft
-// can be read together during a single bounded verification call.
+// can usually be read together during a single bounded verification call.
+// This is a planning reserve, not a hard output limit for a valid register.
 export const REGISTER_REVIEW_RESERVE = 12_000;
 export const REGISTER_DRAFT_TITLE = '[DRAFT] Реестр для сверки — не источник';
 
@@ -13,16 +18,45 @@ export function registerDraft(
 }
 
 export function checkedRegister(content: string): string {
-  if (
-    !content?.trim() ||
-    content.length > 10_000 ||
-    content.includes('\0') ||
-    JSON.stringify(JSON.stringify(content)).length > REGISTER_REVIEW_RESERVE
-  )
+  if (!content?.trim() || content.length > 80_000 || content.includes('\0'))
     throw new AiProviderError(
-      'Промежуточный реестр не удалось безопасно проверить. Новая версия не создана.',
+      'AI вернул пустой, повреждённый или слишком большой промежуточный реестр (более 80 000 символов). Новая версия не создана.',
     );
   return content;
+}
+
+export const REGISTER_PART_REVIEW_NOTE =
+  '\nЧерновой реестр передан частями. Сверь только переданную часть с исходниками; восстанови относящиеся к её фактам условия и пропущенные сведения. Не повторяй весь реестр по источникам: остальные части проверяются отдельно.';
+
+/** Split only the draft when necessary. Every review retains the SAME complete
+ * source batch, including qualifiers possibly absent from the draft fragment.
+ */
+export function registerReviewBatches(
+  sources: PreparationInput['materials'],
+  draft: string,
+  instruction: string,
+  measure: (instruction: string, context: PreparationInput) => number,
+): PreparationInput['materials'][] {
+  const complete = [...sources, registerDraft(checkedRegister(draft))];
+  if (
+    measure(instruction, { materials: complete, previousResult: null }) <=
+    PREPARATION_REQUEST_LIMIT
+  )
+    return [complete];
+  const parts = preparationBatches(
+    [registerDraft(draft)],
+    instruction,
+    (task, context) =>
+      measure(task, {
+        materials: [...sources, ...context.materials],
+        previousResult: null,
+      }),
+  );
+  if (parts.length > 8)
+    throw new AiProviderError(
+      'Промежуточный реестр требует более 8 частей для сверки с источниками. Уточните задачу; предыдущая версия сохранена.',
+    );
+  return parts.map((part) => [...sources, ...part]);
 }
 
 export function registerReviewTask(

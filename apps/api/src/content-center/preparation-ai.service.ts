@@ -16,6 +16,8 @@ import {
   checkedRegister,
   registerDraft,
   registerReviewTask,
+  registerReviewBatches,
+  REGISTER_PART_REVIEW_NOTE,
   REGISTER_REVIEW_RESERVE,
 } from './preparation-verification';
 
@@ -202,7 +204,7 @@ export class PreparationAiService {
           ),
       );
       let completed = 0;
-      const summaries = new Array<PreparationInput['materials'][number]>(
+      const summaries = new Array<PreparationInput['materials']>(
         batches.length,
       );
       // Bounded concurrency: no paid retry and no unbounded Promise.all over pages.
@@ -221,18 +223,29 @@ export class PreparationAiService {
               completed,
               total: batches.length,
             });
-            // Exactly one review, no correction/retry loop. Use this run's snapshot,
-            // not a fresh web fetch that may disagree with the extraction input.
-            const verified = await call(
-              reviewTask,
-              reviewContext(batch, draft),
+            // No retry or truncation: a verbose draft can need several bounded
+            // reviews against the same source snapshot. Preserve every fragment.
+            const reviewParts = registerReviewBatches(
+              batch,
+              draft,
+              reviewTask + REGISTER_PART_REVIEW_NOTE,
+              measure,
             );
-            const content = checkedRegister(verified.content);
-            summaries[start + offset] = {
-              title: `Реестр фактов: этап ${round}, часть ${start + offset + 1}${batch[0]?.topic ? ` — [${batch[0].topic.sourceId}] ${batch[0].topic.label}` : ''}`,
-              content,
-              sourceUrl: null,
-            };
+            const registers: PreparationInput['materials'] = [];
+            for (const [partIndex, reviewMaterials] of reviewParts.entries()) {
+              const verified = await call(
+                reviewParts.length > 1
+                  ? reviewTask + REGISTER_PART_REVIEW_NOTE
+                  : reviewTask,
+                { materials: reviewMaterials, previousResult: null },
+              );
+              registers.push({
+                title: `Реестр фактов: этап ${round}, часть ${start + offset + 1}.${partIndex + 1}${batch[0]?.topic ? ` — [${batch[0].topic.sourceId}] ${batch[0].topic.label}` : ''}`,
+                content: checkedRegister(verified.content),
+                sourceUrl: null,
+              });
+            }
+            summaries[start + offset] = registers;
             // Topic boundaries apply to original sources. Later aggregation may
             // combine labelled registers, otherwise many small topics never shrink.
             await progress({
@@ -244,7 +257,7 @@ export class PreparationAiService {
           }),
         );
       }
-      return summaries;
+      return summaries.flat();
     };
     let round = 0;
     while (measure(task, context()) > PREPARATION_REQUEST_LIMIT) {
