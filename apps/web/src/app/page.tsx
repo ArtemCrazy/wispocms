@@ -39,6 +39,12 @@ import { SiteVariablesView } from "./site-variables-view";
 import { MediaLayoutView } from "./media-layout-view";
 import { MediaTemplatesView } from "./media-templates-view";
 import { ContentCenterView } from "./content-center/content-center-view";
+import {
+  CONTENT_CENTER_SECTIONS,
+  contentCenterSection,
+  parseContentCenterScreen,
+  type ContentCenterScreen,
+} from "./content-center/navigation";
 
 type SessionData = {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -237,6 +243,7 @@ function Dashboard({
     | "settings"
     | "history";
   const [activeView, setActiveView] = useState<View>("all-projects");
+  const [contentCenterScreen, setContentCenterScreen] = useState<ContentCenterScreen>("root");
   const [navigationTarget, setNavigationTarget] = useState<
     (SearchTarget & { requestId: number }) | null
   >(null);
@@ -337,6 +344,7 @@ function Dashboard({
           setSelectedWorkspaceId(workspaceId);
           setSelectedSiteId(null);
           setActiveView("content-center");
+          setContentCenterScreen(parseContentCenterScreen(url.searchParams.get("cc")));
           setNavigationTarget(null);
         }
         return;
@@ -1051,8 +1059,9 @@ function Dashboard({
     window.history.pushState({}, "", url);
   }
 
-  function openContentCenter(workspaceId: string) {
-    if (hasUnsavedChanges && !confirmDiscardChanges()) return;
+  function openContentCenter(workspaceId: string, screen: ContentCenterScreen = "root") {
+    const stayingInContentCenter = activeView === "content-center" && selectedWorkspaceId === workspaceId;
+    if (!stayingInContentCenter && hasUnsavedChanges && !confirmDiscardChanges()) return;
     setSelectedWorkspaceId(workspaceId);
     setSelectedSiteId(null);
     setStructurePages([]);
@@ -1061,6 +1070,7 @@ function Dashboard({
     for (const key of ["site", "subview", "cc", "ccVersion"]) url.searchParams.delete(key);
     url.searchParams.set("workspace", workspaceId);
     url.searchParams.set("view", "content-center");
+    if (screen !== "root") url.searchParams.set("cc", screen);
     window.history.pushState({}, "", url);
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
@@ -1354,6 +1364,7 @@ function Dashboard({
               {renderWorkspaceCreate("sidebar")}
               {session.workspaces.map((workspaceItem) => {
                 const expanded = workspaceItem.id === selectedWorkspaceId;
+                const contentCenterOpen = expanded && activeView === "content-center";
                 const selected =
                   expanded && activeView === "projects" && !selectedSiteId;
                 return (
@@ -1419,14 +1430,30 @@ function Dashboard({
                         ) : null}
                         <div className="workspace-tools-divider" aria-hidden="true" />
                         <button
-                          className={`nav-item workspace-site-item ${expanded && activeView === "content-center" ? "active" : ""}`}
+                          className={`nav-item workspace-site-item ${contentCenterOpen && contentCenterScreen === "root" ? "active" : ""}`}
                           tabIndex={expanded ? 0 : -1}
-                          aria-current={expanded && activeView === "content-center" ? "page" : undefined}
+                          aria-current={contentCenterOpen && contentCenterScreen === "root" ? "page" : undefined}
+                          aria-expanded={contentCenterOpen}
                           onClick={() => openContentCenter(workspaceItem.id)}
                         >
                           <span className="site-system-icon content-center" aria-hidden="true" />
                           <span className="nav-text">Контент-центр</span>
                         </button>
+                        {contentCenterOpen && (
+                          <div className="workspace-content-sections" role="group" aria-label="Разделы контент-центра">
+                            {CONTENT_CENTER_SECTIONS.map((section) => (
+                              <button
+                                key={section.id}
+                                className={`nav-item workspace-content-section ${contentCenterSection(contentCenterScreen) === section.id ? "active" : ""}`}
+                                title={section.label}
+                                aria-current={contentCenterScreen === section.id ? "page" : undefined}
+                                onClick={() => openContentCenter(workspaceItem.id, section.id)}
+                              >
+                                {section.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </section>
@@ -1847,6 +1874,7 @@ function Dashboard({
             workspaceId={workspace.id}
             workspaceName={workspace.name}
             onDirtyChange={setHasUnsavedChanges}
+            onScreenChange={setContentCenterScreen}
           />
         ) : activeView === "articles" ? (
           site?.siteType === "media" ? (

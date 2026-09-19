@@ -9,6 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import { PreparedDocument } from "./prepared-document";
+import {
+  CONTENT_CENTER_SECTIONS,
+  parseContentCenterScreen,
+  type ContentCenterScreen as Screen,
+} from "./navigation";
 import styles from "./content-center-view.module.css";
 
 type Material = {
@@ -44,7 +49,6 @@ type Overview = {
   ai: { connected: boolean };
   draft: { instruction: string; without_materials: boolean; revision: number };
 };
-type Screen = "root" | "preparation" | "history" | "document";
 type MaterialDraft = {
   id?: string;
   title: string;
@@ -141,10 +145,12 @@ export function ContentCenterView({
   workspaceId,
   workspaceName,
   onDirtyChange,
+  onScreenChange,
 }: {
   workspaceId: string;
   workspaceName: string;
   onDirtyChange: (dirty: boolean) => void;
+  onScreenChange: (screen: Screen) => void;
 }) {
   const base = `/api/workspaces/${workspaceId}/content-center`;
   const [data, setData] = useState<Overview | null>(null);
@@ -180,12 +186,9 @@ export function ContentCenterView({
     let active = true;
     const restoreScreen = () => {
       const params = new URL(window.location.href).searchParams;
-      const target = params.get("cc");
-      setScreen(
-        ["preparation", "history", "document"].includes(target ?? "")
-          ? (target as Screen)
-          : "root",
-      );
+      const target = parseContentCenterScreen(params.get("cc"));
+      setScreen(target);
+      onScreenChange(target);
       setVersionId(params.get("ccVersion"));
     };
     restoreScreen();
@@ -208,7 +211,7 @@ export function ContentCenterView({
       window.removeEventListener("popstate", restoreScreen);
       onDirtyChange(false);
     };
-  }, [load, onDirtyChange]);
+  }, [load, onDirtyChange, onScreenChange]);
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -252,6 +255,7 @@ export function ContentCenterView({
     else url.searchParams.delete("ccVersion");
     window.history.pushState({}, "", url);
     setScreen(next);
+    onScreenChange(next);
     setVersionId(id ?? null);
     setDocument(null);
     setError("");
@@ -299,6 +303,8 @@ export function ContentCenterView({
   const title = {
     root: "Контент-центр",
     preparation: "Подготовка информации",
+    research: "Исследование и анализ",
+    creation: "Создание контента",
     history: "История версий",
     document: "Обработанная информация",
   }[screen];
@@ -311,13 +317,17 @@ export function ContentCenterView({
             <button
               className={styles.link}
               onClick={() =>
-                navigate(screen === "preparation" ? "root" : "preparation")
+                navigate(
+                  screen === "history" || screen === "document"
+                    ? "preparation"
+                    : "root",
+                )
               }
             >
               ←{" "}
-              {screen === "preparation"
-                ? "Контент-центр"
-                : "Подготовка информации"}
+              {screen === "history" || screen === "document"
+                ? "Подготовка информации"
+                : "Контент-центр"}
             </button>
           )}
           <div className={styles.eyebrow}>
@@ -331,7 +341,9 @@ export function ContentCenterView({
                 ? "Добавьте материалы проекта и задайте, какую информацию нужно подготовить."
                 : screen === "history"
                   ? "Сохранённые результаты. Восстановление создаёт новую версию."
-                  : "Документ для чтения и использования на следующих этапах."}
+                  : screen === "document"
+                    ? "Документ для чтения и использования на следующих этапах."
+                    : CONTENT_CENTER_SECTIONS.find((section) => section.id === screen)?.description}
           </p>
         </div>
         {screen === "preparation" && (
@@ -373,46 +385,50 @@ export function ContentCenterView({
         <>
           {screen === "root" && (
             <div className={styles.cards}>
-              <article className={`${styles.card} ${styles.entry}`}>
-                <div>
-                  <h2>Подготовка информации</h2>
-                  <p>
-                    Соберите ссылки, файлы и сведения клиента. Подготовьте
-                    задачу и получите единый документ о проекте.
-                  </p>
-                  <p className={styles.muted}>
-                    Материалов: {data.materials.length} · Версий результата:{" "}
-                    {data.versions.length}
-                  </p>
-                </div>
-                <button
-                  className={styles.primary}
-                  onClick={() => navigate("preparation")}
+              {CONTENT_CENTER_SECTIONS.map((section) => (
+                <article
+                  key={section.id}
+                  className={`${styles.card} ${styles.entry}`}
                 >
-                  Перейти к подготовке →
-                </button>
-              </article>
-              <article className={`${styles.card} ${styles.entry}`}>
-                <div>
-                  <h2>Исследование и анализ</h2>
-                  <p>
-                    Конкуренты, задачи аудитории и поисковый спрос. Раздел
-                    появится после завершения его проектирования.
-                  </p>
-                </div>
-                <span className={styles.badge}>Следующий этап</span>
-              </article>
-              <article className={`${styles.card} ${styles.entry}`}>
-                <div>
-                  <h2>Создание контента</h2>
-                  <p>
-                    Подготовка статей на основе информации о проекте и кластеров
-                    поисковых запросов.
-                  </p>
-                </div>
-                <span className={styles.badge}>Следующий этап</span>
-              </article>
+                  <div>
+                    <h2>{section.label}</h2>
+                    <p>{section.description}</p>
+                    {section.id === "preparation" ? (
+                      <p className={styles.muted}>
+                        Материалов: {data.materials.length} · Версий результата:{" "}
+                        {data.versions.length}
+                      </p>
+                    ) : (
+                      <span className={styles.badge}>Следующий этап</span>
+                    )}
+                  </div>
+                  <button
+                    className={section.id === "preparation" ? styles.primary : undefined}
+                    aria-label={`Открыть раздел «${section.label}»`}
+                    onClick={() => navigate(section.id)}
+                  >
+                    {section.id === "preparation"
+                      ? "Перейти к подготовке →"
+                      : "Открыть раздел →"}
+                  </button>
+                </article>
+              ))}
             </div>
+          )}
+
+          {(screen === "research" || screen === "creation") && (
+            <article className={styles.card}>
+              <div className={styles.cardHead}>
+                <h2>{screen === "research" ? "Раздел ожидает проектирования" : "Раздел ещё не реализован"}</h2>
+              </div>
+              <p className={styles.muted}>
+                {screen === "research"
+                  ? "Исследования и анализ пока недоступны. Структура и рабочие действия появятся после завершения проектирования этого процесса."
+                  : "Работа с кластерами, статьями и историей запусков предусмотрена ТЗ и будет реализована на следующем этапе."}
+              </p>
+              <p>Сейчас можно собрать материалы проекта и сохранить задачу в разделе «Подготовка информации».</p>
+              <button onClick={() => navigate("preparation")}>Перейти к подготовке →</button>
+            </article>
           )}
 
           {screen === "preparation" && (
