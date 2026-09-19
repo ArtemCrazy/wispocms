@@ -25,6 +25,7 @@ import { ImportSkinovaMediaSite1789848000000 } from './migrations/1789848000000-
 import { CanonicalBannerSlots1789934400000 } from './migrations/1789934400000-CanonicalBannerSlots';
 import { ContentCenterPreparation1790020800000 } from './migrations/1790020800000-ContentCenterPreparation';
 import { ContentCenterSourceFiles1790107200000 } from './migrations/1790107200000-ContentCenterSourceFiles';
+import { ContentCenterResearch1790193600000 } from './migrations/1790193600000-ContentCenterResearch';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -56,6 +57,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       CanonicalBannerSlots1789934400000,
       ContentCenterPreparation1790020800000,
       ContentCenterSourceFiles1790107200000,
+      ContentCenterResearch1790193600000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

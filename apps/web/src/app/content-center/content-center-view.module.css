@@ -126,6 +126,151 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
+.research {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.researchTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid #e3e2ed;
+  padding-bottom: 12px;
+}
+.researchTabs button[aria-current="page"] {
+  color: #674ad3;
+  border-color: #aa96f5;
+  background: #eee9ff;
+}
+.researchToolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.researchToolbar .researchTabs {
+  border: 0;
+  padding: 0;
+}
+.research h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.research h3 {
+  font-size: 16px;
+}
+.research input:not([type="checkbox"]):not([type="radio"]),
+.research select {
+  font: inherit;
+  min-height: 42px;
+  border: 1px solid #dcdce7;
+  border-radius: 8px;
+  background: white;
+  color: #202127;
+  padding: 10px 12px;
+  width: 100%;
+  min-width: 0;
+}
+.research input[type="checkbox"],
+.research input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #7054ec;
+  flex: 0 0 auto;
+}
+.researchOption {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  border: 1px solid #e3e2ed;
+  border-radius: 10px;
+  padding: 18px;
+  margin: 18px 0;
+}
+.researchOption > span {
+  display: grid;
+  gap: 4px;
+}
+.researchOption .badge {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.researchCategories {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.researchCategory {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+.researchCategory label {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.researchAddCategory {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.researchAddCategory .field {
+  flex: 1;
+  min-width: min(240px, 100%);
+}
+.research .actions {
+  margin-top: 18px;
+}
+.researchGroup {
+  border-top: 1px solid #e3e2ed;
+  margin-top: 22px;
+  padding-top: 12px;
+}
+.researchGroup ul {
+  padding-left: 20px;
+}
+.researchGroup li {
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}
+.researchSource {
+  padding: 16px;
+  border: 1px solid #e3e2ed;
+  border-radius: 10px;
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.researchSource[data-excluded="true"] {
+  background: #f8f8fc;
+}
+.researchInclude {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.researchSourceActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.researchSourceActions label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: min(240px, 100%);
+}
+.researchSourceActions select {
+  max-width: 440px;
+}
 .subheading {
   margin: 24px 0 12px;
   font-size: 16px;
@@ -527,6 +672,15 @@
   }
 }
 @media (max-width: 600px) {
+  .researchOption {
+    flex-wrap: wrap;
+  }
+  .researchOption > span:not(.badge) {
+    flex: 1;
+  }
+  .researchOption .badge {
+    margin-left: 32px;
+  }
   .sourceRow {
     grid-template-columns: minmax(0, 1fr);
   }

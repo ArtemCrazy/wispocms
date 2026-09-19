@@ -9,7 +9,7 @@ export const CONTENT_CENTER_SECTIONS = [
     id: "research",
     label: "Исследование и анализ",
     description:
-      "Конкуренты, задачи аудитории и поисковый спрос. Логика раздела будет спроектирована отдельно.",
+      "Подготовьте конкурентный анализ: выберите данные о проекте, соберите и подтвердите источники исследования.",
   },
   {
     id: "creation",
@@ -19,12 +19,10 @@ export const CONTENT_CENTER_SECTIONS = [
   },
 ] as const;
 
-export type ContentCenterSection = (typeof CONTENT_CENTER_SECTIONS)[number]["id"];
+export type ContentCenterSection =
+  (typeof CONTENT_CENTER_SECTIONS)[number]["id"];
 export type ContentCenterScreen =
-  | ContentCenterSection
-  | "root"
-  | "history"
-  | "document";
+  ContentCenterSection | "root" | "history" | "document";
 
 export function parseContentCenterScreen(
   value: string | null,

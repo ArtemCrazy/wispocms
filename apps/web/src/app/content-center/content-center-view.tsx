@@ -11,6 +11,7 @@ import {
 import { PreparedDocument } from "./prepared-document";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
+import { ResearchView } from "./research-view";
 import {
   SOURCE_CATEGORIES,
   type ProjectMaterial as Material,
@@ -163,6 +164,7 @@ export function ContentCenterView({
   const [withoutMaterials, setWithoutMaterials] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
+  const [researchDirty, setResearchDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -218,14 +220,14 @@ export function ContentCenterView({
   }, [load, onDirtyChange, onScreenChange]);
 
   useEffect(() => {
-    onDirtyChange(dirty);
-  }, [dirty, onDirtyChange]);
+    onDirtyChange(dirty || researchDirty);
+  }, [dirty, researchDirty, onDirtyChange]);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !researchDirty) return;
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, researchDirty]);
 
   const running =
     data?.run?.status === "queued" || data?.run?.status === "processing";
@@ -253,6 +255,12 @@ export function ContentCenterView({
   }, [base, screen, versionId]);
 
   function navigate(next: Screen, id?: string) {
+    if (
+      researchDirty &&
+      next !== "research" &&
+      !window.confirm("Уйти без сохранения изменений исследования?")
+    )
+      return;
     const url = new URL(window.location.href);
     url.searchParams.set("cc", next);
     if (id) url.searchParams.set("ccVersion", id);
@@ -418,8 +426,10 @@ export function ContentCenterView({
                         Материалов: {data.materials.length} · Версий результата:{" "}
                         {data.versions.length}
                       </p>
-                    ) : (
+                    ) : section.id === "creation" ? (
                       <span className={styles.badge}>Следующий этап</span>
+                    ) : (
+                      <span className={styles.badge}>Конкурентный анализ</span>
                     )}
                   </div>
                   <button
@@ -438,19 +448,20 @@ export function ContentCenterView({
             </div>
           )}
 
-          {(screen === "research" || screen === "creation") && (
+          {screen === "research" && (
+            <ResearchView
+              workspaceId={workspaceId}
+              onDirtyChange={setResearchDirty}
+            />
+          )}
+          {screen === "creation" && (
             <article className={styles.card}>
               <div className={styles.cardHead}>
-                <h2>
-                  {screen === "research"
-                    ? "Раздел ожидает проектирования"
-                    : "Раздел ещё не реализован"}
-                </h2>
+                <h2>Раздел ещё не реализован</h2>
               </div>
               <p className={styles.muted}>
-                {screen === "research"
-                  ? "Исследования и анализ пока недоступны. Структура и рабочие действия появятся после завершения проектирования этого процесса."
-                  : "Работа с кластерами, статьями и историей запусков предусмотрена ТЗ и будет реализована на следующем этапе."}
+                Работа с кластерами, статьями и историей запусков предусмотрена
+                ТЗ и будет реализована на следующем этапе.
               </p>
               <p>
                 Сейчас можно собрать материалы проекта и сохранить задачу в
