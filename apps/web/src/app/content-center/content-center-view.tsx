@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { PreparedDocument } from "./prepared-document";
+import { ContentCenterBreadcrumbs } from "./content-center-breadcrumbs";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
 import { ResearchView } from "./research-view";
@@ -147,11 +148,13 @@ function Dialog({
 export function ContentCenterView({
   workspaceId,
   workspaceName,
+  onWorkspaceOpen,
   onDirtyChange,
   onScreenChange,
 }: {
   workspaceId: string;
   workspaceName: string;
+  onWorkspaceOpen: () => void;
   onDirtyChange: (dirty: boolean) => void;
   onScreenChange: (screen: Screen) => void;
 }) {
@@ -329,26 +332,13 @@ export function ContentCenterView({
     <section className={styles.view} aria-label="Контент-центр">
       <div className={styles.heading}>
         <div>
-          {screen !== "root" && (
-            <button
-              className={styles.link}
-              onClick={() =>
-                navigate(
-                  screen === "history" || screen === "document"
-                    ? "preparation"
-                    : "root",
-                )
-              }
-            >
-              ←{" "}
-              {screen === "history" || screen === "document"
-                ? "Подготовка информации"
-                : "Контент-центр"}
-            </button>
-          )}
-          <div className={styles.eyebrow}>
-            {workspaceName} · общее для сайтов пространства
-          </div>
+          <ContentCenterBreadcrumbs
+            workspaceName={workspaceName}
+            screen={screen}
+            title={title}
+            onWorkspaceOpen={onWorkspaceOpen}
+            onNavigate={navigate}
+          />
           <h1>{title}</h1>
           <p className={styles.muted}>
             {screen === "root"

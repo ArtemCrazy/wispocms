@@ -1899,6 +1899,7 @@ function Dashboard({
             key={workspace.id}
             workspaceId={workspace.id}
             workspaceName={workspace.name}
+            onWorkspaceOpen={() => openProject(workspace.id)}
             onDirtyChange={setHasUnsavedChanges}
             onScreenChange={setContentCenterScreen}
           />
