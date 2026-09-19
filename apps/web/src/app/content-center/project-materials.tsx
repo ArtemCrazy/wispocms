@@ -41,7 +41,6 @@ export function ProjectMaterials({
           Добавьте информацию о проекте: ссылки, файлы и материалы клиента.
           Изменение источников не меняет уже готовые версии.
         </p>
-        <h3 className={styles.subheading}>Ссылки на онлайн-ресурсы</h3>
         <div className={styles.sourceRows}>
           {SOURCE_CATEGORIES.map((category) => (
             <div key={category.id} className={styles.sourceRow}>
