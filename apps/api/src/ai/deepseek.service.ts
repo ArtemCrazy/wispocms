@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AiProviderError as DeepseekError } from './ai-provider.error';
 import { DeepseekSettingsService } from './deepseek-settings.service';
+import { escapeJsonTextWhitespace } from './json-text-whitespace';
 import {
   preparationRequestSize,
   PREPARATION_REQUEST_LIMIT,
@@ -132,6 +133,7 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     input: unknown,
     signal: AbortSignal,
     maxTokens = 8192,
+    allowLiteralTextWhitespace = false,
   ) {
     const context = JSON.stringify(input);
     if (context.length > 2_000_000)
@@ -194,7 +196,13 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
         content.length > 240_000
       )
         throw new Error();
-      return object(JSON.parse(content) as unknown);
+      return object(
+        JSON.parse(
+          allowLiteralTextWhitespace
+            ? escapeJsonTextWhitespace(content)
+            : content,
+        ) as unknown,
+      );
     } catch (error) {
       if (error instanceof DeepseekError) throw error;
       throw new DeepseekError(
@@ -228,6 +236,7 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
       { instruction: request.instruction, context: request.context },
       request.signal,
       16384,
+      true,
     );
     if (
       typeof result.content !== 'string' ||

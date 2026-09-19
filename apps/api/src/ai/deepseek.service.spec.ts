@@ -230,6 +230,50 @@ describe('DeepSeek adapter', () => {
       ai.produce(existing, new AbortController().signal),
     ).rejects.toThrow('не соответствующий');
   });
+  it('accepts literal newlines inside preparation JSON strings without changing the text', async () => {
+    const content =
+      'Реестр (описание)\n\nИсточник\r\nУсловия\tтолько внутри МКАД.';
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { content: '{"content":"' + content + '"}' },
+            },
+          ],
+        }),
+      ),
+    );
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ content });
+  });
+  it('still rejects malformed preparation JSON beyond literal whitespace', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { content: '{"content":"Оборванный\nответ' },
+            },
+          ],
+        }),
+      ),
+    );
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('некорректный');
+  });
   it.each([401, 402, 403, 429, 500])(
     'sanitizes HTTP %s and never retries a paid operation',
     async (status) => {
