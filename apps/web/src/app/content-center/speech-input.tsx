@@ -13,6 +13,7 @@ type Recognition = {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
+  onstart: (() => void) | null;
   onresult: ((event: SpeechEvent) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
@@ -35,16 +36,27 @@ export function SpeechInput({
   onActiveChange: (active: boolean) => void;
 }) {
   const recognition = useRef<Recognition | null>(null);
+  const consentDialog = useRef<HTMLDialogElement | null>(null);
+  const [consentOpen, setConsentOpen] = useState(false);
   const [active, setActive] = useState(false);
+  const [listening, setListening] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const [interim, setInterim] = useState("");
+
+  useEffect(() => {
+    const dialog = consentDialog.current;
+    if (consentOpen) dialog?.showModal();
+    else dialog?.close();
+    return () => dialog?.close();
+  }, [consentOpen]);
 
   useEffect(
     () => () => {
       const current = recognition.current;
       recognition.current = null;
       if (current) {
+        current.onstart = null;
         current.onresult = null;
         current.onerror = null;
         current.onend = null;
@@ -57,6 +69,7 @@ export function SpeechInput({
 
   function start() {
     if (recognition.current || disabled) return;
+    setConsentOpen(false);
     setError("");
     const browser = window as SpeechWindow;
     const Constructor =
@@ -67,13 +80,6 @@ export function SpeechInput({
       );
       return;
     }
-    // Explicit consent before the browser may send audio to its speech service.
-    if (
-      !window.confirm(
-        "Начать голосовой ввод? Браузер запросит доступ к микрофону и может передавать речь своему сервису распознавания. CMS не сохраняет аудио. Распознанный текст появится в инструкции; проверьте его перед сохранением.",
-      )
-    )
-      return;
     let instance: Recognition;
     try {
       instance = new Constructor();
@@ -81,6 +87,9 @@ export function SpeechInput({
       instance.continuous = true;
       instance.interimResults = true;
       const committed = new Set<number>();
+      instance.onstart = () => {
+        if (recognition.current === instance) setListening(true);
+      };
       instance.onresult = (event) => {
         if (recognition.current !== instance) return;
         const text = collectDictation(event.results, committed);
@@ -92,10 +101,12 @@ export function SpeechInput({
         if (event.error !== "aborted")
           setError(speechErrorMessage(event.error));
         recognition.current = null;
+        instance.onstart = null;
         instance.onresult = null;
         instance.onerror = null;
         instance.onend = null;
         setActive(false);
+        setListening(false);
         setStopping(false);
         setInterim("");
         onActiveChange(false);
@@ -105,6 +116,7 @@ export function SpeechInput({
         if (recognition.current !== instance) return;
         recognition.current = null;
         setActive(false);
+        setListening(false);
         setStopping(false);
         setInterim("");
         onActiveChange(false);
@@ -112,6 +124,7 @@ export function SpeechInput({
       recognition.current = instance;
       setInterim("");
       setActive(true);
+      setListening(false);
       setStopping(false);
       onActiveChange(true);
       instance.start();
@@ -119,12 +132,14 @@ export function SpeechInput({
       const current = recognition.current;
       recognition.current = null;
       if (current) {
+        current.onstart = null;
         current.onresult = null;
         current.onerror = null;
         current.onend = null;
         current.abort();
       }
       setActive(false);
+      setListening(false);
       setStopping(false);
       onActiveChange(false);
       setError(speechErrorMessage("start-failed"));
@@ -139,8 +154,10 @@ export function SpeechInput({
           aria-pressed={active}
           disabled={stopping || (!active && disabled)}
           onClick={() => {
-            if (!active) start();
-            else {
+            if (!active) {
+              setError("");
+              setConsentOpen(true);
+            } else {
               setStopping(true);
               recognition.current?.stop();
             }
@@ -154,7 +171,9 @@ export function SpeechInput({
         </button>
         <span className={styles.muted} role="status">
           {active
-            ? "Микрофон включён. Говорите по-русски."
+            ? listening
+              ? "Микрофон включён. Говорите по-русски."
+              : "Ожидаем готовности микрофона и распознавания…"
             : "Добавляет текст в конец инструкции."}
         </span>
       </div>
@@ -173,6 +192,52 @@ export function SpeechInput({
         Аудио не сохраняется в CMS. Текст сохраняется только кнопкой «Сохранить
         задачу».
       </p>
+      <dialog
+        ref={consentDialog}
+        className={styles.dialog}
+        aria-label="Голосовой ввод инструкции"
+        onCancel={(event) => {
+          event.preventDefault();
+          setConsentOpen(false);
+        }}
+      >
+        <div className={styles.cardHead}>
+          <h2>Голосовой ввод инструкции</h2>
+          <button
+            type="button"
+            aria-label="Закрыть окно голосового ввода"
+            onClick={() => setConsentOpen(false)}
+          >
+            ×
+          </button>
+        </div>
+        <p>
+          Микрофон пока выключен. После нажатия «Включить микрофон» браузер
+          запросит разрешение и начнёт распознавание русской речи.
+        </p>
+        <p>
+          Браузер может передавать речь своему сервису распознавания. CMS не
+          сохраняет аудио. Текст добавится в конец инструкции — проверьте его
+          перед сохранением.
+        </p>
+        <p className={styles.muted}>
+          Если браузер не поддерживает распознавание, можно ввести текст вручную
+          или воспользоваться системной диктовкой.
+        </p>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.primary}
+            disabled={disabled}
+            onClick={start}
+          >
+            Включить микрофон
+          </button>
+          <button type="button" autoFocus onClick={() => setConsentOpen(false)}>
+            Отмена
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
