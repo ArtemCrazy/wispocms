@@ -125,8 +125,10 @@ integration('Content Center / isolated PostgreSQL', () => {
       expect(await service.getMaterial(workspace, id, admin)).toMatchObject({
         url_category: 'social',
         content: '',
-        source_error: expect.stringContaining('недоступен'),
       });
+      expect(
+        (await service.getMaterial(workspace, id, admin)).source_error,
+      ).toContain('недоступен');
       await service.start(workspace, admin, {
         instruction: 'Read',
         withoutMaterials: false,
