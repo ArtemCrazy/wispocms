@@ -12,6 +12,7 @@ import { PreparedDocument } from "./prepared-document";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
 import { ResearchView } from "./research-view";
+import { CreationView } from "./creation-view";
 import {
   SOURCE_CATEGORIES,
   type ProjectMaterial as Material,
@@ -165,6 +166,7 @@ export function ContentCenterView({
   const [draftRevision, setDraftRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [researchDirty, setResearchDirty] = useState(false);
+  const [creationDirty, setCreationDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -220,14 +222,14 @@ export function ContentCenterView({
   }, [load, onDirtyChange, onScreenChange]);
 
   useEffect(() => {
-    onDirtyChange(dirty || researchDirty);
-  }, [dirty, researchDirty, onDirtyChange]);
+    onDirtyChange(dirty || researchDirty || creationDirty);
+  }, [dirty, researchDirty, creationDirty, onDirtyChange]);
   useEffect(() => {
-    if (!dirty && !researchDirty) return;
+    if (!dirty && !researchDirty && !creationDirty) return;
     const warn = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, researchDirty]);
+  }, [dirty, researchDirty, creationDirty]);
 
   const running =
     data?.run?.status === "queued" || data?.run?.status === "processing";
@@ -255,6 +257,12 @@ export function ContentCenterView({
   }, [base, screen, versionId]);
 
   function navigate(next: Screen, id?: string) {
+    if (
+      creationDirty &&
+      next !== "creation" &&
+      !window.confirm("Уйти без сохранения данных создания контента?")
+    )
+      return;
     if (
       researchDirty &&
       next !== "research" &&
@@ -427,7 +435,7 @@ export function ContentCenterView({
                         {data.versions.length}
                       </p>
                     ) : section.id === "creation" ? (
-                      <span className={styles.badge}>Следующий этап</span>
+                      <span className={styles.badge}>Кластеры и статьи</span>
                     ) : (
                       <span className={styles.badge}>Конкурентный анализ</span>
                     )}
@@ -455,22 +463,10 @@ export function ContentCenterView({
             />
           )}
           {screen === "creation" && (
-            <article className={styles.card}>
-              <div className={styles.cardHead}>
-                <h2>Раздел ещё не реализован</h2>
-              </div>
-              <p className={styles.muted}>
-                Работа с кластерами, статьями и историей запусков предусмотрена
-                ТЗ и будет реализована на следующем этапе.
-              </p>
-              <p>
-                Сейчас можно собрать материалы проекта и сохранить задачу в
-                разделе «Подготовка информации».
-              </p>
-              <button onClick={() => navigate("preparation")}>
-                Перейти к подготовке →
-              </button>
-            </article>
+            <CreationView
+              workspaceId={workspaceId}
+              onDirtyChange={setCreationDirty}
+            />
           )}
 
           {screen === "preparation" && (

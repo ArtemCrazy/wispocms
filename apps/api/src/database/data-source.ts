@@ -26,6 +26,7 @@ import { CanonicalBannerSlots1789934400000 } from './migrations/1789934400000-Ca
 import { ContentCenterPreparation1790020800000 } from './migrations/1790020800000-ContentCenterPreparation';
 import { ContentCenterSourceFiles1790107200000 } from './migrations/1790107200000-ContentCenterSourceFiles';
 import { ContentCenterResearch1790193600000 } from './migrations/1790193600000-ContentCenterResearch';
+import { ContentCenterCreation1790280000000 } from './migrations/1790280000000-ContentCenterCreation';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -58,6 +59,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       ContentCenterPreparation1790020800000,
       ContentCenterSourceFiles1790107200000,
       ContentCenterResearch1790193600000,
+      ContentCenterCreation1790280000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

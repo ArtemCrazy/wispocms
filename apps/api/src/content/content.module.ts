@@ -62,5 +62,6 @@ import { PublicSiteController } from './public-site.controller';
   ],
   controllers: [ContentController, PublicSiteController],
   providers: [ContentService, ContentLifecycleService],
+  exports: [ContentLifecycleService],
 })
 export class ContentModule {}
