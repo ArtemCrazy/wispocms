@@ -35,7 +35,6 @@ export function ProjectMaterials({
       <article className={styles.card} aria-label="Материалы и данные проекта">
         <div className={styles.cardHead}>
           <h2>Материалы и данные проекта</h2>
-          <span className={styles.badge}>{materials.length} / 50</span>
         </div>
         <p className={styles.muted}>
           Добавьте информацию о проекте: ссылки, файлы и материалы клиента.
