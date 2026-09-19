@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { PreparedDocument } from "./prepared-document";
+import { SpeechInput } from "./speech-input";
+import { appendDictation, preparationSteps } from "./preparation-state";
 import {
   CONTENT_CENTER_SECTIONS,
   parseContentCenterScreen,
@@ -158,6 +160,8 @@ export function ContentCenterView({
   const [versionId, setVersionId] = useState<string | null>(null);
   const [document, setDocument] = useState<Version | null>(null);
   const [instruction, setInstruction] = useState("");
+  const instructionRef = useRef("");
+  const [voiceActive, setVoiceActive] = useState(false);
   const [withoutMaterials, setWithoutMaterials] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
@@ -197,6 +201,7 @@ export function ContentCenterView({
       .then((payload) => {
         if (!active) return;
         setInstruction(payload.draft.instruction);
+        instructionRef.current = payload.draft.instruction;
         setWithoutMaterials(
           payload.materials.length ? false : payload.draft.without_materials,
         );
@@ -293,6 +298,7 @@ export function ContentCenterView({
   }
 
   function changeInstruction(value: string) {
+    instructionRef.current = value;
     setInstruction(value);
     setDirty(true);
     setNotice("");
@@ -343,7 +349,9 @@ export function ContentCenterView({
                   ? "Сохранённые результаты. Восстановление создаёт новую версию."
                   : screen === "document"
                     ? "Документ для чтения и использования на следующих этапах."
-                    : CONTENT_CENTER_SECTIONS.find((section) => section.id === screen)?.description}
+                    : CONTENT_CENTER_SECTIONS.find(
+                        (section) => section.id === screen,
+                      )?.description}
           </p>
         </div>
         {screen === "preparation" && (
@@ -370,6 +378,7 @@ export function ContentCenterView({
                 void act(async () => {
                   const result = await load();
                   setInstruction(result.draft.instruction);
+                  instructionRef.current = result.draft.instruction;
                   setDraftRevision(result.draft.revision);
                   setWithoutMaterials(result.draft.without_materials);
                 })
@@ -403,7 +412,9 @@ export function ContentCenterView({
                     )}
                   </div>
                   <button
-                    className={section.id === "preparation" ? styles.primary : undefined}
+                    className={
+                      section.id === "preparation" ? styles.primary : undefined
+                    }
                     aria-label={`Открыть раздел «${section.label}»`}
                     onClick={() => navigate(section.id)}
                   >
@@ -419,15 +430,24 @@ export function ContentCenterView({
           {(screen === "research" || screen === "creation") && (
             <article className={styles.card}>
               <div className={styles.cardHead}>
-                <h2>{screen === "research" ? "Раздел ожидает проектирования" : "Раздел ещё не реализован"}</h2>
+                <h2>
+                  {screen === "research"
+                    ? "Раздел ожидает проектирования"
+                    : "Раздел ещё не реализован"}
+                </h2>
               </div>
               <p className={styles.muted}>
                 {screen === "research"
                   ? "Исследования и анализ пока недоступны. Структура и рабочие действия появятся после завершения проектирования этого процесса."
                   : "Работа с кластерами, статьями и историей запусков предусмотрена ТЗ и будет реализована на следующем этапе."}
               </p>
-              <p>Сейчас можно собрать материалы проекта и сохранить задачу в разделе «Подготовка информации».</p>
-              <button onClick={() => navigate("preparation")}>Перейти к подготовке →</button>
+              <p>
+                Сейчас можно собрать материалы проекта и сохранить задачу в
+                разделе «Подготовка информации».
+              </p>
+              <button onClick={() => navigate("preparation")}>
+                Перейти к подготовке →
+              </button>
             </article>
           )}
 
@@ -546,7 +566,7 @@ export function ContentCenterView({
                   <div className={styles.cardHead}>
                     <h2>Задача для AI</h2>
                     <button
-                      disabled={busy}
+                      disabled={busy || voiceActive}
                       onClick={() => {
                         setPromptsOpen(true);
                         setDialogError("");
@@ -571,9 +591,24 @@ export function ContentCenterView({
                       placeholder="Собери информацию о компании: продукты, аудитория, преимущества, тон коммуникации. Отдельно перечисли, каких сведений не хватает."
                     />
                   </label>
+                  <SpeechInput
+                    disabled={busy}
+                    onActiveChange={setVoiceActive}
+                    onTranscript={(text) => {
+                      const appended = appendDictation(
+                        instructionRef.current,
+                        text,
+                      );
+                      if (appended.overflow) {
+                        setError(
+                          "Инструкция ограничена 12 000 символами. Последняя распознанная фраза не добавлена; остановите диктовку и сократите текст.",
+                        );
+                      } else changeInstruction(appended.value);
+                    }}
+                  />
                   <div className={styles.actions}>
                     <button
-                      disabled={busy || !dirty}
+                      disabled={busy || voiceActive || !dirty}
                       onClick={() => void act(saveDraft)}
                     >
                       Сохранить задачу
@@ -582,6 +617,7 @@ export function ContentCenterView({
                       className={styles.primary}
                       disabled={
                         busy ||
+                        voiceActive ||
                         running ||
                         !data.ai.connected ||
                         !instruction.trim() ||
@@ -617,7 +653,13 @@ export function ContentCenterView({
                     {data.materials.length
                       ? materialCount(data.materials.length)
                       : "без материалов"}
-                    {latest ? ` и предыдущий результат V${latest.number}` : ""}.
+                    {data.materials.length && latest
+                      ? ` и предыдущий результат V${latest.number}`
+                      : ""}
+                    .
+                    {!data.materials.length &&
+                      withoutMaterials &&
+                      " Будет передана только инструкция, без прежних результатов."}
                   </p>
                   {data.run && (
                     <div
@@ -636,6 +678,48 @@ export function ContentCenterView({
                           : data.run.status === "failed"
                             ? data.run.error
                             : "Обработка завершена. Новая версия доступна ниже."}
+                      <ol
+                        className={styles.runSteps}
+                        aria-label="Этапы обработки"
+                      >
+                        {preparationSteps(data.run.status).map(
+                          (step, index) => (
+                            <li
+                              key={step.title}
+                              data-state={step.state}
+                              aria-current={
+                                step.state === "active" ? "step" : undefined
+                              }
+                            >
+                              <span
+                                className={styles.stepNumber}
+                                aria-hidden="true"
+                              >
+                                {step.state === "done" ? "✓" : index + 1}
+                              </span>
+                              <span>
+                                {step.title}
+                                <small>
+                                  {
+                                    {
+                                      done: "Готово",
+                                      active: "Выполняется",
+                                      waiting: "Ожидание",
+                                      failed: "Не завершено",
+                                    }[step.state]
+                                  }
+                                </small>
+                              </span>
+                            </li>
+                          ),
+                        )}
+                      </ol>
+                      {data.run.status === "failed" && (
+                        <p className={styles.muted}>
+                          Новая версия не создана. Последний успешный результат
+                          сохранён. Проверьте задачу и повторите запуск.
+                        </p>
+                      )}
                     </div>
                   )}
                 </article>

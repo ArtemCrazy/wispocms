@@ -317,7 +317,11 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           content: m.content,
           sourceUrl: m.source_url,
         })),
-        previousResult: previous?.content ?? null,
+        // With no materials the specification permits only the user's message.
+        // A saved result must not silently reintroduce deleted source facts.
+        previousResult: dto.withoutMaterials
+          ? null
+          : (previous?.content ?? null),
       };
       if (JSON.stringify(input).length > 180000)
         throw new BadRequestException(

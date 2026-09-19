@@ -286,6 +286,41 @@ integration('Content Center / isolated PostgreSQL', () => {
     ).rejects.toThrow('Появилась новая версия');
   });
 
+  it('uses only the message after the last material is deleted, without old result facts', async () => {
+    const material = await service.saveMaterial(workspace, admin, {
+      kind: 'text',
+      title: 'Старые факты',
+      content: 'Не включать в следующий запуск',
+    });
+    await service.start(workspace, admin, {
+      instruction: 'Первый документ',
+      withoutMaterials: false,
+    });
+    await service.processNext();
+    const first = (await service.overview(workspace, admin)).versions[0];
+    await service.deleteMaterial(workspace, material.id, 1, admin);
+    expect(
+      (await service.getVersion(workspace, first.id, admin)).content,
+    ).toContain('Факты из тестового');
+
+    await service.start(workspace, admin, {
+      instruction: 'Используй только это сообщение',
+      withoutMaterials: true,
+    });
+    await service.processNext();
+    expect(generate.mock.calls[1][0].instruction).toBe(
+      'Используй только это сообщение',
+    );
+    expect(generate.mock.calls[1][0].context).toEqual({
+      materials: [],
+      previousResult: null,
+    });
+    expect((await service.overview(workspace, admin)).versions).toHaveLength(2);
+    expect(
+      (await service.getVersion(workspace, first.id, admin)).content,
+    ).toContain('Факты из тестового');
+  });
+
   it('keeps the last result on failure and recovers abandoned jobs', async () => {
     await service.start(workspace, admin, {
       instruction: 'Task',
