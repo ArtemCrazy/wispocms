@@ -38,7 +38,7 @@ test('coverage distinguishes read pages from excluded, failed and duplicate page
       { title: 'Ошибка', url: 'https://example.com/error', status: 'failed', error: 'Не удалось прочитать страницу' },
     ],
   }] }));
-  assert.match(html, /<dt>Обнаружено страниц<\/dt><dd>4<\/dd>/);
+  assert.match(html, /<dt>Обнаружено<\/dt><dd>4<\/dd>/);
   for (const [status, label] of [['loaded', 'Прочитано'], ['found', 'Не включено'], ['failed', 'Недоступно'], ['duplicate', 'Дубликаты']]) {
     assert.ok(html.includes(`data-status="${status}"><dt>${label}</dt><dd>1</dd>`));
   }
@@ -58,5 +58,46 @@ test('an unread source stays visible and several sources can be expanded indepen
   assert.equal((html.match(/<details>/g) ?? []).length, 2);
   assert.match(html, /Прочитано 0 из 0/);
   assert.match(html, /<dt>Прочитано<\/dt><dd>0<\/dd>/);
-  assert.doesNotMatch(html, /<details open|Недоступно|Дубликаты/);
+  assert.doesNotMatch(html, /<details open|Дубликаты/);
+});
+
+test('filters show all, read, unread and exact statuses without changing source references', () => {
+  const pages = [
+    { title: 'Архив', status: 'found' },
+    { title: 'Компания', status: 'loaded' },
+    { title: 'Копия', status: 'duplicate' },
+    { title: 'Ошибка', status: 'failed' },
+    { title: 'Услуги', status: 'loaded' },
+  ];
+  const original = structuredClone(pages);
+  const select = filter => target.exports.filterSourcePages(pages, filter);
+  for (const [filter, expected] of [
+    ['all', [0, 1, 2, 3, 4]], ['loaded', [1, 4]], ['unread', [0, 2, 3]],
+    ['found', [0]], ['failed', [3]], ['duplicate', [2]],
+  ]) {
+    assert.deepEqual(select(filter).map(item => item.index), expected);
+    for (const item of select(filter)) assert.equal(item.page, pages[item.index]);
+  }
+  assert.deepEqual(pages, original);
+  assert.deepEqual(target.exports.filterSourcePages([], 'loaded'), []);
+});
+
+test('each source has labelled filter buttons and defaults to all pages', () => {
+  const source = { title: 'Компания', checkedAt: '2026-09-19T12:00:00Z', warnings: [], pages: [
+    { title: 'Услуги', url: 'https://example.com/services', status: 'loaded', content: 'Текст' },
+    { title: 'Архив', url: 'https://example.com/news', status: 'found' },
+    { title: 'Ошибка', url: 'https://example.com/error', status: 'failed' },
+  ] };
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [
+    { ...source, sourceId: 'S1' }, { ...source, sourceId: 'S2', title: 'Магазин' },
+  ] }));
+  assert.match(html, /role="group" aria-label="Фильтр страниц: Компания"/);
+  assert.match(html, /role="group" aria-label="Фильтр страниц: Магазин"/);
+  assert.equal((html.match(/aria-pressed="true">Все <span>3<\/span>/g) ?? []).length, 2);
+  assert.match(html, /aria-pressed="false">Прочитано <span>1<\/span>/);
+  assert.match(html, /aria-pressed="false">Не прочитано <span>2<\/span>/);
+  assert.match(html, /aria-pressed="false">Не включено <span>1<\/span>/);
+  assert.match(html, /aria-pressed="false">Недоступно <span>1<\/span>/);
+  assert.match(html, /role="status">Показано 3 из 3/);
+  assert.doesNotMatch(html, /Обнаружено страниц|Дубликаты/);
 });

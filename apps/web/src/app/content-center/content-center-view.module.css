@@ -1053,6 +1053,7 @@
   display: flex;
   flex: 1 1 130px;
   flex-direction: column-reverse;
+  justify-content: flex-end;
   gap: 3px;
   padding: 12px 14px;
   border-radius: 10px;
@@ -1093,6 +1094,45 @@
   font-size: 14px;
   font-weight: 600;
   color: #454354;
+}
+.sourceFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sourceFilters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid #e3e0ee;
+  border-radius: 8px;
+  background: #fff;
+  color: #626878;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sourceFilters button:hover {
+  background: #f8f7ff;
+  border-color: #aa96f5;
+}
+.sourceFilters button[aria-pressed="true"] {
+  background: #eee9ff;
+  border-color: #aa96f5;
+  color: #674ad3;
+}
+.sourceFilters button:focus-visible {
+  outline: 2px solid #7054ec;
+  outline-offset: 2px;
+}
+.sourceFilters button span {
+  font-variant-numeric: tabular-nums;
+}
+.sourceFilterCount {
+  margin: 10px 0;
+  font-size: 14px;
+  color: #6c7282;
 }
 .sourcePages {
   display: grid;
