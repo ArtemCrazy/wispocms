@@ -42,6 +42,32 @@ test("version labels use the saved request name, not a current template or a gue
   );
 });
 
+test("content center uses the breadcrumb bar instead of an empty help toolbar", () => {
+  const root = new URL("../src/app/", import.meta.url);
+  const page = readFileSync(new URL("page.tsx", root), "utf8");
+  const view = readFileSync(
+    new URL("content-center/content-center-view.tsx", root),
+    "utf8",
+  );
+  const css = readFileSync(
+    new URL("content-center/content-center-view.module.css", root),
+    "utf8",
+  );
+  assert.match(
+    page,
+    /activeView !== "content-center" &&\s*!\(site && isSiteNavigationActive\) \? \(\s*<header className="topbar topbar-actions-only">/,
+  );
+  assert.ok(
+    view.indexOf("<ContentCenterBreadcrumbs") <
+      view.indexOf("<div className={styles.heading}>"),
+  );
+  assert.match(
+    css,
+    /\.breadcrumbs \{[^}]*border-bottom: 1px solid var\(--line,/,
+  );
+  assert.match(css, /\.view \{[^}]*padding: 0;/);
+});
+
 test("draft prefill preserves a snapshot and only matches unambiguous exact copied prompts", () => {
   const prompts = [{ title: "Анализ компании", content: "Task" }];
   assert.equal(

@@ -1784,6 +1784,7 @@ function Dashboard({
         {activeView !== "global-search" &&
         activeView !== "all-projects" &&
         activeView !== "projects" &&
+        activeView !== "content-center" &&
         !(site && isSiteNavigationActive) ? (
           <header className="topbar topbar-actions-only">
             <div className="top-actions">

@@ -351,15 +351,15 @@ export function ContentCenterView({
 
   return (
     <section className={styles.view} aria-label="Контент-центр">
+      <ContentCenterBreadcrumbs
+        workspaceName={workspaceName}
+        screen={screen}
+        title={title}
+        onWorkspaceOpen={onWorkspaceOpen}
+        onNavigate={navigate}
+      />
       <div className={styles.heading}>
         <div>
-          <ContentCenterBreadcrumbs
-            workspaceName={workspaceName}
-            screen={screen}
-            title={title}
-            onWorkspaceOpen={onWorkspaceOpen}
-            onNavigate={navigate}
-          />
           <h1>{title}</h1>
           <p className={styles.muted}>
             {screen === "root"
