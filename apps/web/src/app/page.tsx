@@ -1389,15 +1389,6 @@ function Dashboard({
                       aria-hidden={!expanded}
                     >
                       <div className="workspace-site-tree-inner">
-                        <button
-                          className={`nav-item workspace-site-item ${expanded && activeView === "content-center" ? "active" : ""}`}
-                          tabIndex={expanded ? 0 : -1}
-                          aria-current={expanded && activeView === "content-center" ? "page" : undefined}
-                          onClick={() => openContentCenter(workspaceItem.id)}
-                        >
-                          <span className="site-system-icon content-center" aria-hidden="true" />
-                          <span className="nav-text">Контент-центр</span>
-                        </button>
                         {workspaceItem.sites.map((siteItem, index) => (
                           <button
                             key={siteItem.id}
@@ -1426,6 +1417,16 @@ function Dashboard({
                             Сайтов пока нет
                           </p>
                         ) : null}
+                        <div className="workspace-tools-divider" aria-hidden="true" />
+                        <button
+                          className={`nav-item workspace-site-item ${expanded && activeView === "content-center" ? "active" : ""}`}
+                          tabIndex={expanded ? 0 : -1}
+                          aria-current={expanded && activeView === "content-center" ? "page" : undefined}
+                          onClick={() => openContentCenter(workspaceItem.id)}
+                        >
+                          <span className="site-system-icon content-center" aria-hidden="true" />
+                          <span className="nav-text">Контент-центр</span>
+                        </button>
                       </div>
                     </div>
                   </section>

@@ -2895,6 +2895,10 @@ nav .workspace-site-item {
   width: 188px;
   padding-left: 7px;
 }
+.workspace-tools-divider {
+  margin: 7px 7px 6px;
+  border-top: 1px solid var(--line, #e8e9ee);
+}
 .workspace-site-mark {
   display: grid;
   place-items: center;
