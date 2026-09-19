@@ -253,6 +253,27 @@ describe('DeepSeek adapter', () => {
       }),
     ).resolves.toEqual({ content });
   });
+  it('uses a dedicated compact register system instruction and measures that exact input', async () => {
+    respond({ content: '[S1.1] Компания основана в 2010 году.' });
+    const context = {
+      materials: [{ title: '[S1.1]', content: '2010', sourceUrl: null }],
+      previousResult: null,
+      processingStage: 'register' as const,
+    };
+    const instruction = 'Подготовь реестр фактов';
+    await ai.generate({
+      instruction,
+      context,
+      signal: new AbortController().signal,
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.messages[0].content).toContain('НЕ пишешь итоговый документ');
+    expect(body.messages[0].content).toContain('до 6000 символов');
+    expect(body.messages[0].content).not.toContain('максимум 80000');
+    expect(ai.measureInput(instruction, context)).toBe(
+      JSON.stringify(body.messages).length,
+    );
+  });
   it('still rejects malformed preparation JSON beyond literal whitespace', async () => {
     fetchMock.mockResolvedValue(
       new Response(

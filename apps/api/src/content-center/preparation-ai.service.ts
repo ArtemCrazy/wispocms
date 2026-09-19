@@ -39,6 +39,7 @@ export type SourceSnapshot = {
 };
 
 export type PreparationInput = {
+  processingStage?: 'register';
   materials: Array<{
     title: string;
     content: string;
@@ -187,13 +188,17 @@ export class PreparationAiService {
       ): PreparationInput => ({
         materials: [...batch, registerDraft(draft)],
         previousResult: null,
+        processingStage: 'register',
       });
       const batches = preparationBatches(
         items,
         stageTask,
         (extractTask, batchContext) =>
           Math.max(
-            measure(extractTask, batchContext),
+            measure(extractTask, {
+              ...batchContext,
+              processingStage: 'register',
+            }),
             measure(
               reviewTask,
               reviewContext(
@@ -215,6 +220,7 @@ export class PreparationAiService {
             const result = await call(stageTask, {
               materials: batch,
               previousResult: null,
+              processingStage: 'register',
             });
             const draft = checkedRegister(result.content);
             await progress({
@@ -229,7 +235,11 @@ export class PreparationAiService {
               batch,
               draft,
               reviewTask + REGISTER_PART_REVIEW_NOTE,
-              measure,
+              (reviewInstruction, reviewInput) =>
+                measure(reviewInstruction, {
+                  ...reviewInput,
+                  processingStage: 'register',
+                }),
             );
             const registers: PreparationInput['materials'] = [];
             for (const [partIndex, reviewMaterials] of reviewParts.entries()) {
@@ -237,7 +247,11 @@ export class PreparationAiService {
                 reviewParts.length > 1
                   ? reviewTask + REGISTER_PART_REVIEW_NOTE
                   : reviewTask,
-                { materials: reviewMaterials, previousResult: null },
+                {
+                  materials: reviewMaterials,
+                  previousResult: null,
+                  processingStage: 'register',
+                },
               );
               registers.push({
                 title: `Реестр фактов: этап ${round}, часть ${start + offset + 1}.${partIndex + 1}${batch[0]?.topic ? ` — [${batch[0].topic.sourceId}] ${batch[0].topic.label}` : ''}`,
