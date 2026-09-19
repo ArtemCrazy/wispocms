@@ -66,6 +66,23 @@ describe('automatic website collection', () => {
     expect(result.content).toContain('Продукт');
     expect(result.content).not.toMatch(/malicious|Навигация|<script/);
   });
+  it('retains section boundaries for semantic splitting without losing heading text', () => {
+    const result = extractPage(
+      html(
+        'Компания',
+        '<h2>Доставка</h2><p>Только в пределах МКАД.</p><h3>Исключения</h3><p>За пределами — отдельный расчёт.</p>',
+      ),
+      'https://example.com/',
+    );
+    expect(result.title).toBe('Компания');
+    expect(result.content).toMatch(/^# Компания\n/);
+    expect(result.content).toContain(
+      '\n\n## Доставка\nТолько в пределах МКАД.',
+    );
+    expect(result.content).toContain(
+      '\n\n### Исключения\nЗа пределами — отдельный расчёт.',
+    );
+  });
   it('obeys robots, records failures, deduplicates text, and rejects external links', async () => {
     const requests: string[] = [];
     jest

@@ -103,6 +103,10 @@ export function extractPage(html: string, url: string) {
   $('[class*="cookie"],[id*="cookie"]').remove();
   const main = $('main,[role="main"]').first();
   const body = main.length ? main : $('body');
+  body.find('h1,h2,h3,h4,h5,h6').each((_, heading) => {
+    const level = Number(heading.tagName.slice(1));
+    $(heading).prepend(`\n\n${'#'.repeat(level)} `);
+  });
   body.find('td,th').append(' | ');
   body.find('h1,h2,h3,h4,h5,h6,p,li,tr,section,article,div,br').append('\n');
   const content = body

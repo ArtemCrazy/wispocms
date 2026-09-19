@@ -21,13 +21,11 @@ describe('preparation source snapshots', () => {
     content: 'Исходные факты',
   };
   it('archives exact texts and conditions metadata writes on workspace and captured revision', async () => {
-    jest
-      .spyOn(SiteCrawler.prototype, 'discover')
-      .mockResolvedValue({
-        root: material.sourceUrl,
-        pages: [page],
-        warnings: [],
-      });
+    jest.spyOn(SiteCrawler.prototype, 'discover').mockResolvedValue({
+      root: material.sourceUrl,
+      pages: [page],
+      warnings: [],
+    });
     jest.spyOn(SiteCrawler.prototype, 'collect').mockResolvedValue([page]);
     const query = jest.fn().mockResolvedValue([]);
     const result = await new PreparationCollectionService({
@@ -40,6 +38,14 @@ describe('preparation source snapshots', () => {
     );
     expect(result.sources?.[0].pages[0].content).toBe('Исходные факты');
     expect(result.materials[0].title).toContain('[S1.1]');
+    expect(result.materials[0].topic).toMatchObject({
+      sourceId: 'S1',
+      key: 'company',
+    });
+    expect(result.materials[1].topic).toMatchObject({
+      sourceId: 'S1',
+      key: 'coverage',
+    });
     const [sql, params] = query.mock.calls[0];
     expect(sql).toContain(
       'workspace_id=$1 AND id=$2 AND revision=$3 AND source_url=$5',

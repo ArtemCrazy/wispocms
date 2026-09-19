@@ -6,6 +6,70 @@ import {
 } from './preparation-budget';
 
 describe('preparation request budget', () => {
+  it('reunites interleaved topics without mixing subjects or sites, padding, or mutating input', () => {
+    const material = (title: string, key: string, sourceId = 'S1') => ({
+      title,
+      content: `${title}: исходные сведения`,
+      sourceUrl: `https://example.com/${title}`,
+      topic: { sourceId, key, label: key },
+    });
+    const input = [
+      material('Компания', 'company'),
+      material('Цены', 'conditions'),
+      material('Товар', 'offering'),
+      material('Контакты', 'company'),
+      material('Доставка', 'conditions'),
+      material('Гарантия', 'conditions'),
+      material('Другой сайт', 'company', 'S2'),
+    ];
+    const original = structuredClone(input);
+    const batches = preparationBatches(input, 'Обзор', preparationRequestSize);
+    expect(batches.map((batch) => batch.map((m) => m.title))).toEqual([
+      ['Компания', 'Контакты'],
+      ['Цены', 'Доставка', 'Гарантия'],
+      ['Товар'],
+      ['Другой сайт'],
+    ]);
+    expect(batches.flat()).toHaveLength(input.length);
+    expect(input).toEqual(original);
+  });
+
+  it('starts a new batch before a whole page which cannot fit, even within one topic', () => {
+    const topic = { sourceId: 'S1', key: 'offering', label: 'Продукты' };
+    const input = ['A', 'B', 'C'].map((title) => ({
+      title,
+      content: title.repeat(24000),
+      sourceUrl: null,
+      topic,
+    }));
+    expect(preparationBatches(input, 'Обзор', preparationRequestSize)).toEqual(
+      input.map((item) => [item]),
+    );
+  });
+
+  it('prefers complete heading sections even when a topic finishes well before the target', () => {
+    const sections = [
+      '# Компания\n' + 'Описание. '.repeat(1000) + '\n\n',
+      '## Доставка\n' + 'Цена и условия. '.repeat(2600) + '\n\n',
+      '## Гарантия\n' + 'Срок и исключения. '.repeat(1700),
+    ];
+    const parts = preparationBatches(
+      [
+        {
+          title: '[S1.1] Условия',
+          content: sections.join(''),
+          sourceUrl: null,
+        },
+      ],
+      'Обзор',
+      preparationRequestSize,
+    ).flat();
+    expect(parts.map((p) => p.content.length)).toEqual(
+      sections.map((s) => s.length),
+    );
+    expect(parts.every((p, i) => p.content === sections[i])).toBe(true);
+  });
+
   it('keeps pages intact and splits long pages at paragraphs without dropping text', () => {
     const paragraph = 'Компания: услуги и цены. '.repeat(500) + '\n\n';
     const long = paragraph.repeat(7);

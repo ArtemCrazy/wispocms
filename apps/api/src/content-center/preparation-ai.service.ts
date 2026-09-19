@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AiProviderError } from '../ai/ai-provider.error';
 import type { SitePage } from './site-crawler';
+import type { PreparationTopic } from './preparation-topics';
 import {
   preparationBatches,
   preparationRequestSize,
@@ -44,6 +45,7 @@ export type PreparationInput = {
     revision?: number;
     urlCategory?: string;
     sourceError?: string | null;
+    topic?: PreparationTopic;
   }>;
   previousResult: string | null;
   sources?: SourceSnapshot[];
@@ -227,10 +229,12 @@ export class PreparationAiService {
             );
             const content = checkedRegister(verified.content);
             summaries[start + offset] = {
-              title: `Реестр фактов: этап ${round}, часть ${start + offset + 1}`,
+              title: `Реестр фактов: этап ${round}, часть ${start + offset + 1}${batch[0]?.topic ? ` — [${batch[0].topic.sourceId}] ${batch[0].topic.label}` : ''}`,
               content,
               sourceUrl: null,
             };
+            // Topic boundaries apply to original sources. Later aggregation may
+            // combine labelled registers, otherwise many small topics never shrink.
             await progress({
               stage: 'analysing',
               message: `${previous ? 'Анализ предыдущей версии' : 'Анализ материалов'}: этап ${round}, обработано ${++completed} из ${batches.length} частей`,
@@ -266,8 +270,11 @@ export class PreparationAiService {
           .join('\n\n');
       }
       if (measure(task, context()) <= PREPARATION_REQUEST_LIMIT) break;
+      const hadSourceTopics = materials.some((material) => material.topic);
       materials = await summarize(materials, round);
-      if (measure(task, context()) >= before)
+      // Separate short topics can initially produce longer registers in total.
+      // Allow that one transition; subsequent, ungrouped aggregation must shrink.
+      if (measure(task, context()) >= before && !hadSourceTopics)
         throw new AiProviderError(
           'Промежуточная обработка не сократила контекст. Новая версия не создана.',
         );

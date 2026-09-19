@@ -197,9 +197,7 @@ describe('provider-neutral preparation', () => {
         .join(''),
     ).toBe(previousResult);
     expect(
-      requests
-        .slice(0, -1)
-        .every((r) => r.instruction.includes('историчес')),
+      requests.slice(0, -1).every((r) => r.instruction.includes('историчес')),
     ).toBe(true);
     expect(requests.at(-1)?.context.materials).toEqual(input.materials);
     expect(requests.at(-1)?.context.previousResult).not.toBe(previousResult);
@@ -273,5 +271,55 @@ describe('provider-neutral preparation', () => {
       ),
     ).rejects.toThrow('Сократите');
     expect(generate).not.toHaveBeenCalled();
+  });
+
+  it('verifies topic-only batches then lets labelled registers converge within the full budget', async () => {
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockResolvedValue({ content: 'Факты '.repeat(1000) });
+    const materials = Array.from({ length: 20 }, (_, i) => ({
+      title: `[S${i + 1}.1] Компания`,
+      content: 'Исходные сведения. '.repeat(250),
+      sourceUrl: `https://example${i}.com/`,
+      topic: { sourceId: `S${i + 1}`, key: 'company', label: 'Компания' },
+    }));
+    await new PreparationAiService({ name: 'test', generate }).generate(
+      'Обзор',
+      { materials, previousResult: null },
+    );
+    const requests = generate.mock.calls.map(([call]) => call);
+    const extractions = requests.filter((call) =>
+      call.instruction.startsWith('Подготовь реестр фактов'),
+    );
+    const firstRound = extractions.filter(
+      (call) => call.context.materials[0]?.topic,
+    );
+    expect(firstRound).toHaveLength(20);
+    expect(
+      firstRound.every((call) => call.context.materials.length === 1),
+    ).toBe(true);
+    const aggregated = extractions.filter(
+      (call) => !call.context.materials[0]?.topic,
+    );
+    expect(aggregated.length).toBeGreaterThan(0);
+    expect(
+      aggregated
+        .flatMap((call) => call.context.materials)
+        .every((m) => /\[S\d+\] Компания/.test(m.title)),
+    ).toBe(true);
+    for (const request of requests) {
+      expect(
+        preparationRequestSize(request.instruction, request.context),
+      ).toBeLessThanOrEqual(PREPARATION_REQUEST_LIMIT);
+      if (
+        request.instruction.startsWith('Сверь черновой реестр') &&
+        request.context.materials[0]?.topic
+      ) {
+        expect(request.context.materials).toHaveLength(2); // Original page + draft, no other topic.
+      }
+    }
   });
 });

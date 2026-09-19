@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { AiProviderError } from '../ai/ai-provider.error';
 import { readPublicMaterial } from './public-material';
 import { SiteCrawler, type SitePage } from './site-crawler';
+import { preparationTopic } from './preparation-topics';
 import type {
   PreparationInput,
   PreparationProgress,
@@ -144,12 +145,21 @@ export class PreparationCollectionService {
           title: `[${sourceId}.${pageIndex + 1}] ${page.title}`,
           content: page.content,
           sourceUrl: page.url || null,
+          topic:
+            snapshot.mode === 'main-pages'
+              ? preparationTopic(page, sourceId)
+              : { sourceId, key: 'material', label: material.title },
         });
       }
       const failed = snapshot.pages.filter((page) => page.status === 'failed');
       materials.push({
         title: `[${sourceId}] Охват источника «${material.title}»`,
         sourceUrl: material.sourceUrl,
+        topic: {
+          sourceId,
+          key: 'coverage',
+          label: 'Охват и ограничения источника',
+        },
         content: JSON.stringify({
           mode: snapshot.mode,
           warnings: snapshot.warnings,

@@ -24,6 +24,14 @@ function boundary(text: string, start: number, end: number) {
   if (end === text.length) return end;
   const floor = start + Math.floor((end - start) * 0.6);
   const tail = text.slice(floor, end);
+  // A heading starts the next section: leave it with the following text.
+  // HTML collection preserves headings as Markdown; supplied Markdown works too.
+  const heading = [...text.slice(start, end).matchAll(/^#{1,6}[ \t]+\S/gm)]
+    .filter(
+      (match) => match.index > 0 && text[start + match.index - 1] === '\n',
+    )
+    .at(-1);
+  if (heading) return start + heading.index;
   // Prefer complete paragraphs, then lines/table rows, sentences, and words.
   for (const pattern of [/\n\s*\n/g, /\n/g, /[.!?…][ \t]+/g, /\s+/g]) {
     const matches = [...tail.matchAll(pattern)];
@@ -40,6 +48,27 @@ function boundary(text: string, start: number, end: number) {
 }
 
 export function preparationBatches(
+  materials: Materials,
+  instruction: string,
+  measure: Measure,
+): Materials[] {
+  // Stable buckets reunite related pages even when discovery interleaves topics.
+  // Never pad a short topic with an unrelated page just to fill the budget.
+  const topics = new Map<string, Materials>();
+  for (const material of materials) {
+    const key = material.topic
+      ? JSON.stringify([material.topic.sourceId, material.topic.key])
+      : 'unclassified';
+    const bucket = topics.get(key) ?? [];
+    bucket.push(material);
+    topics.set(key, bucket);
+  }
+  return [...topics.values()].flatMap((topic) =>
+    boundedBatches(topic, instruction, measure),
+  );
+}
+
+function boundedBatches(
   materials: Materials,
   instruction: string,
   measure: Measure,
