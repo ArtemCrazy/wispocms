@@ -229,10 +229,6 @@ export function ProjectMaterials({
             </table>
           </div>
         ) : null}
-        <p className={styles.muted}>
-          Оригиналы доступны только сотрудникам с доступом к этому workspace.
-          Загрузка файла ещё не означает, что AI его обработал.
-        </p>
       </section>
     </article>
   );
