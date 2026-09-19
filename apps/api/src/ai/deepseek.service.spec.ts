@@ -207,7 +207,7 @@ describe('DeepSeek adapter', () => {
     respond(production, 'length');
     await expect(
       ai.produce(input, new AbortController().signal),
-    ).rejects.toThrow('неполный');
+    ).rejects.toThrow('лимита длины');
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -217,12 +217,52 @@ describe('DeepSeek adapter', () => {
     );
     await expect(
       ai.produce(input, new AbortController().signal),
-    ).rejects.toThrow('неполный');
+    ).rejects.toThrow('пустой ответ');
     respond({ ...production, article: { title: 'Неверно' } });
     await expect(
       ai.produce(input, new AbortController().signal),
     ).rejects.toThrow();
   });
+  it.each([
+    ['length', 'лимита длины'],
+    ['content_filter', 'своим фильтром'],
+    ['insufficient_system_resource', 'нехватки ресурсов'],
+    ['aborted', 'прервал генерацию'],
+    ['unknown-provider-value', 'не завершил генерацию'],
+  ])(
+    'reports a safe, specific termination reason: %s',
+    async (finish, message) => {
+      respond(production, finish);
+      await expect(
+        ai.produce(input, new AbortController().signal),
+      ).rejects.toThrow(message);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('uses a larger preparation budget while preserving the article budget', async () => {
+    respond({ content: 'Facts' });
+    await ai.generate({
+      instruction: 'Summarize',
+      context: { materials: [], previousResult: null },
+      signal: new AbortController().signal,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.deepseek.com/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining('"max_tokens":16384') as unknown,
+      }),
+    );
+    respond(production);
+    await ai.produce(input, new AbortController().signal);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      'https://api.deepseek.com/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining('"max_tokens":8192') as unknown,
+      }),
+    );
+  });
+
   it('rejects unsupported attachments before sending any request', async () => {
     await expect(
       ai.produce(

@@ -123,7 +123,12 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     return this.settings.markVerified(credentials.revision);
   }
 
-  private async json(system: string, input: unknown, signal: AbortSignal) {
+  private async json(
+    system: string,
+    input: unknown,
+    signal: AbortSignal,
+    maxTokens = 8192,
+  ) {
     const context = JSON.stringify(input);
     if (context.length > 2_000_000)
       throw new DeepseekError(
@@ -142,7 +147,7 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
         ],
         response_format: { type: 'json_object' },
         thinking: { type: 'disabled' },
-        max_tokens: 8192,
+        max_tokens: maxTokens,
         stream: false,
       },
     );
@@ -150,8 +155,35 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
       if (!Array.isArray(response.choices) || response.choices.length !== 1)
         throw new Error();
       const choice = object(response.choices[0]);
-      if (choice.finish_reason !== 'stop') throw new Error();
+      if (choice.finish_reason !== 'stop') {
+        const reasons = new Map<unknown, string>([
+          [
+            'length',
+            'DeepSeek достиг лимита длины ответа. Результат неполный и не сохранён. Сократите задачу или запрошенный объём результата.',
+          ],
+          [
+            'content_filter',
+            'DeepSeek остановил ответ своим фильтром. Новая версия не создана. Проверьте задачу и материалы.',
+          ],
+          [
+            'insufficient_system_resource',
+            'DeepSeek прервал генерацию из-за нехватки ресурсов на своей стороне. Повторите позже.',
+          ],
+          [
+            'aborted',
+            'DeepSeek прервал генерацию. Новая версия не создана. Повторите позже.',
+          ],
+        ]);
+        throw new DeepseekError(
+          reasons.get(choice.finish_reason) ??
+            'DeepSeek не завершил генерацию ожидаемым образом. Новая версия не создана.',
+        );
+      }
       const content = object(choice.message).content;
+      if (typeof content === 'string' && !content.trim())
+        throw new DeepseekError(
+          'DeepSeek вернул пустой ответ. Новая версия не создана. Уточните задачу и повторите запуск.',
+        );
       if (
         typeof content !== 'string' ||
         !content.trim() ||
@@ -159,7 +191,8 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
       )
         throw new Error();
       return object(JSON.parse(content) as unknown);
-    } catch {
+    } catch (error) {
+      if (error instanceof DeepseekError) throw error;
       throw new DeepseekError(
         'DeepSeek вернул неполный или некорректный результат. Текущая версия не изменена.',
       );
@@ -179,6 +212,7 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
       PREPARATION_PROMPT,
       { instruction: request.instruction, context: request.context },
       request.signal,
+      16384,
     );
     if (
       typeof result.content !== 'string' ||
