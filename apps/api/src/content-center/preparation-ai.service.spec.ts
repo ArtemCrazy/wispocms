@@ -91,11 +91,18 @@ describe('provider-neutral preparation', () => {
       input,
       progress,
     );
-    expect(generate).toHaveBeenCalledTimes(6);
+    const extractions = generate.mock.calls.filter(([request]) =>
+      request.instruction.startsWith('Подготовь реестр фактов'),
+    );
+    const reviews = generate.mock.calls.filter(([request]) =>
+      request.instruction.startsWith('Сверь черновой реестр'),
+    );
+    expect(reviews).toHaveLength(extractions.length);
+    expect(generate).toHaveBeenCalledTimes(extractions.length * 2 + 1);
     const contexts = generate.mock.calls.map(([request]) => request.context);
     expect(
-      contexts
-        .slice(0, -1)
+      extractions
+        .map(([request]) => request.context)
         .flatMap((c) => c.materials)
         .map((m) => m.content)
         .join(''),
@@ -104,7 +111,7 @@ describe('provider-neutral preparation', () => {
     expect(
       contexts.slice(0, -1).every((c) => JSON.stringify(c).length < 61000),
     ).toBe(true);
-    expect(contexts.at(-1).materials).toHaveLength(5);
+    expect(contexts.at(-1).materials).toHaveLength(extractions.length);
     expect(progress).toHaveBeenLastCalledWith(
       expect.objectContaining({ stage: 'synthesizing' }),
     );
@@ -184,7 +191,7 @@ describe('provider-neutral preparation', () => {
     const requests = generate.mock.calls.map(([call]) => call);
     expect(
       requests
-        .slice(0, -1)
+        .filter((r) => r.instruction.startsWith('Подготовь реестр фактов'))
         .flatMap((r) => r.context.materials)
         .map((m) => m.content)
         .join(''),
@@ -192,7 +199,7 @@ describe('provider-neutral preparation', () => {
     expect(
       requests
         .slice(0, -1)
-        .every((r) => r.instruction.includes('исторические')),
+        .every((r) => r.instruction.includes('историчес')),
     ).toBe(true);
     expect(requests.at(-1)?.context.materials).toEqual(input.materials);
     expect(requests.at(-1)?.context.previousResult).not.toBe(previousResult);

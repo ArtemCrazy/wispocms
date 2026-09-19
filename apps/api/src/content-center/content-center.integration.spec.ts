@@ -788,6 +788,53 @@ integration('Content Center / isolated PostgreSQL', () => {
     },
   );
 
+  it('keeps the saved version when verification fails after extraction succeeded', async () => {
+    await service.start(workspace, admin, {
+      instruction: 'Первый результат',
+      withoutMaterials: true,
+    });
+    await service.processNext();
+    const previous = (await service.overview(workspace, admin)).versions[0];
+    for (let index = 0; index < 3; index++)
+      await service.saveMaterial(workspace, admin, {
+        kind: 'text',
+        title: `Исходник ${index}`,
+        content: 'Исходные факты.\n'.repeat(2400),
+      });
+    generate.mockImplementation((request) =>
+      request.instruction.startsWith('Сверь черновой реестр')
+        ? Promise.reject(
+            new AiProviderError('Сверка недоступна. Новая версия не создана.'),
+          )
+        : Promise.resolve({ content: 'Черновой реестр фактов' }),
+    );
+    const run = await service.start(workspace, admin, {
+      instruction: 'Собери новый результат',
+      withoutMaterials: false,
+    });
+    await service.processNext();
+    const state = await service.overview(workspace, admin);
+    expect(state.run.status).toBe('failed');
+    expect(state.run.error).toContain('Сверка недоступна');
+    expect(state.versions).toHaveLength(1);
+    expect(state.versions[0].id).toBe(previous.id);
+    expect(
+      generate.mock.calls
+        .slice(1)
+        .every(([r]) =>
+          /^(Подготовь реестр фактов|Сверь черновой реестр)/.test(
+            r.instruction,
+          ),
+        ),
+    ).toBe(true);
+    expect(
+      await db.query(
+        'SELECT input_context FROM cc_preparation_runs WHERE id=$1',
+        [run.id],
+      ),
+    ).toEqual([{ input_context: null }]);
+  });
+
   it('keeps the last result on failure and recovers abandoned jobs', async () => {
     await service.start(workspace, admin, {
       instruction: 'Task',
