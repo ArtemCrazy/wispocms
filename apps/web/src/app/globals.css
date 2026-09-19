@@ -2964,17 +2964,26 @@ nav .nav-item.active {
 }
 .workspace-content-sections {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 2px;
   margin: 4px 6px 6px 14px;
   padding-left: 7px;
   border-left: 1px solid var(--line, #e8e9ee);
 }
 nav .workspace-content-section {
+  display: block;
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   min-height: 34px;
   padding: 6px 8px;
+  border-radius: 999px;
   font-size: 14px;
   line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .nav-item.site-page-link .nav-icon {
   width: 16px;

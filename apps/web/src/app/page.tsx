@@ -1471,10 +1471,11 @@ function Dashboard({
                                 key={section.id}
                                 className={`nav-item workspace-content-section ${contentCenterSection(contentCenterScreen) === section.id ? "active" : ""}`}
                                 title={section.label}
+                                aria-label={section.label}
                                 aria-current={contentCenterScreen === section.id ? "page" : undefined}
                                 onClick={() => openContentCenter(workspaceItem.id, section.id)}
                               >
-                                {section.label}
+                                {section.id === "preparation" ? "Подготовка инфо" : section.label}
                               </button>
                             ))}
                           </div>
