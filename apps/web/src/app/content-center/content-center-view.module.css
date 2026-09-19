@@ -523,6 +523,9 @@
   border-radius: 0 8px 8px 0;
   width: 40px;
 }
+.sourceItem > button:nth-of-type(3) {
+  margin-inline-start: 8px;
+}
 .sourceWarning {
   flex-basis: 100%;
   color: #8a641b;
