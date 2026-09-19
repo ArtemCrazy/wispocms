@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
 import { PreparationRequestLabels1790659200000 } from '../database/migrations/1790659200000-PreparationRequestLabels';
+import { PreparationReadablePrompts1790745600000 } from '../database/migrations/1790745600000-PreparationReadablePrompts';
 import { SiteCrawler, type SitePage } from './site-crawler';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -113,6 +114,62 @@ integration('Content Center / isolated PostgreSQL', () => {
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
+  });
+
+  it('updates only the legacy starter citation sentence, preserving edits and history', async () => {
+    const library = new PlatformPromptsService(db);
+    const oldRule =
+      'При возможности указывай название материала или предоставленную ссылку, откуда взят факт; не выдумывай источники.';
+    const matching = await library.create({
+      title: 'Анализ компании',
+      content: `Мои изменения. ${oldRule} Мой финал.`,
+    });
+    await library.create({
+      title: 'Анализ лендинга',
+      content: 'Полностью мой текст.',
+    });
+    await library.create({ title: 'Другой промпт', content: oldRule });
+    await service.saveDraft(workspace, admin, {
+      instruction: oldRule,
+      withoutMaterials: true,
+      revision: 0,
+    });
+    await service.start(workspace, admin, {
+      instruction: oldRule,
+      withoutMaterials: true,
+    });
+    await service.processNext();
+    const before = await service.overview(workspace, admin);
+    const beforeHistory = await db.query<unknown[]>(
+      'SELECT * FROM cc_preparation_versions',
+    );
+    const runner = db.createQueryRunner();
+    try {
+      await new PreparationReadablePrompts1790745600000().up(runner);
+      const once = await library.list();
+      const updated = once.find((p) => p.id === matching.id)!;
+      expect(updated.content).toContain(
+        'Мои изменения. В итоговом документе не добавляй ссылки на источники',
+      );
+      expect(updated.content).toMatch(/Мой финал\.$/);
+      expect(updated.revision).toBe(2);
+      expect(once.find((p) => p.title === 'Анализ лендинга')!.content).toBe(
+        'Полностью мой текст.',
+      );
+      expect(once.find((p) => p.title === 'Другой промпт')!.content).toBe(
+        oldRule,
+      );
+      await new PreparationReadablePrompts1790745600000().up(runner);
+      expect(await library.list()).toEqual(once);
+      expect((await service.overview(workspace, admin)).draft).toEqual(
+        before.draft,
+      );
+      expect(await db.query('SELECT * FROM cc_preparation_versions')).toEqual(
+        beforeHistory,
+      );
+    } finally {
+      await runner.release();
+    }
   });
 
   it('snapshots request names and instructions through queueing, library edits and restoration', async () => {

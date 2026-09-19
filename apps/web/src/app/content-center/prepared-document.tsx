@@ -12,9 +12,25 @@ function renderInline(text: string): ReactNode[] {
   return parts;
 }
 
+// Hide only internal citations, not business URLs, ordinary brackets or saved evidence.
+const sourceId = String.raw`S\d+(?:\.\d+)*(?:[ \t]*[-–—][ \t]*S?\d+(?:\.\d+)*)?`;
+const sourceGroup = String.raw`\[[ \t]*${sourceId}(?:[ \t]*[,;][ \t]*${sourceId})*[ \t]*\]`;
+const sourceReferences = new RegExp(
+  String.raw`[ \t]*(?:\([ \t]*${sourceGroup}[ \t]*\)|${sourceGroup})`,
+  "g",
+);
+
 // Render a deliberately small Markdown subset as React text. Never execute AI HTML.
-export function PreparedDocument({ content }: { content: string }) {
-  const lines = content.split(/\r?\n/);
+export function PreparedDocument({
+  content,
+  hideSourceReferences = false,
+}: {
+  content: string;
+  hideSourceReferences?: boolean;
+}) {
+  const lines = (
+    hideSourceReferences ? content.replace(sourceReferences, "") : content
+  ).split(/\r?\n/);
   const blocks: ReactNode[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];

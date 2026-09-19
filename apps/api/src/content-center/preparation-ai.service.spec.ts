@@ -39,6 +39,8 @@ describe('provider-neutral preparation', () => {
       Parameters<PreparationProvider['generate']>[0],
     ];
     expect(called[0].instruction).toMatch(/^Подготовь документ/);
+    expect(called[0].instruction).toContain('не добавляй ссылки на источники');
+    expect(called[0].instruction).not.toContain('Указывай источники');
     expect(called[0].context).toEqual(context);
     expect(called[0].signal).toBeInstanceOf(AbortSignal);
   });
@@ -71,9 +73,14 @@ describe('provider-neutral preparation', () => {
     }
   });
   it('stages large input in bounded batches and does not send the source archive twice', async () => {
-    const generate = jest.fn().mockResolvedValue({
-      content: '[S1.1] Компания продаёт оборудование. https://example.com/',
-    });
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockResolvedValue({
+        content: '[S1.1] Компания продаёт оборудование. https://example.com/',
+      });
     const progress = jest.fn();
     const input = {
       materials: [
@@ -99,6 +106,14 @@ describe('provider-neutral preparation', () => {
     );
     expect(reviews).toHaveLength(extractions.length);
     expect(generate).toHaveBeenCalledTimes(extractions.length * 2 + 1);
+    expect(
+      extractions.every(([request]) =>
+        request.instruction.includes('сохрани исходные идентификаторы [S…]'),
+      ),
+    ).toBe(true);
+    expect(generate.mock.calls.at(-1)![0].instruction).toContain(
+      'не добавляй ссылки на источники',
+    );
     const contexts = generate.mock.calls.map(([request]) => request.context);
     expect(
       extractions

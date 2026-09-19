@@ -10,7 +10,28 @@ const source = await readFile(new URL('../src/app/content-center/prepared-docume
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } });
 const target = { exports: {} };
 new Function('require', 'module', 'exports', compiled.outputText)(createRequire(import.meta.url), target, target.exports);
-const render = content => renderToStaticMarkup(React.createElement(target.exports.PreparedDocument, { content }));
+const render = (content, hideSourceReferences = false) => renderToStaticMarkup(React.createElement(target.exports.PreparedDocument, { content, hideSourceReferences }));
+
+test('preparation presentation hides internal citations without altering stored content', () => {
+  const content = '# Компания [S1.1]\nЦена: **3 500 ₽** [S1.3, S1.11].\nОхват ([S1.1–S1.16, S1.17–S1.27, S1.83]).\n- Услуга [S1.2; S2] доступна.\n1. Факт [S1.2-S1.3].\n| Поле | Значение |\n| --- | --- |\n| Цена | 100 [S1.3] |';
+  const html = render(content, true);
+  assert.doesNotMatch(html, /\[S\d|\(\)/);
+  assert.match(html, /<h2>Компания<\/h2>/);
+  assert.match(html, /Цена: <strong>3 500 ₽<\/strong>\./);
+  assert.match(html, /<li>Услуга доступна\.<\/li>/);
+  assert.match(html, /<td>100<\/td>/);
+  assert.match(content, /\[S1\.1\]/);
+  assert.match(render(content), /\[S1\.1\]/); // Other document types retain their citations.
+});
+
+test('citation cleanup preserves business URLs, uncertainty, numbers, brackets and escaping', () => {
+  const html = render('Сайт: https://example.com/\n[Сайт](https://example.com/)\n[Нет данных] [S1 неизвестно] Цена от 50 до 150 ₽ [S1.2].\n<script>alert(1)</script> [S2.1]', true);
+  assert.match(html, /https:\/\/example\.com\//);
+  assert.match(html, /\[Сайт\]\(https:\/\/example\.com\/\)/);
+  assert.match(html, /\[Нет данных\] \[S1 неизвестно\] Цена от 50 до 150 ₽\./);
+  assert.doesNotMatch(html, /<script|\[S2\.1\]/);
+  assert.match(html, /&lt;script&gt;/);
+});
 
 test('prepared document renders headings, lists and tables as readable markup', () => {
   const html = render('# Компания\nОписание\n\n- Первый факт\n- Второй факт\n\n1. Вопрос клиенту\n\n| Поле | Значение |\n| --- | --- |\n| Продукт | Косметика |');

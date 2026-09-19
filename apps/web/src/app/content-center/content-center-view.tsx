@@ -870,7 +870,10 @@ export function ContentCenterView({
                       <pre>{document.instruction}</pre>
                     </details>
                   )}
-                  <PreparedDocument content={document.content ?? ""} />
+                  <PreparedDocument
+                    content={document.content ?? ""}
+                    hideSourceReferences
+                  />
                   <SourceRegistry sources={document.sources ?? []} />
                 </>
               )}

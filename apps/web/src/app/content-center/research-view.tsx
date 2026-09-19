@@ -372,7 +372,10 @@ export function ResearchView({
                     aria-label="Полный результат обработки"
                   >
                     <h2>Полный результат · версия {data.prepared.number}</h2>
-                    <PreparedDocument content={data.prepared.content} />
+                    <PreparedDocument
+                      content={data.prepared.content}
+                      hideSourceReferences
+                    />
                   </article>
                 )}
               </div>
