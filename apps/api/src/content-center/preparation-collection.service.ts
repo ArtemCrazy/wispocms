@@ -2,7 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AiProviderError } from '../ai/ai-provider.error';
 import { readPublicMaterial } from './public-material';
-import { SiteCrawler, type SitePage } from './site-crawler';
+import {
+  SiteCrawler,
+  siteCoverage,
+  type SitePage,
+  type SiteDiscovery,
+} from './site-crawler';
 import { preparationTopic } from './preparation-topics';
 import type {
   PreparationInput,
@@ -52,6 +57,13 @@ export class PreparationCollectionService {
       if (material.sourceUrl && material.urlCategory === 'site') {
         let discovered: SitePage[] = [];
         let loaded: SitePage[] = [];
+        let discoveryStatus: SiteDiscovery = {
+          state: 'partial',
+          checkedPages: 0,
+          pendingPages: 0,
+          pendingSitemaps: 0,
+          reasons: ['Не удалось завершить поиск структуры сайта.'],
+        };
         try {
           const crawler = new SiteCrawler(
             material.sourceUrl,
@@ -61,8 +73,16 @@ export class PreparationCollectionService {
             },
             signal,
           );
-          const discovery = await crawler.discover();
+          const discovery = await crawler.discover(async (checked, found) => {
+            await progress({
+              stage: 'collecting',
+              message: `${material.title}: поиск структуры — найдено ${found}, проверено ${checked} страниц`,
+              completed: checked,
+              total: found,
+            });
+          });
           discovered = discovery.pages;
+          discoveryStatus = discovery.discovery;
           snapshot.warnings = discovery.warnings;
           const selected = discovered.filter((page) => page.recommended);
           loaded = await crawler.collect(selected, async (pages) => {
@@ -91,8 +111,8 @@ export class PreparationCollectionService {
           return page.recommended
             ? {
                 ...page,
-                status: 'failed',
-                error: 'Не удалось завершить загрузку страницы',
+                status: 'pending',
+                reason: 'Обход прерван до завершения проверки страницы',
               }
             : page;
         });
@@ -105,6 +125,7 @@ export class PreparationCollectionService {
             status: 'failed',
             error: 'Сайт не удалось прочитать',
           });
+        snapshot.coverage = siteCoverage(discoveryStatus, snapshot.pages);
       } else {
         let content = material.content;
         let error: string | undefined;
@@ -163,10 +184,14 @@ export class PreparationCollectionService {
         content: JSON.stringify({
           mode: snapshot.mode,
           warnings: snapshot.warnings,
+          coverage: snapshot.coverage,
           loaded: snapshot.pages
             .filter((p) => p.status === 'loaded')
             .map((p) => p.url),
           unavailable: failed.map((p) => ({ url: p.url, reason: p.error })),
+          unchecked: snapshot.pages
+            .filter((p) => p.status === 'pending')
+            .map((p) => ({ url: p.url, reason: p.reason })),
           excluded: snapshot.pages.filter((p) => !p.recommended).length,
           rule: 'Выводы только по прочитанным материалам. Не найдено в выборке не означает отсутствие у компании. Маркетинговые заявления не являются независимо проверенными фактами.',
         }),

@@ -953,6 +953,13 @@ integration('Content Center / isolated PostgreSQL', () => {
         root: 'https://example.com/',
         pages: [page],
         warnings: [],
+        discovery: {
+          state: 'finished',
+          checkedPages: 1,
+          pendingPages: 0,
+          pendingSitemaps: 0,
+          reasons: [],
+        },
       });
     const collect = jest
       .spyOn(SiteCrawler.prototype, 'collect')
@@ -995,6 +1002,11 @@ integration('Content Center / isolated PostgreSQL', () => {
         admin,
       );
       expect(version.sources?.[0].sourceUrl).toBe('https://example.com/');
+      expect(version.sources?.[0].coverage).toMatchObject({
+        state: 'finished',
+        selected: 1,
+        read: 1,
+      });
       expect(version.sources?.[0].pages[0].content).toContain(
         'второй страницы',
       );

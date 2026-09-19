@@ -5,7 +5,9 @@ import { load } from 'cheerio';
 import robotsParser from 'robots-parser';
 import { publicMaterialUrl, readPublicResource } from './public-material';
 
-export const SITE_PAGE_LIMIT = 30;
+export const SITE_ADDRESS_LIMIT = 2000;
+export const SITE_SITEMAP_LIMIT = 64;
+export const SITE_REQUEST_LIMIT = 180;
 export const SITE_TEXT_LIMIT = 1_200_000;
 const AGENT = 'WispoCMS';
 export type SitePage = {
@@ -13,7 +15,7 @@ export type SitePage = {
   title: string;
   group: string;
   recommended: boolean;
-  status: 'found' | 'loaded' | 'failed' | 'duplicate';
+  status: 'found' | 'loaded' | 'failed' | 'duplicate' | 'pending';
   content?: string;
   error?: string;
   checkedAt?: string;
@@ -21,6 +23,64 @@ export type SitePage = {
   duplicateOf?: string;
   reason?: string;
 };
+
+export type SiteDiscovery = {
+  state: 'finished' | 'partial';
+  checkedPages: number;
+  pendingPages: number;
+  pendingSitemaps: number;
+  reasons: string[];
+};
+export type SiteCoverage = SiteDiscovery & {
+  selected: number;
+  read: number;
+  unread: number;
+  sections: Array<{
+    title: string;
+    found: number;
+    read: number;
+    unread: number;
+  }>;
+};
+
+export function siteCoverage(
+  discovery: SiteDiscovery,
+  pages: SitePage[],
+): SiteCoverage {
+  const selected = pages.filter((p) => p.recommended);
+  const available = (p: SitePage) =>
+    p.status === 'loaded' || p.status === 'duplicate';
+  const unread = selected.filter((p) => !available(p)).length;
+  return {
+    ...discovery,
+    reasons: [
+      ...new Set([
+        ...discovery.reasons,
+        ...(unread
+          ? [
+              `Не удалось включить выбранные страницы: ${unread}. Они не использованы в анализе.`,
+            ]
+          : []),
+        ...selected
+          .filter((p) => p.status === 'pending')
+          .map((p) => p.reason ?? 'Страница не проверена'),
+      ]),
+    ],
+    state: discovery.state === 'partial' || unread ? 'partial' : 'finished',
+    selected: selected.length,
+    read: selected.filter((p) => p.status === 'loaded').length,
+    unread,
+    sections: MAIN_GROUPS.map((title) => {
+      const section = pages.filter((p) => p.group === title);
+      return {
+        title,
+        found: section.length,
+        read: section.filter(available).length,
+        unread: section.filter((p) => !available(p)).length,
+      };
+    }),
+  };
+}
 
 export function siteUrl(value: string, root: string): string {
   const url = publicMaterialUrl(new URL(value, root).href);
@@ -48,8 +108,16 @@ export function pageGroup(url: string, title: string): string {
     /* Keep encoded paths. */
   }
   if (path === '/') return 'Главная';
+  // Editorial URLs stay editorial even when their headline mentions a price or doctor.
+  if (/(?:^|\/)(?:blog|news|articles?|блог|новости|статьи)(?:\/|$)/i.test(path))
+    return 'Блог и новости';
   const value = `${path} ${title}`.toLowerCase();
-  if (/price|pricing|cost|цены|стоимост/.test(value)) return 'Цены и условия';
+  if (
+    /price|pricing|cost|цены|стоимост|delivery|payment|warranty|guarantee|доставк|оплат|гаранти/.test(
+      value,
+    )
+  )
+    return 'Цены и условия';
   if (/contact|контакт|адрес/.test(value)) return 'Контакты';
   if (/about|company|о нас|о компании|о клиник/.test(value))
     return 'О компании';
@@ -79,7 +147,7 @@ export function usablePage(url: string): boolean {
   );
 }
 
-export function extractPage(html: string, url: string) {
+export function extractStructure(html: string, url: string) {
   if (html.includes('\0') || html.includes('\uFFFD'))
     throw new Error('encoding');
   const $ = load(html);
@@ -92,11 +160,20 @@ export function extractPage(html: string, url: string) {
     .slice(0, 200);
   const links = $('a[href]')
     .toArray()
-    .slice(0, 3000)
     .map((a) => ({
       url: $(a).attr('href')!,
       title: $(a).text().trim().slice(0, 200),
     }));
+  return {
+    title,
+    links,
+    description: $('meta[name="description"]').attr('content') ?? '',
+  };
+}
+
+export function extractPage(html: string, url: string) {
+  const structure = extractStructure(html, url);
+  const $ = load(html);
   $(
     'script,style,noscript,svg,nav,form,iframe,[hidden],[aria-hidden="true"],body > header,body > footer,[role="banner"],[role="contentinfo"],[role="navigation"]',
   ).remove();
@@ -123,8 +200,7 @@ export function extractPage(html: string, url: string) {
     throw new Error(
       'Текст страницы превышает 100 000 символов; добавьте нужную часть вручную',
     );
-  const description = $('meta[name="description"]').attr('content') ?? '';
-  return { title, links, content, description };
+  return { ...structure, content };
 }
 
 const MAIN_GROUPS = [
@@ -137,22 +213,38 @@ const MAIN_GROUPS = [
   'Услуги и другие страницы',
 ];
 
+function balanceBranches(pages: SitePage[]) {
+  const branches = new Map<string, SitePage[]>();
+  for (const page of [...pages].sort(
+    (a, b) =>
+      new URL(a.url).pathname.split('/').filter(Boolean).length -
+      new URL(b.url).pathname.split('/').filter(Boolean).length,
+  )) {
+    const parts = new URL(page.url).pathname.split('/').filter(Boolean);
+    const key = parts.slice(0, parts.length > 2 ? 2 : 1).join('/');
+    const branch = branches.get(key) ?? [];
+    branch.push(page);
+    branches.set(key, branch);
+  }
+  const result: SitePage[] = [];
+  while ([...branches.values()].some((branch) => branch.length))
+    for (const branch of branches.values())
+      if (branch.length) result.push(branch.shift()!);
+  return result;
+}
+
 export function selectSitePages(pages: SitePage[]): SitePage[] {
   const selected: SitePage[] = [];
   const editorial = pages
     .filter((p) => p.group === 'Блог и новости')
     .slice(0, 3);
-  // Round-robin ensures 25 doctors or products cannot displace contact/pricing pages.
+  // Interleave business sections; never drop a business page just because 30 were selected.
   const buckets = MAIN_GROUPS.map((group) =>
-    pages.filter((p) => p.group === group),
+    balanceBranches(pages.filter((p) => p.group === group)),
   );
-  while (
-    selected.length < SITE_PAGE_LIMIT - editorial.length &&
-    buckets.some((b) => b.length)
-  ) {
+  while (buckets.some((b) => b.length)) {
     for (const bucket of buckets) {
-      if (bucket.length && selected.length < SITE_PAGE_LIMIT - editorial.length)
-        selected.push(bucket.shift()!);
+      if (bucket.length) selected.push(bucket.shift()!);
     }
   }
   selected.push(...editorial);
@@ -164,7 +256,7 @@ export function selectSitePages(pages: SitePage[]): SitePage[] {
         : 'Информация о компании и продукте'
       : page.group === 'Юридические документы'
         ? 'Не включено в профиль компании'
-        : 'За пределами автоматической выборки';
+        : 'Архив статей и новостей: используется выборочно';
   }
   return selected;
 }
@@ -175,19 +267,27 @@ export class SiteCrawler {
   private lastRequest = 0;
   private requests = 0;
   readonly signal: AbortSignal;
-  private cache = new Map<
+  private stopReason: string | undefined;
+  private cachedCharacters = 0;
+  private documents = new Map<
     string,
-    Awaited<ReturnType<typeof readPublicResource>>
+    {
+      url: string;
+      title: string;
+      content?: string;
+      error?: string;
+      pending?: string;
+    }
   >();
 
   constructor(
     private root: string,
     private alive: () => Promise<void> = () => Promise.resolve(),
-    signal?: AbortSignal,
+    private readonly parentSignal?: AbortSignal,
   ) {
     this.root = siteUrl(root, root);
-    this.signal = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(4 * 60_000)])
+    this.signal = parentSignal
+      ? AbortSignal.any([parentSignal, AbortSignal.timeout(4 * 60_000)])
       : AbortSignal.timeout(4 * 60_000);
   }
 
@@ -195,8 +295,11 @@ export class SiteCrawler {
     siteUrl(url.href, this.root);
     await this.alive();
     this.signal.throwIfAborted();
-    if (++this.requests > 180)
-      throw new Error('Достигнут предел запросов обхода');
+    if (this.requests >= SITE_REQUEST_LIMIT) {
+      this.stopReason = `Достигнут технический предел: ${SITE_REQUEST_LIMIT} запросов к сайту.`;
+      throw new Error(this.stopReason);
+    }
+    this.requests++;
     const seconds = this.robots.get(url.origin)?.getCrawlDelay(AGENT) ?? 0;
     if (seconds > 10)
       throw new Error('Сайт требует слишком большой интервал обхода');
@@ -226,8 +329,7 @@ export class SiteCrawler {
 
   private async read(url: string, xml = false) {
     const normalized = siteUrl(url, this.root);
-    if (this.cache.has(normalized)) return this.cache.get(normalized)!;
-    const result = await readPublicResource(normalized, {
+    return readPublicResource(normalized, {
       signal: this.signal,
       xml,
       beforeRequest: async (target) => {
@@ -238,21 +340,89 @@ export class SiteCrawler {
         await this.pace(target);
       },
     });
-    if (!xml && this.cache.size < 35) this.cache.set(normalized, result);
-    return result;
   }
 
-  async discover() {
+  private stopped() {
+    this.parentSignal?.throwIfAborted();
+    if (this.signal.aborted)
+      this.stopReason ??= 'Достигнут предел времени обхода: 4 минуты.';
+    return this.stopReason;
+  }
+
+  private errorMessage(error: unknown) {
+    const message = error instanceof Error ? error.message : '';
+    return /robots|JavaScript|символов|HTML|интервал/.test(message)
+      ? message.slice(0, 250)
+      : 'Не удалось прочитать страницу. Она недоступна, защищена или требует JavaScript.';
+  }
+
+  private remember(
+    url: string,
+    resource: Awaited<ReturnType<typeof readPublicResource>>,
+  ) {
+    if (!resource.html)
+      throw new Error('Не HTML-страница; документ можно загрузить файлом');
+    // Structure discovery must work even on a short navigation page with no usable body text.
+    const structure = extractStructure(resource.body, resource.url);
+    const document: {
+      url: string;
+      title: string;
+      content?: string;
+      error?: string;
+      pending?: string;
+    } = {
+      url: resource.url,
+      title: structure.title,
+    };
+    try {
+      const { content } = extractPage(resource.body, resource.url);
+      if (this.cachedCharacters + content.length > SITE_TEXT_LIMIT) {
+        document.pending =
+          'Текст не включён: достигнут предел объёма сайта — 1,2 млн символов.';
+      } else {
+        document.content = content;
+        this.cachedCharacters += content.length;
+      }
+    } catch (error) {
+      document.error = this.errorMessage(error);
+    }
+    this.documents.set(url, document);
+    return structure;
+  }
+
+  async discover(
+    progress?: (checked: number, discovered: number) => Promise<void>,
+  ) {
     const pages = new Map<string, SitePage>();
     const warnings: string[] = [];
+    const reasons = new Set<string>();
+    const inspected = new Set<string>();
+    const attempted = new Set<string>();
     const add = (value: string, title = '', base = this.root) => {
       try {
         const url = siteUrl(new URL(value, base).href, this.root);
-        if (!usablePage(url) || pages.size >= 300 || pages.has(url)) return;
+        if (!usablePage(url) || pages.has(url)) return;
+        const group = pageGroup(url, title);
+        if (pages.size >= SITE_ADDRESS_LIMIT) {
+          reasons.add(
+            `Реестр ограничен ${SITE_ADDRESS_LIMIT} адресами. Не все обнаруженные ссылки сохранены.`,
+          );
+          // A large editorial sitemap must not crowd out business URLs discovered later.
+          const replace = MAIN_GROUPS.includes(group)
+            ? [...pages.values()]
+                .reverse()
+                .find(
+                  (p) =>
+                    !MAIN_GROUPS.includes(p.group) && !attempted.has(p.url),
+                )
+            : undefined;
+          if (!replace) return;
+          pages.delete(replace.url);
+        }
         pages.set(url, {
           url,
           title: title || new URL(url).pathname,
-          group: pageGroup(url, title),
+          group,
           recommended: false,
           status: 'found',
         });
@@ -261,81 +431,135 @@ export class SiteCrawler {
       }
     };
     add(this.root, 'Главная');
-    const rootResource = await this.read(this.root);
-    if (!rootResource.html)
-      throw new Error('Адрес сайта не является HTML-страницей');
-    this.root = siteUrl(rootResource.url, this.root);
-    pages.clear();
-    add(this.root, 'Главная');
-    const rootPage = extractPage(rootResource.body, this.root);
-    pages.get(this.root)!.title = rootPage.title;
-    rootPage.links.forEach((link) => add(link.url, link.title));
-    const policy = await this.policy(new URL(this.root).origin);
-    const sitemaps = [
-      ...policy.getSitemaps(),
-      `${new URL(this.root).origin}/sitemap.xml`,
-    ];
-    const visitedMaps = new Set<string>();
-    while (sitemaps.length && visitedMaps.size < 6 && pages.size < 300) {
-      const value = sitemaps.shift()!;
+    try {
+      const rootResource = await this.read(this.root);
+      this.root = siteUrl(rootResource.url, this.root);
+      pages.clear();
+      add(this.root, 'Главная');
+      const rootPage = this.remember(this.root, rootResource);
+      pages.get(this.root)!.title = rootPage.title;
+      inspected.add(this.root);
+      rootPage.links.forEach((link) => add(link.url, link.title));
+    } catch (error) {
+      this.parentSignal?.throwIfAborted();
+      reasons.add('Не удалось проверить ссылки на главной странице.');
+      this.documents.set(this.root, {
+        url: this.root,
+        title: 'Главная',
+        error: this.errorMessage(error),
+      });
+    }
+    attempted.add(this.root);
+    await progress?.(inspected.size, pages.size);
+
+    const sitemaps: string[] = [];
+    const knownMaps = new Set<string>();
+    const queueMap = (value: string) => {
       try {
         const url = siteUrl(value, this.root);
-        if (visitedMaps.has(url)) continue;
-        visitedMaps.add(url);
+        if (knownMaps.has(url)) return;
+        if (knownMaps.size >= 256) {
+          reasons.add(
+            'Не все вложенные карты сайта помещаются в очередь проверки.',
+          );
+          return;
+        }
+        knownMaps.add(url);
+        sitemaps.push(url);
+      } catch {
+        reasons.add(
+          'Карта сайта указывает на неподдерживаемый или внешний адрес.',
+        );
+      }
+    };
+    this.robots.get(new URL(this.root).origin)?.getSitemaps().forEach(queueMap);
+    queueMap(`${new URL(this.root).origin}/sitemap.xml`);
+    const visitedMaps = new Set<string>();
+    while (
+      sitemaps.length &&
+      visitedMaps.size < SITE_SITEMAP_LIMIT &&
+      !this.stopped()
+    ) {
+      // Prefer service/product sitemaps to editorial archives when a site has many maps.
+      sitemaps.sort(
+        (a, b) =>
+          Number(/blog|news|article/i.test(a)) -
+          Number(/blog|news|article/i.test(b)),
+      );
+      const url = sitemaps.shift()!;
+      visitedMaps.add(url);
+      try {
         const xml = await this.read(url, true);
         if (/<!DOCTYPE|<!ENTITY/i.test(xml.body))
           throw new Error('unsupported XML');
         const $ = load(xml.body, { xml: true });
+        if (!$('sitemapindex,urlset').length)
+          throw new Error('unsupported sitemap');
         $('sitemap > loc').each((_i, el) => {
-          if (sitemaps.length < 20) sitemaps.push($(el).text().trim());
+          queueMap($(el).text().trim());
         });
         $('url > loc').each((_i, el) => add($(el).text().trim()));
       } catch {
-        warnings.push(
-          'Не все карты сайта удалось прочитать. Дополнительно используем внутренние ссылки.',
+        this.parentSignal?.throwIfAborted();
+        reasons.add(
+          'Не все карты сайта удалось прочитать. Поиск дополнен внутренними ссылками.',
         );
       }
     }
-    // Follow a bounded breadth-first sample, not all articles/products from one section.
-    const queue = [...pages.values()].sort(
-      (a, b) => this.priority(a) - this.priority(b),
-    );
-    const visited = new Set([this.root]);
-    while (queue.length && visited.size < 21 && pages.size < 300) {
-      const page = queue.shift()!;
-      if (visited.has(page.url) || page.group === 'Юридические документы')
-        continue;
-      visited.add(page.url);
+    if (sitemaps.length)
+      reasons.add(`Осталось проверить карт сайта: ${sitemaps.length}.`);
+
+    // Continue the business frontier to exhaustion, not just the first 20 pages.
+    while (!this.stopped()) {
+      const candidates = selectSitePages([...pages.values()]);
+      const remaining = candidates.filter((p) => !attempted.has(p.url));
+      const page = remaining[0];
+      if (!page) break;
+      attempted.add(page.url);
       try {
         const response = await this.read(page.url);
-        if (!response.html) continue;
-        const parsed = extractPage(response.body, response.url);
+        const parsed = this.remember(page.url, response);
         page.title = parsed.title;
         page.group = pageGroup(page.url, `${page.title} ${parsed.description}`);
+        inspected.add(page.url);
         parsed.links.forEach((link) => add(link.url, link.title, response.url));
-        // Prioritize deeper product pages, while only sampling editorial content.
-        for (const next of [...pages.values()].sort(
-          (a, b) => this.priority(a) - this.priority(b),
-        ))
-          if (
-            !visited.has(next.url) &&
-            !queue.some((item) => item.url === next.url)
-          )
-            queue.push(next);
-      } catch {
-        /* Loading will show the exact per-page error after selection. */
+      } catch (error) {
+        this.parentSignal?.throwIfAborted();
+        if (!this.stopped())
+          this.documents.set(page.url, {
+            url: page.url,
+            title: page.title,
+            error: this.errorMessage(error),
+          });
       }
+      await progress?.(inspected.size, pages.size);
     }
     const result = [...pages.values()].sort(
       (a, b) => this.priority(a) - this.priority(b),
     );
-    selectSitePages(result);
+    const selected = selectSitePages(result);
+    const pendingPages = selected.filter((p) => !inspected.has(p.url)).length;
+    if (this.stopped()) reasons.add(this.stopped()!);
+    if (pendingPages)
+      reasons.add(
+        `Не проверены ссылки на выбранных страницах: ${pendingPages}. В них могут быть другие важные разделы.`,
+      );
     warnings.push(
-      'Автоматическая выборка основных страниц, не полный аудит сайта. Архив статей и новости используются выборочно.',
+      'Проверяются найденные страницы компании, услуг и продуктов. Блог и новости — до трёх примеров; юридические страницы исключены. Скрытые и недоступные ссылки могут остаться вне обхода.',
     );
-    if (pages.size >= 300)
-      warnings.push('Обнаружение ограничено 300 уникальными адресами.');
-    return { root: this.root, pages: result, warnings: [...new Set(warnings)] };
+    const discovery: SiteDiscovery = {
+      state: reasons.size ? 'partial' : 'finished',
+      checkedPages: inspected.size,
+      pendingPages,
+      pendingSitemaps: sitemaps.length,
+      reasons: [...reasons],
+    };
+    return {
+      root: this.root,
+      pages: result,
+      warnings: [...new Set(warnings)],
+      discovery,
+    };
   }
 
   private priority(page: SitePage) {
@@ -348,14 +572,14 @@ export class SiteCrawler {
     pages: SitePage[],
     progress: (pages: SitePage[]) => Promise<void>,
   ) {
-    if (!pages.length || pages.length > SITE_PAGE_LIMIT)
+    if (!pages.length || pages.length > SITE_ADDRESS_LIMIT)
       throw new Error('Некорректный размер выборки страниц');
     const results: SitePage[] = [];
     const hashes = new Map<string, string>();
     let total = 0;
     for (const candidate of pages) {
       await this.alive();
-      this.signal.throwIfAborted();
+      this.parentSignal?.throwIfAborted();
       const page: SitePage = {
         ...candidate,
         status: 'failed',
@@ -363,32 +587,52 @@ export class SiteCrawler {
         checkedAt: new Date().toISOString(),
       };
       try {
-        const response = await this.read(candidate.url);
-        if (!response.html)
-          throw new Error('Не HTML-страница; документ можно загрузить файлом');
-        const parsed = extractPage(response.body, response.url);
+        if (!this.documents.has(candidate.url)) {
+          if (this.stopped()) {
+            this.documents.set(candidate.url, {
+              url: candidate.url,
+              title: candidate.title,
+              pending: `${this.stopped()} Страница не проверена.`,
+            });
+          } else {
+            this.remember(candidate.url, await this.read(candidate.url));
+          }
+        }
+        const parsed = this.documents.get(candidate.url)!;
         page.title = parsed.title;
-        page.url = response.url;
-        page.hash = createHash('sha256').update(parsed.content).digest('hex');
-        const duplicate = hashes.get(page.hash);
-        if (duplicate) {
-          page.status = 'duplicate';
-          page.duplicateOf = duplicate;
+        page.url = parsed.url;
+        if (parsed.pending) {
+          page.status = 'pending';
+          page.reason = parsed.pending;
+        } else if (parsed.error || !parsed.content) {
+          page.error =
+            parsed.error ??
+            'Страница не содержит текста; возможно, требуется JavaScript';
         } else {
-          if (total + parsed.content.length > SITE_TEXT_LIMIT)
-            throw new Error(
-              'Достигнут предел объёма сайта: 1,2 млн символов. Сократите выбор',
-            );
-          page.status = 'loaded';
-          page.content = parsed.content;
-          hashes.set(page.hash, page.url);
-          total += parsed.content.length;
+          page.hash = createHash('sha256').update(parsed.content).digest('hex');
+          const duplicate = hashes.get(page.hash);
+          if (duplicate) {
+            page.status = 'duplicate';
+            page.duplicateOf = duplicate;
+          } else {
+            if (total + parsed.content.length > SITE_TEXT_LIMIT) {
+              page.status = 'pending';
+              page.reason =
+                'Текст не включён: достигнут предел объёма сайта — 1,2 млн символов.';
+            } else {
+              page.status = 'loaded';
+              page.content = parsed.content;
+              hashes.set(page.hash, page.url);
+              total += parsed.content.length;
+            }
+          }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : '';
-        page.error = /robots|JavaScript|символов|HTML|интервал/.test(message)
-          ? message.slice(0, 250)
-          : 'Не удалось прочитать страницу. Она недоступна, защищена или требует JavaScript.';
+        this.parentSignal?.throwIfAborted();
+        if (this.stopped()) {
+          page.status = 'pending';
+          page.reason = `${this.stopped()} Страница не проверена.`;
+        } else page.error = this.errorMessage(error);
       }
       results.push(page);
       await progress(results);

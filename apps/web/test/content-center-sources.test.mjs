@@ -68,18 +68,38 @@ test('filters show all, read, unread and exact statuses without changing source 
     { title: 'Копия', status: 'duplicate' },
     { title: 'Ошибка', status: 'failed' },
     { title: 'Услуги', status: 'loaded' },
+    { title: 'Не проверенная', status: 'pending' },
   ];
   const original = structuredClone(pages);
   const select = filter => target.exports.filterSourcePages(pages, filter);
   for (const [filter, expected] of [
-    ['all', [0, 1, 2, 3, 4]], ['loaded', [1, 4]], ['unread', [0, 2, 3]],
-    ['found', [0]], ['failed', [3]], ['duplicate', [2]],
+    ['all', [0, 1, 2, 3, 4, 5]], ['loaded', [1, 4]], ['unread', [0, 2, 3, 5]],
+    ['found', [0]], ['failed', [3]], ['duplicate', [2]], ['pending', [5]],
   ]) {
     assert.deepEqual(select(filter).map(item => item.index), expected);
     for (const item of select(filter)) assert.equal(item.page, pages[item.index]);
   }
   assert.deepEqual(pages, original);
   assert.deepEqual(target.exports.filterSourcePages([], 'loaded'), []);
+});
+
+test('coverage exposes incomplete traversal, missed sections and unchecked pages separately from failures', () => {
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{
+    sourceId: 'S1', title: 'Сайт', checkedAt: '2026-09-20T00:00:00Z', warnings: [],
+    coverage: { state: 'partial', selected: 2, read: 1, unread: 1, checkedPages: 1, pendingPages: 1, pendingSitemaps: 2,
+      reasons: ['Осталось проверить карт сайта: 2.'],
+      sections: [{ title: 'Услуги', found: 2, read: 1, unread: 1 }, { title: 'Контакты', found: 0, read: 0, unread: 0 }] },
+    pages: [{ title: 'Услуга', url: 'https://example.com/service', status: 'loaded', content: 'Текст' },
+      { title: 'Направление', url: 'https://example.com/deep', status: 'pending', reason: 'Достигнут предел времени обхода' }],
+  }] }));
+  assert.match(html, /Охват неполный/);
+  assert.match(html, /Осталось проверить карт сайта: 2/);
+  assert.match(html, /Контакты<\/strong>: не найдено в обходе/);
+  assert.match(html, /учтено 1 из 2, не прочитано 1/);
+  assert.match(html, /Не проверена/);
+  assert.match(html, /Не проверено <span>1<\/span>/);
+  assert.match(html, /Достигнут предел времени обхода/);
+  assert.doesNotMatch(html, /Проверка найденной структуры завершена|<pre>[^<]*Достигнут/);
 });
 
 test('each source has labelled filter buttons and defaults to all pages', () => {

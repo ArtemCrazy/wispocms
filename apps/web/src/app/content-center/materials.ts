@@ -36,10 +36,26 @@ export type SourceSnapshot = {
   title: string;
   checkedAt: string;
   warnings: string[];
+  coverage?: {
+    state: "finished" | "partial";
+    checkedPages: number;
+    pendingPages: number;
+    pendingSitemaps: number;
+    reasons: string[];
+    selected: number;
+    read: number;
+    unread: number;
+    sections: Array<{
+      title: string;
+      found: number;
+      read: number;
+      unread: number;
+    }>;
+  };
   pages: Array<{
     url: string;
     title: string;
-    status: "found" | "loaded" | "failed" | "duplicate";
+    status: "found" | "loaded" | "failed" | "duplicate" | "pending";
     content?: string;
     error?: string;
     reason?: string;

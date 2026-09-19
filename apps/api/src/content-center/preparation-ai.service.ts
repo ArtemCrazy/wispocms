@@ -5,7 +5,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { AiProviderError } from '../ai/ai-provider.error';
-import type { SitePage } from './site-crawler';
+import type { SitePage, SiteCoverage } from './site-crawler';
 import type { PreparationTopic } from './preparation-topics';
 import {
   preparationBatches,
@@ -36,6 +36,7 @@ export type SourceSnapshot = {
   mode: 'main-pages' | 'single-page' | 'provided';
   warnings: string[];
   pages: SitePage[];
+  coverage?: SiteCoverage;
 };
 
 export type PreparationInput = {

@@ -9,6 +9,7 @@ const statusLabel = {
   found: "Не включена",
   failed: "Недоступна",
   duplicate: "Дубликат",
+  pending: "Не проверена",
 };
 
 type SourceFilter =
@@ -20,6 +21,7 @@ const filters = [
   ["unread", "Не прочитано"],
   ["found", "Не включено"],
   ["failed", "Недоступно"],
+  ["pending", "Не проверено"],
   ["duplicate", "Дубликаты"],
 ] as const;
 
@@ -80,6 +82,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                     ["loaded", "Прочитано"],
                     ["found", "Не включено"],
                     ["failed", "Недоступно"],
+                    ["pending", "Не проверено"],
                     ["duplicate", "Дубликаты"],
                   ] as const
                 ).map(([state, label]) => {
@@ -95,7 +98,39 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 })}
               </dl>
               <div className={styles.sourceNote}>
-                <p>Охват этого запуска, не полный аудит сайта.</p>
+                <p>
+                  <strong>
+                    {source.coverage
+                      ? source.coverage.state === "partial"
+                        ? "Охват неполный"
+                        : "Проверка найденной структуры завершена"
+                      : "Охват этого запуска, не полный аудит сайта."}
+                  </strong>
+                </p>
+                {source.coverage && (
+                  <>
+                    <p>
+                      Выбрано для обработки: {source.coverage.selected}. Не
+                      удалось включить: {source.coverage.unread}.
+                    </p>
+                    {source.coverage.reasons.map((reason) => (
+                      <p key={reason}>{reason}</p>
+                    ))}
+                    <details className={styles.sourceText}>
+                      <summary>Охват разделов</summary>
+                      <ul>
+                        {source.coverage.sections.map((section) => (
+                          <li key={section.title}>
+                            <strong>{section.title}</strong>:{" "}
+                            {section.found
+                              ? `учтено ${section.read} из ${section.found}${section.unread ? `, не прочитано ${section.unread}` : ""}`
+                              : "не найдено в обходе"}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </>
+                )}
                 {source.warnings.map((warning) => (
                   <p key={warning}>{warning}</p>
                 ))}
@@ -108,7 +143,11 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
               >
                 {filters.map(([filter, label]) => {
                   const count = filterSourcePages(source.pages, filter).length;
-                  if (filter === "duplicate" && count === 0) return null;
+                  if (
+                    (filter === "duplicate" || filter === "pending") &&
+                    count === 0
+                  )
+                    return null;
                   return (
                     <button
                       key={filter}
