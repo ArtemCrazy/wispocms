@@ -19,9 +19,35 @@ test('source collection exposes categorized links and a real file input', () => 
   for (const category of materials.SOURCE_CATEGORIES) assert.ok(html.includes(category.label));
   assert.match(html, /type="file"/);
   assert.ok(html.includes(materials.FILE_ACCEPT));
-  assert.match(html, /Файлы проекта/);
-  assert.match(html, /Текстовые материалы/);
+  assert.equal((html.match(/<article\b/g) ?? []).length, 1);
+  assert.match(html, /<h3>Файлы и тексты проекта<\/h3>/);
+  assert.match(html, /Добавить текст/);
+  assert.doesNotMatch(html, /Текстовые материалы/);
+  assert.ok(html.indexOf('Другие источники') < html.indexOf('<h3>Файлы и тексты проекта'));
   assert.doesNotMatch(html, /Создать форму/);
+});
+
+test('files and typed materials share one table without losing their actions', () => {
+  const html = render([
+    { id: 'file-id', kind: 'file', title: 'Бриф', file_name: 'Бриф.pdf', file_size: 1024, characters: 12, created_at: '2026-09-19T00:00:00Z' },
+    { id: 'text-id', kind: 'text', title: 'Заметки клиента', characters: 125, created_at: '2026-09-19T00:00:00Z' },
+  ]);
+  assert.equal((html.match(/<table\b/g) ?? []).length, 1);
+  assert.match(html, /Бриф\.pdf/);
+  assert.match(html, /Заметки клиента/);
+  assert.match(html, /125 симв\./);
+  assert.match(html, /Открыть и изменить/);
+  assert.match(html, /Удалить материал «Заметки клиента»/);
+  assert.match(html, /materials\/file-id\/file/);
+  assert.doesNotMatch(html, /materials\/text-id\/file/);
+});
+
+test('text-only collection is not shown as empty', () => {
+  const html = render([{ id: 'text-id', kind: 'text', title: 'Заметка', characters: 0, created_at: '2026-09-19T00:00:00Z' }]);
+  assert.match(html, /<table/);
+  assert.match(html, /0 симв\./);
+  assert.doesNotMatch(html, /Файлов и текстов пока нет/);
+  assert.match(render([]), /Файлов и текстов пока нет/);
 });
 
 test('saved originals link to private downloads and never claim AI processing', () => {

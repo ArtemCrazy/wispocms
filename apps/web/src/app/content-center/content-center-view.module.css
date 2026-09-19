@@ -527,10 +527,19 @@
   color: #8a641b;
   margin-top: 6px;
 }
+.materialsSection {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid #eeeef4;
+}
+.materialsSection h3 {
+  margin: 0;
+  font-size: 16px;
+}
 .uploadArea {
   padding: 20px 0;
 }
-.uploadArea > button {
+.uploadArea > .actions > button {
   min-width: min(300px, 100%);
   min-height: 54px;
   border-style: dashed;
