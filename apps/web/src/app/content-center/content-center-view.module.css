@@ -208,6 +208,10 @@
 .heading > div {
   min-width: 0;
 }
+.breadcrumbs {
+  padding: 0;
+  overflow: visible;
+}
 .breadcrumbs ol {
   display: flex;
   flex-wrap: wrap;
