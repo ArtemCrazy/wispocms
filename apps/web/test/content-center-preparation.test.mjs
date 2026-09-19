@@ -8,6 +8,21 @@ import {
   speechErrorMessage,
 } from "../src/app/content-center/preparation-state.ts";
 
+test("preparation opens saved results from history without a duplicate result card", () => {
+  const view = readFileSync(
+    new URL(
+      "../src/app/content-center/content-center-view.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(view, /Открыть обработанную информацию ↗/);
+  assert.doesNotMatch(view, /<h2>Обработанная информация<\/h2>/);
+  assert.match(view, /<h2>История версий<\/h2>/);
+  assert.match(view, /Открыть версию \{version\.number\} ↗/);
+  assert.match(view, /onClick=\{\(\) => navigate\("document", version\.id\)\}/);
+});
+
 test("dictation appends to the current instruction without replacing manual edits", () => {
   assert.deepEqual(appendDictation("Задача", " новая фраза "), {
     value: "Задача новая фраза",

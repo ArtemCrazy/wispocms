@@ -727,7 +727,7 @@ export function ContentCenterView({
                               className={styles.link}
                               onClick={() => navigate("document", version.id)}
                             >
-                              Версия {version.number}
+                              Открыть версию {version.number} ↗
                             </button>
                             {version.id === latest?.id && (
                               <span className={styles.badge}>Текущая</span>
@@ -742,34 +742,6 @@ export function ContentCenterView({
                       </ol>
                     )}
                   </div>
-                </article>
-                <article className={styles.card}>
-                  <div className={styles.cardHead}>
-                    <h2>Обработанная информация</h2>
-                    {latest && (
-                      <span className={styles.badge}>
-                        Текущая · V{latest.number}
-                      </span>
-                    )}
-                  </div>
-                  {latest ? (
-                    <>
-                      <p className={styles.muted}>
-                        {formatDate(latest.created_at)} · {latest.actor_name}
-                      </p>
-                    </>
-                  ) : (
-                    <p className={styles.muted}>
-                      Здесь появится документ после первой успешной обработки.
-                    </p>
-                  )}
-                  <button
-                    className={`${styles.primary} ${styles.openResult}`}
-                    disabled={!latest}
-                    onClick={() => latest && navigate("document", latest.id)}
-                  >
-                    Открыть обработанную информацию ↗
-                  </button>
                 </article>
               </div>
             </>
