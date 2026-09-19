@@ -42,7 +42,6 @@ export class MaterialDto {
   @IsOptional()
   @Transform(trim)
   @IsString()
-  @MaxLength(40000)
   content?: string;
 }
 

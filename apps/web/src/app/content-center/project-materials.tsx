@@ -166,7 +166,6 @@ export function ProjectMaterials({
           </div>
           <p className={styles.muted}>
             PDF, DOCX, XLSX, PPTX, PNG, JPG, TXT, MD, CSV · до 10 МБ на файл.
-            Текст — UTF-8, до 40 000 символов.
           </p>
         </div>
         {documents.length ? (

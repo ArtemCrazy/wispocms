@@ -50,6 +50,7 @@ test('source collection exposes categorized links and a real file input', () => 
   assert.equal((html.match(/<article\b/g) ?? []).length, 1);
   assert.match(html, /<h3>Файлы и тексты проекта<\/h3>/);
   assert.doesNotMatch(html, /из 50 МБ/);
+  assert.doesNotMatch(html, /Текст — UTF-8|40 000 символов/);
   assert.match(html, /Добавить текст/);
   assert.doesNotMatch(html, /Текстовые материалы/);
   assert.ok(html.indexOf('Другие источники') < html.indexOf('<h3>Файлы и тексты проекта'));

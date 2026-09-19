@@ -12,6 +12,11 @@ import {
   preparationVersionLabel,
 } from "../src/app/content-center/preparation-version.ts";
 
+test("manual material input does not impose the old 40k character cap", () => {
+  const view = readFileSync(new URL("../src/app/content-center/content-center-view.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(view, /maxLength=\{40000\}|40 000 символов/);
+});
+
 test("preparation opens saved results from history without a duplicate result card", () => {
   const view = readFileSync(
     new URL(

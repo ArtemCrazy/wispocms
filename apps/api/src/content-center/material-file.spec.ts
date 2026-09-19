@@ -1,6 +1,18 @@
 import { MATERIAL_FILE_LIMIT, validateMaterialFile } from './material-file';
 
 describe('private project source files', () => {
+  it('preserves TXT, MD and CSV sources above 40,000 characters', () => {
+    const content = 'Информация о проекте.\n'.repeat(10000).trim();
+    for (const extension of ['txt', 'md', 'csv']) {
+      const buffer = Buffer.from(content);
+      const result = validateMaterialFile({
+        originalname: `long.${extension}`,
+        buffer,
+      });
+      expect(result.content).toBe(content);
+      expect(result.data.equals(buffer)).toBe(true);
+    }
+  });
   it('validates extension, signature, size and nonempty content', () => {
     expect(() => validateMaterialFile()).toThrow('непустой');
     expect(() =>

@@ -74,10 +74,6 @@ export function materialText(source: string, html: boolean): string {
     throw new BadRequestException(
       'Не удалось прочитать текст. Используйте текст в UTF-8.',
     );
-  if (text.length > 40000)
-    throw new BadRequestException(
-      'В материале больше 40 000 символов. Разделите его на несколько материалов.',
-    );
   return text;
 }
 

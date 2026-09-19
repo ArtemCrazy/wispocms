@@ -1008,7 +1008,6 @@ export function ContentCenterView({
                     Текст материала
                     <textarea
                       required
-                      maxLength={40000}
                       value={material.content}
                       onChange={(e) =>
                         setMaterial({ ...material, content: e.target.value })
@@ -1016,8 +1015,8 @@ export function ContentCenterView({
                     />
                   </label>
                   <p className={styles.muted}>
-                    До 40 000 символов. Документы и изображения загружаются в
-                    разделе «Файлы и тексты проекта».
+                    Документы и изображения загружаются в разделе «Файлы и
+                    тексты проекта».
                   </p>
                 </>
               )}

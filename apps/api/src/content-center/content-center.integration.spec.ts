@@ -11,6 +11,9 @@ import { AiProviderError } from '../ai/ai-provider.error';
 import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import type { ExecutionContext } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { configureMaterialBodyParser } from './material-body-parser';
 import request from 'supertest';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
@@ -521,30 +524,84 @@ integration('Content Center / isolated PostgreSQL', () => {
         },
       })
       .compile();
-    const app = module.createNestApplication();
+    const app = module.createNestApplication<NestExpressApplication>();
+    app.setGlobalPrefix('api');
+    configureMaterialBodyParser(app);
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
     try {
-      const http = app.getHttpServer() as import('node:http').Server;
-      const route = `/workspaces/${workspace}/content-center`;
+      const http = app.getHttpServer();
+      const route = `/api/workspaces/${workspace}/content-center`;
+      const longText = 'Информация о проекте.\n'.repeat(10000).trim();
       const upload = await request(http)
         .post(`${route}/files`)
-        .attach('file', Buffer.from('Test source'), 'source.txt')
+        .attach('file', Buffer.from(longText), 'source.txt')
         .expect(201);
       const id = (upload.body as { id: string }).id;
       const response = await request(http)
         .get(`${route}/materials/${id}/file`)
         .expect(200);
-      expect(response.text).toBe('Test source');
+      expect(response.text).toBe(longText);
+      expect((await service.getMaterial(workspace, id, employee)).content).toBe(
+        longText,
+      );
+      const manual = await request(http)
+        .post(`${route}/materials`)
+        .send({ title: 'Длинный текст', kind: 'text', content: longText })
+        .expect(201);
+      const manualId = (manual.body as { id: string }).id;
+      const updatedText = `${longText}\nДополнительные сведения.`;
+      await request(http)
+        .put(`${route}/materials/${manualId}`)
+        .send({
+          title: 'Длинный текст',
+          kind: 'text',
+          content: updatedText,
+          revision: 1,
+        })
+        .expect(200);
+      expect(
+        (await service.getMaterial(workspace, manualId, employee)).content,
+      ).toBe(updatedText);
+      await request(http)
+        .put(`${route}/draft`)
+        .send({ instruction: 'Задача', withoutMaterials: false, revision: 0 })
+        .expect(200);
+      await request(http)
+        .put(`${route}/draft`)
+        .send({ instruction: longText, withoutMaterials: false, revision: 1 })
+        .expect(413);
+      await request(http)
+        .post(`${route}/materials`)
+        .send({
+          title: 'Too large',
+          kind: 'text',
+          content: 'x'.repeat(10 * 1024 * 1024),
+        })
+        .expect(413);
+      const run = await service.start(workspace, employee, {
+        instruction: 'Обработай материалы',
+        withoutMaterials: false,
+      });
+      const [queued] = await db.query<
+        Array<{ input_context: { materials: Array<{ content: string }> } }>
+      >('SELECT input_context FROM cc_preparation_runs WHERE id=$1', [run.id]);
+      expect(queued.input_context.materials.map((m) => m.content)).toEqual([
+        longText,
+        updatedText,
+      ]);
       expect(response.headers['content-disposition']).toContain('attachment;');
       expect(response.headers['cache-control']).toContain('no-store');
       expect(response.headers['x-content-type-options']).toBe('nosniff');
       await request(http)
-        .post(`/workspaces/${otherWorkspace}/content-center/files`)
+        .post(`/api/workspaces/${otherWorkspace}/content-center/files`)
         .attach('file', Buffer.from('Secret'), 'source.txt')
         .expect(404);
       await request(http)
         .get(
-          `/workspaces/${otherWorkspace}/content-center/materials/${id}/file`,
+          `/api/workspaces/${otherWorkspace}/content-center/materials/${id}/file`,
         )
         .expect(404);
       await request(http)

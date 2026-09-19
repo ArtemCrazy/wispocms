@@ -40,8 +40,9 @@ describe('material import boundaries', () => {
       ),
     ).toBe('Компания Факты & данные');
   });
-  it('rejects oversized or malformed files instead of silently truncating', () => {
-    expect(() => materialText('x'.repeat(40001), false)).toThrow();
+  it('preserves long text for staged processing, rejecting only malformed input', () => {
+    const content = 'Информация о проекте.\n'.repeat(10000).trim();
+    expect(materialText(content, false)).toBe(content);
     expect(() => materialText('wrong\uFFFD', false)).toThrow();
     expect(() => materialText('binary\0', false)).toThrow();
   });
