@@ -121,11 +121,136 @@
 .entry button {
   flex-shrink: 0;
 }
-.grid {
+.preparationStack {
   display: grid;
-  grid-template-columns: minmax(300px, 0.9fr) minmax(420px, 1.1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
+}
+.subheading {
+  margin: 24px 0 12px;
+  font-size: 16px;
+}
+.sourceRows {
+  display: grid;
+}
+.sourceRow {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) minmax(180px, 0.65fr);
+  gap: 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid #eeeef4;
   align-items: start;
+}
+.sourceRow:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.sourceRow > strong {
+  padding-top: 8px;
+}
+.sourceItems {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  align-items: start;
+}
+.sourceItem {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.sourceItem > button:first-child {
+  max-width: calc(100% - 42px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #f8f7ff;
+  color: #674ad3;
+  border-radius: 8px 0 0 8px;
+}
+.sourceItem > button:nth-child(2) {
+  border-radius: 0 8px 8px 0;
+  width: 40px;
+}
+.sourceWarning {
+  flex-basis: 100%;
+  color: #8a641b;
+  margin-top: 6px;
+}
+.uploadArea {
+  padding: 20px 0;
+}
+.uploadArea > button {
+  min-width: min(300px, 100%);
+  min-height: 54px;
+  border-style: dashed;
+  border-color: #b8a8ee;
+  color: #674ad3;
+}
+.fileInput {
+  display: none;
+}
+.fileTable caption {
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.fileTable td:first-child {
+  min-width: 220px;
+  overflow-wrap: anywhere;
+  max-width: 500px;
+}
+.download {
+  color: #6849df;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 8px 0;
+}
+.download:focus-visible {
+  outline: 2px solid #7256ee;
+  outline-offset: 3px;
+}
+.processingHistory {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+}
+.processingHistory > div + div {
+  padding-left: 28px;
+  border-left: 1px solid #e3e2ed;
+}
+.processingHistory .runSteps {
+  grid-template-columns: 1fr;
+}
+.recentVersions {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.recentVersions li {
+  padding: 12px 0;
+  border-bottom: 1px solid #eeeef4;
+}
+.recentVersions .badge {
+  margin-left: 10px;
+}
+.view .openResult {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 16px;
+}
+.preparationStack textarea {
+  min-height: 120px;
+}
+.heading > button {
+  flex-shrink: 0;
+}
+.heading > button[aria-pressed="true"] {
+  background: #eee9ff;
+  border-color: #aa96f5;
+  color: #674ad3;
 }
 .cardHead {
   display: flex;
@@ -162,6 +287,7 @@
 }
 .view textarea,
 .dialog textarea,
+.dialog select,
 .dialog input {
   width: 100%;
   font: inherit;
@@ -381,14 +507,35 @@
   overflow-y: auto;
 }
 @media (max-width: 1050px) {
-  .grid {
+  .sourceRow {
+    grid-template-columns: 160px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .sourceRow > p {
+    grid-column: 2;
+  }
+  .processingHistory {
     grid-template-columns: 1fr;
+  }
+  .processingHistory > div + div {
+    padding: 20px 0 0;
+    border-left: 0;
+    border-top: 1px solid #e3e2ed;
   }
   .view {
     padding: 24px;
   }
 }
 @media (max-width: 600px) {
+  .sourceRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sourceRow > p {
+    grid-column: 1;
+  }
+  .cardHead {
+    flex-wrap: wrap;
+  }
   .view {
     padding: 20px 16px;
   }

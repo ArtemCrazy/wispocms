@@ -30,6 +30,10 @@ export class MaterialDto {
   sourceUrl?: string;
 
   @IsOptional()
+  @IsIn(['site', 'social', 'maps', 'marketplace', 'advertising', 'other'])
+  urlCategory?: string;
+
+  @IsOptional()
   @Transform(trim)
   @IsString()
   @MaxLength(200)

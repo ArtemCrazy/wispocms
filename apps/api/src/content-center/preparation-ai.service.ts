@@ -12,6 +12,7 @@ export type PreparationInput = {
     sourceUrl: string | null;
   }>;
   previousResult: string | null;
+  files?: Array<{ fileName: string; mediaType: string; dataBase64: string }>;
 };
 
 export const PREPARATION_PROVIDER = Symbol('PREPARATION_PROVIDER');
@@ -19,6 +20,7 @@ export const PREPARATION_PROVIDER = Symbol('PREPARATION_PROVIDER');
 /** Implement this contract when an AI provider is selected. Keep credentials on the server. */
 export interface PreparationProvider {
   readonly name: string;
+  readonly supportsFiles?: boolean;
   generate(request: {
     instruction: string;
     context: PreparationInput;
@@ -40,6 +42,9 @@ export class PreparationAiService {
   get configured() {
     return Boolean(this.provider);
   }
+  get supportsFiles() {
+    return this.provider?.supportsFiles === true;
+  }
 
   async generate(
     instruction: string,
@@ -48,6 +53,10 @@ export class PreparationAiService {
     if (!this.provider)
       throw new ServiceUnavailableException(
         'AI ещё не подключён. Материалы и промпты можно подготовить заранее.',
+      );
+    if (input.files?.length && !this.supportsFiles)
+      throw new ServiceUnavailableException(
+        'AI не поддерживает вложенные файлы',
       );
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;

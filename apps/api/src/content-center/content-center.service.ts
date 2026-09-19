@@ -20,7 +20,13 @@ import type {
 } from './content-center.dto';
 import { PreparationAiService } from './preparation-ai.service';
 import type { PreparationInput } from './preparation-ai.service';
-import { materialText, readPublicMaterial } from './public-material';
+import {
+  materialText,
+  publicMaterialUrl,
+  readPublicMaterial,
+} from './public-material';
+import { validateMaterialFile, WORKSPACE_FILES_LIMIT } from './material-file';
+import type { MaterialUpload } from './material-file';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -31,6 +37,11 @@ type Material = {
   source_url: string | null;
   file_name: string | null;
   revision: number;
+  url_category: string;
+  file_size: number | null;
+  media_type: string | null;
+  has_original: boolean;
+  source_error: string | null;
 };
 type Version = {
   id: string;
@@ -90,7 +101,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     clearInterval(this.timer);
   }
 
-  private async access(workspaceId: string, actor: Actor): Promise<string> {
+  async access(workspaceId: string, actor: Actor): Promise<string> {
     const rows = await this.db.query<Array<{ full_name: string }>>(
       `
       SELECT u.full_name FROM workspaces w JOIN users u ON u.id = $2 AND u.is_active = true
@@ -122,7 +133,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           Omit<Material, 'content'> & { characters: number; updated_at: Date }
         >
       >(
-        `SELECT id, title, kind, source_url, file_name, revision, length(content) AS characters, updated_at FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at DESC`,
+        `SELECT id, title, kind, source_url, file_name, revision, url_category, file_size, media_type, source_error, (file_data IS NOT NULL) AS has_original, length(content) AS characters, created_at, updated_at FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at DESC`,
         [workspaceId],
       ),
       this.db.query<Array<{ id: string; title: string; content: string }>>(
@@ -159,11 +170,65 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
   async getMaterial(workspaceId: string, id: string, actor: Actor) {
     await this.access(workspaceId, actor);
     const [row] = await this.db.query<Material[]>(
-      `SELECT * FROM cc_materials WHERE workspace_id=$1 AND id=$2`,
+      `SELECT id, title, kind, source_url, file_name, content, revision, url_category, file_size, media_type, source_error, (file_data IS NOT NULL) AS has_original FROM cc_materials WHERE workspace_id=$1 AND id=$2`,
       [workspaceId, id],
     );
     if (!row) throw new NotFoundException('Материал не найден');
     return row;
+  }
+
+  async uploadFile(workspaceId: string, actor: Actor, upload?: MaterialUpload) {
+    await this.access(workspaceId, actor);
+    const file = validateMaterialFile(upload);
+    return this.db.transaction(async (manager) => {
+      await this.lock(manager, workspaceId);
+      const [usage] = await manager.query<
+        Array<{ total: string; bytes: string }>
+      >(
+        `SELECT count(*) AS total, coalesce(sum(file_size),0) AS bytes FROM cc_materials WHERE workspace_id=$1`,
+        [workspaceId],
+      );
+      if (Number(usage.total) >= 50)
+        throw new BadRequestException('Можно добавить до 50 материалов');
+      if (Number(usage.bytes) + file.size > WORKSPACE_FILES_LIMIT)
+        throw new BadRequestException(
+          'Общий размер файлов пространства не должен превышать 50 МБ',
+        );
+      const [row] = await manager.query<Array<{ id: string }>>(
+        `INSERT INTO cc_materials (workspace_id,title,kind,file_name,content,file_data,file_size,media_type) VALUES ($1,$2,'file',$3,$4,$5,$6,$7) RETURNING id`,
+        [
+          workspaceId,
+          file.fileName.slice(0, 160),
+          file.fileName,
+          file.content,
+          file.data,
+          file.size,
+          file.mediaType,
+        ],
+      );
+      return row;
+    });
+  }
+
+  async getFile(workspaceId: string, id: string, actor: Actor) {
+    await this.access(workspaceId, actor);
+    const [row] = await this.db.query<
+      Array<{
+        file_data: Buffer | null;
+        file_name: string;
+        content: string;
+        media_type: string | null;
+      }>
+    >(
+      `SELECT file_data,file_name,content,media_type FROM cc_materials WHERE workspace_id=$1 AND id=$2 AND kind='file'`,
+      [workspaceId, id],
+    );
+    if (!row) throw new NotFoundException('Файл не найден');
+    return {
+      data: row.file_data ?? Buffer.from(row.content, 'utf8'),
+      fileName: row.file_name,
+      mediaType: row.media_type ?? 'text/plain',
+    };
   }
 
   async saveMaterial(
@@ -173,16 +238,20 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     id?: string,
   ) {
     await this.access(workspaceId, actor);
-    if (id) await this.getMaterial(workspaceId, id, actor);
+    if (id && (await this.getMaterial(workspaceId, id, actor)).has_original)
+      throw new BadRequestException(
+        'Чтобы заменить оригинал, загрузите новый файл и удалите старый',
+      );
     let content: string;
+    let sourceError: string | null = null;
     if (dto.kind === 'url') {
+      publicMaterialUrl(dto.sourceUrl ?? '');
       try {
         content = await readPublicMaterial(dto.sourceUrl ?? '');
-      } catch (error) {
-        if (error instanceof BadRequestException) throw error;
-        throw new BadRequestException(
-          'Не удалось прочитать страницу. Проверьте ссылку или добавьте текст вручную.',
-        );
+      } catch {
+        content = '';
+        sourceError =
+          'Ссылка сохранена, но текст страницы недоступен. При необходимости добавьте его вручную.';
       }
     } else {
       if (dto.kind === 'file' && !/\.(txt|md)$/i.test(dto.fileName ?? ''))
@@ -208,14 +277,16 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         dto.kind === 'url' ? dto.sourceUrl : null,
         dto.kind === 'file' ? dto.fileName : null,
         content,
+        dto.kind === 'url' ? (dto.urlCategory ?? 'other') : 'other',
+        sourceError,
       ];
       const rows = id
         ? await manager.query<Array<{ id: string }>>(
-            `WITH changed AS (UPDATE cc_materials SET title=$2, kind=$3, source_url=$4, file_name=$5, content=$6, revision=revision+1, updated_at=now() WHERE workspace_id=$1 AND id=$7 AND revision=$8 RETURNING id) SELECT * FROM changed`,
+            `WITH changed AS (UPDATE cc_materials SET title=$2, kind=$3, source_url=$4, file_name=$5, content=$6, url_category=$7, source_error=$8, revision=revision+1, updated_at=now() WHERE workspace_id=$1 AND id=$9 AND revision=$10 AND file_data IS NULL RETURNING id) SELECT * FROM changed`,
             [...params, id, (dto as UpdateMaterialDto).revision],
           )
         : await manager.query<Array<{ id: string }>>(
-            `INSERT INTO cc_materials (workspace_id,title,kind,source_url,file_name,content) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+            `INSERT INTO cc_materials (workspace_id,title,kind,source_url,file_name,content,url_category,source_error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
             params,
           );
       if (!rows.length)
@@ -295,8 +366,10 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     return this.db.transaction(async (manager) => {
       await this.lock(manager, workspaceId);
       await this.requireIdle(manager, workspaceId);
-      const materials = await manager.query<Material[]>(
-        `SELECT title, content, source_url FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at`,
+      const materials = await manager.query<
+        Array<Material & { file_data: Buffer | null }>
+      >(
+        `SELECT title, content, source_url, source_error, file_name, media_type, file_data FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at`,
         [workspaceId],
       );
       if (!materials.length && !dto.withoutMaterials)
@@ -314,7 +387,11 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       const input: PreparationInput = {
         materials: materials.map((m) => ({
           title: m.title,
-          content: m.content,
+          content:
+            m.content ||
+            (m.source_error
+              ? '[Текст источника не загружен. Не делайте выводов о его содержимом по одной ссылке.]'
+              : ''),
           sourceUrl: m.source_url,
         })),
         // With no materials the specification permits only the user's message.
@@ -327,6 +404,20 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException(
           'Материалы и предыдущий результат превышают 180 000 символов. Сократите материалы перед запуском.',
         );
+      const files = materials
+        .filter((m) => m.file_data && !m.content)
+        .map((m) => ({
+          fileName: m.file_name!,
+          mediaType: m.media_type!,
+          dataBase64: m.file_data!.toString('base64'),
+        }));
+      if (files.length) {
+        if (!this.ai.supportsFiles)
+          throw new BadRequestException(
+            'Подключённый AI пока не умеет обрабатывать документы и изображения. Файлы сохранены, запуск не выполнен.',
+          );
+        input.files = files;
+      }
       const [row] = await manager.query<RunSummary[]>(
         `INSERT INTO cc_preparation_runs (workspace_id,status,actor_name,instruction,input_context,provider) VALUES ($1,'queued',$2,$3,$4::jsonb,$5) RETURNING ${RUN_FIELDS}`,
         [

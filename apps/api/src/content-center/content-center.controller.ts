@@ -10,8 +10,14 @@ import {
   Put,
   Query,
   Req,
+  Res,
+  StreamableFile,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { IsInt, Min } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
@@ -23,6 +29,9 @@ import {
   UpdateMaterialDto,
 } from './content-center.dto';
 import { ContentCenterService } from './content-center.service';
+import { MaterialUploadGuard } from './material-upload.guard';
+import { MATERIAL_FILE_LIMIT } from './material-file';
+import type { MaterialUpload } from './material-file';
 
 class RestoreVersionDto {
   @IsInt()
@@ -34,6 +43,38 @@ class RestoreVersionDto {
 @UseGuards(JwtAuthGuard)
 export class ContentCenterController {
   constructor(private readonly service: ContentCenterService) {}
+
+  @Post('files')
+  @UseGuards(MaterialUploadGuard)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MATERIAL_FILE_LIMIT, files: 1, fields: 0 },
+    }),
+  )
+  upload(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Req() req: AuthenticatedRequest,
+    @UploadedFile() file?: MaterialUpload,
+  ) {
+    return this.service.uploadFile(workspaceId, req.auth!, file);
+  }
+
+  @Get('materials/:id/file')
+  async file(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.service.getFile(workspaceId, id, req.auth!);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    return new StreamableFile(file.data, {
+      type: file.mediaType,
+      disposition: `attachment; filename="material"; filename*=UTF-8''${encodeURIComponent(file.fileName).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`,
+      length: file.data.length,
+    });
+  }
 
   @Get()
   overview(

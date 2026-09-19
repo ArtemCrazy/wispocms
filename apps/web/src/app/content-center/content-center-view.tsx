@@ -10,6 +10,12 @@ import {
 } from "react";
 import { PreparedDocument } from "./prepared-document";
 import { SpeechInput } from "./speech-input";
+import { ProjectMaterials } from "./project-materials";
+import {
+  SOURCE_CATEGORIES,
+  type ProjectMaterial as Material,
+  type SourceCategory,
+} from "./materials";
 import { appendDictation, preparationSteps } from "./preparation-state";
 import {
   CONTENT_CENTER_SECTIONS,
@@ -18,17 +24,6 @@ import {
 } from "./navigation";
 import styles from "./content-center-view.module.css";
 
-type Material = {
-  id: string;
-  title: string;
-  kind: "text" | "file" | "url";
-  source_url: string | null;
-  file_name: string | null;
-  content?: string;
-  revision: number;
-  characters: number;
-  updated_at: string;
-};
 type Prompt = { id: string; title: string; content: string };
 type Version = {
   id: string;
@@ -59,6 +54,7 @@ type MaterialDraft = {
   fileName: string;
   content: string;
   revision?: number;
+  urlCategory?: SourceCategory;
 };
 const blankMaterial = (): MaterialDraft => ({
   title: "",
@@ -86,10 +82,12 @@ async function request<T>(
     cache: "no-store",
     ...(body === undefined
       ? {}
-      : {
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }),
+      : body instanceof FormData
+        ? { body }
+        : {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
   });
   const payload = await response.json().catch(() => null);
   if (!response.ok)
@@ -177,6 +175,7 @@ export function ContentCenterView({
   } | null>(null);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
+  const [removeMaterial, setRemoveMaterial] = useState<Material | null>(null);
   const alive = useRef(true);
 
   const load = useCallback(async () => {
@@ -355,8 +354,20 @@ export function ContentCenterView({
           </p>
         </div>
         {screen === "preparation" && (
-          <button onClick={() => navigate("history")}>
-            История версий{data ? ` · ${data.versions.length}` : ""}
+          <button
+            disabled={busy || !data || Boolean(data.materials.length)}
+            aria-pressed={withoutMaterials}
+            title={
+              data?.materials.length
+                ? "Добавленные материалы автоматически участвуют в обработке"
+                : undefined
+            }
+            onClick={() => {
+              setWithoutMaterials(!withoutMaterials);
+              setDirty(true);
+            }}
+          >
+            {withoutMaterials ? "✓ " : ""}У меня нет материалов
           </button>
         )}
       </div>
@@ -460,111 +471,59 @@ export function ContentCenterView({
                   обработка станет доступна после подключения API.
                 </div>
               )}
-              <div className={styles.grid}>
-                <article className={styles.card}>
-                  <div className={styles.cardHead}>
-                    <h2>Материалы проекта</h2>
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        setMaterial(blankMaterial());
-                        setDialogError("");
-                      }}
-                    >
-                      + Добавить
-                    </button>
+              <div className={styles.preparationStack}>
+                <ProjectMaterials
+                  materials={data.materials}
+                  busy={busy}
+                  base={base}
+                  add={(kind, urlCategory) => {
+                    setMaterial({ ...blankMaterial(), kind, urlCategory });
+                    setDialogError("");
+                  }}
+                  edit={(item) =>
+                    void act(async () => {
+                      const row = await request<Material>(
+                        `${base}/materials/${item.id}`,
+                      );
+                      setMaterial({
+                        id: row.id,
+                        title: row.title,
+                        kind: row.kind,
+                        sourceUrl: row.source_url ?? "",
+                        fileName: row.file_name ?? "",
+                        content: row.content ?? "",
+                        revision: row.revision,
+                        urlCategory: row.url_category,
+                      });
+                    })
+                  }
+                  remove={(item) => {
+                    setRemoveMaterial(item);
+                    setDialogError("");
+                  }}
+                  upload={(file) =>
+                    void act(async () => {
+                      if (file.size > 10 * 1024 * 1024)
+                        throw new Error("Файл должен быть не больше 10 МБ");
+                      const body = new FormData();
+                      body.append("file", file);
+                      await request(`${base}/files`, "POST", body);
+                      await load();
+                      setWithoutMaterials(false);
+                      setNotice(`Файл «${file.name}» загружен`);
+                    })
+                  }
+                />
+                {withoutMaterials && !data.materials.length && (
+                  <div className={styles.notice}>
+                    Выбран режим без материалов: AI получит только вашу
+                    инструкцию, без предыдущего результата. Вымышленные факты не
+                    добавляются.
                   </div>
-                  <p className={styles.muted}>
-                    Все сохранённые материалы автоматически попадут в обработку.
-                    Изменение источников не меняет готовые версии.
-                  </p>
-                  {data.materials.length === 0 ? (
-                    <div className={styles.empty}>
-                      Добавьте ссылку на страницу, текст или файл TXT /
-                      Markdown.
-                    </div>
-                  ) : (
-                    data.materials.map((item) => (
-                      <div key={item.id} className={styles.material}>
-                        <strong>{item.title}</strong>
-                        <p>
-                          {item.kind === "url"
-                            ? item.source_url
-                            : item.kind === "file"
-                              ? item.file_name
-                              : "Текстовый материал"}{" "}
-                          · {item.characters.toLocaleString("ru-RU")} симв.
-                        </p>
-                        <div className={styles.actions}>
-                          <button
-                            disabled={busy}
-                            onClick={() =>
-                              void act(async () => {
-                                const row = await request<Material>(
-                                  `${base}/materials/${item.id}`,
-                                );
-                                setMaterial({
-                                  id: row.id,
-                                  title: row.title,
-                                  kind: row.kind,
-                                  sourceUrl: row.source_url ?? "",
-                                  fileName: row.file_name ?? "",
-                                  content: row.content ?? "",
-                                  revision: row.revision,
-                                });
-                              })
-                            }
-                          >
-                            Открыть и изменить
-                          </button>
-                          <button
-                            disabled={busy}
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  `Удалить материал «${item.title}»? Готовые версии сохранятся.`,
-                                )
-                              )
-                                void act(async () => {
-                                  await request(
-                                    `${base}/materials/${item.id}?revision=${item.revision}`,
-                                    "DELETE",
-                                  );
-                                  await load();
-                                });
-                            }}
-                          >
-                            Удалить
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                  {!data.materials.length && (
-                    <label className={styles.checkbox}>
-                      <input
-                        type="checkbox"
-                        disabled={busy}
-                        checked={withoutMaterials}
-                        onChange={(e) => {
-                          setWithoutMaterials(e.target.checked);
-                          setDirty(true);
-                        }}
-                      />
-                      <span>
-                        У меня нет материалов
-                        <br />
-                        <span className={styles.muted}>
-                          Использовать только мою задачу. Не добавлять
-                          вымышленные факты.
-                        </span>
-                      </span>
-                    </label>
-                  )}
-                </article>
+                )}
                 <article className={styles.card}>
                   <div className={styles.cardHead}>
-                    <h2>Задача для AI</h2>
+                    <h2>Сформировать обработанную информацию</h2>
                     <button
                       disabled={busy || voiceActive}
                       onClick={() => {
@@ -638,7 +597,7 @@ export function ContentCenterView({
                     >
                       {running
                         ? "Обработка выполняется…"
-                        : "Подготовить информацию"}
+                        : "Запустить обработку материалов"}
                     </button>
                   </div>
                   <p className={styles.muted}>
@@ -661,96 +620,152 @@ export function ContentCenterView({
                       withoutMaterials &&
                       " Будет передана только инструкция, без прежних результатов."}
                   </p>
-                  {data.run && (
-                    <div
-                      className={
-                        data.run.status === "failed"
-                          ? styles.error
-                          : styles.notice
-                      }
-                      role="status"
-                      style={{ marginTop: 20 }}
-                    >
-                      {data.run.status === "queued"
-                        ? "Задача в очереди. Можно уйти со страницы — обработка продолжится."
-                        : data.run.status === "processing"
-                          ? "AI готовит документ. Текущая версия остаётся доступной."
-                          : data.run.status === "failed"
-                            ? data.run.error
-                            : "Обработка завершена. Новая версия доступна ниже."}
-                      <ol
-                        className={styles.runSteps}
-                        aria-label="Этапы обработки"
-                      >
-                        {preparationSteps(data.run.status).map(
-                          (step, index) => (
-                            <li
-                              key={step.title}
-                              data-state={step.state}
-                              aria-current={
-                                step.state === "active" ? "step" : undefined
-                              }
-                            >
-                              <span
-                                className={styles.stepNumber}
-                                aria-hidden="true"
-                              >
-                                {step.state === "done" ? "✓" : index + 1}
-                              </span>
-                              <span>
-                                {step.title}
-                                <small>
-                                  {
-                                    {
-                                      done: "Готово",
-                                      active: "Выполняется",
-                                      waiting: "Ожидание",
-                                      failed: "Не завершено",
-                                    }[step.state]
-                                  }
-                                </small>
-                              </span>
-                            </li>
-                          ),
-                        )}
-                      </ol>
-                      {data.run.status === "failed" && (
-                        <p className={styles.muted}>
-                          Новая версия не создана. Последний успешный результат
-                          сохранён. Проверьте задачу и повторите запуск.
-                        </p>
-                      )}
+                </article>
+                <article
+                  className={`${styles.card} ${styles.processingHistory}`}
+                >
+                  <div>
+                    <div className={styles.cardHead}>
+                      <h2>Процесс обработки</h2>
                     </div>
+                    {!data.run && (
+                      <p className={styles.muted}>
+                        {data.ai.connected
+                          ? "Обработка ещё не запускалась. Добавьте материалы, задайте инструкцию и запустите обработку."
+                          : "Ожидает подключения AI. Материалы, промпты и инструкцию можно сохранить заранее."}
+                      </p>
+                    )}
+                    {data.run && (
+                      <div
+                        className={
+                          data.run.status === "failed"
+                            ? styles.error
+                            : styles.notice
+                        }
+                        role="status"
+                        style={{ marginTop: 20 }}
+                      >
+                        {data.run.status === "queued"
+                          ? "Задача в очереди. Можно уйти со страницы — обработка продолжится."
+                          : data.run.status === "processing"
+                            ? "AI готовит документ. Текущая версия остаётся доступной."
+                            : data.run.status === "failed"
+                              ? data.run.error
+                              : "Обработка завершена. Новая версия доступна ниже."}
+                        <ol
+                          className={styles.runSteps}
+                          aria-label="Этапы обработки"
+                        >
+                          {preparationSteps(data.run.status).map(
+                            (step, index) => (
+                              <li
+                                key={step.title}
+                                data-state={step.state}
+                                aria-current={
+                                  step.state === "active" ? "step" : undefined
+                                }
+                              >
+                                <span
+                                  className={styles.stepNumber}
+                                  aria-hidden="true"
+                                >
+                                  {step.state === "done" ? "✓" : index + 1}
+                                </span>
+                                <span>
+                                  {step.title}
+                                  <small>
+                                    {
+                                      {
+                                        done: "Готово",
+                                        active: "Выполняется",
+                                        waiting: "Ожидание",
+                                        failed: "Не завершено",
+                                      }[step.state]
+                                    }
+                                  </small>
+                                </span>
+                              </li>
+                            ),
+                          )}
+                        </ol>
+                        {data.run.status === "failed" && (
+                          <p className={styles.muted}>
+                            Новая версия не создана. Последний успешный
+                            результат сохранён. Проверьте задачу и повторите
+                            запуск.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className={styles.cardHead}>
+                      <h2>История версий</h2>
+                      <button
+                        className={styles.link}
+                        onClick={() => navigate("history")}
+                      >
+                        Все версии →
+                      </button>
+                    </div>
+                    {!data.versions.length ? (
+                      <p className={styles.muted}>
+                        Версий пока нет. Первая появится после успешной
+                        обработки.
+                      </p>
+                    ) : (
+                      <ol className={styles.recentVersions}>
+                        {data.versions.slice(0, 3).map((version) => (
+                          <li key={version.id}>
+                            <button
+                              className={styles.link}
+                              onClick={() => navigate("document", version.id)}
+                            >
+                              Версия {version.number}
+                            </button>
+                            {version.id === latest?.id && (
+                              <span className={styles.badge}>Текущая</span>
+                            )}
+                            <p className={styles.muted}>
+                              {formatDate(version.created_at)} ·{" "}
+                              {version.actor_name}
+                            </p>
+                            <p className={styles.muted}>{version.reason}</p>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                </article>
+                <article className={styles.card}>
+                  <div className={styles.cardHead}>
+                    <h2>Обработанная информация</h2>
+                    {latest && (
+                      <span className={styles.badge}>
+                        Текущая · V{latest.number}
+                      </span>
+                    )}
+                  </div>
+                  {latest ? (
+                    <>
+                      <p className={styles.muted}>
+                        {formatDate(latest.created_at)} · {latest.actor_name}
+                      </p>
+                    </>
+                  ) : (
+                    <p className={styles.muted}>
+                      Здесь появится документ после первой успешной обработки.
+                    </p>
                   )}
+                  <button
+                    className={`${styles.primary} ${styles.openResult}`}
+                    disabled={!latest}
+                    onClick={() => latest && navigate("document", latest.id)}
+                  >
+                    Открыть обработанную информацию ↗
+                  </button>
                 </article>
               </div>
-              <article className={`${styles.card} ${styles.result}`}>
-                <div className={styles.cardHead}>
-                  <h2>Обработанная информация</h2>
-                  {latest && (
-                    <span className={styles.badge}>
-                      Текущая · V{latest.number}
-                    </span>
-                  )}
-                </div>
-                {latest ? (
-                  <>
-                    <p className={styles.muted}>
-                      {formatDate(latest.created_at)} · {latest.actor_name}
-                    </p>
-                    <button
-                      className={styles.link}
-                      onClick={() => navigate("document", latest.id)}
-                    >
-                      Открыть документ →
-                    </button>
-                  </>
-                ) : (
-                  <p className={styles.muted}>
-                    Здесь появится документ после первой успешной обработки.
-                  </p>
-                )}
-              </article>
             </>
           )}
 
@@ -878,7 +893,7 @@ export function ContentCenterView({
             <fieldset disabled={busy} className={styles.formFields}>
               {!material.id && (
                 <div className={styles.actions}>
-                  {(["text", "url", "file"] as const).map((kind) => (
+                  {(["text", "url"] as const).map((kind) => (
                     <button
                       type="button"
                       key={kind}
@@ -905,6 +920,24 @@ export function ContentCenterView({
               {material.kind === "url" ? (
                 <>
                   <label className={styles.field}>
+                    Категория источника
+                    <select
+                      value={material.urlCategory ?? "other"}
+                      onChange={(event) =>
+                        setMaterial({
+                          ...material,
+                          urlCategory: event.target.value as SourceCategory,
+                        })
+                      }
+                    >
+                      {SOURCE_CATEGORIES.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
                     Адрес страницы
                     <input
                       type="url"
@@ -918,9 +951,10 @@ export function ContentCenterView({
                     />
                   </label>
                   <p className={styles.muted}>
-                    Загрузим текст одной публичной HTTPS-страницы. Сайты с
-                    авторизацией или содержимым, доступным только через
-                    JavaScript, пока добавляйте текстом. При сохранении ссылка
+                    Сохраним ссылку и попробуем прочитать одну публичную
+                    HTTPS-страницу. Если сайт закрывает доступ или требует
+                    JavaScript, ссылка останется в материалах с предупреждением.
+                    Добавьте недоступный текст вручную. При сохранении ссылка
                     читается заново.
                   </p>
                   {material.content && (
@@ -934,57 +968,6 @@ export function ContentCenterView({
                 </>
               ) : (
                 <>
-                  {material.kind === "file" && (
-                    <label className={styles.field}>
-                      Файл TXT или Markdown, UTF-8
-                      <input
-                        type="file"
-                        accept=".txt,.md,text/plain,text/markdown"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          if (
-                            file.size > 80000 ||
-                            !/\.(txt|md)$/i.test(file.name)
-                          ) {
-                            setDialogError(
-                              "Выберите TXT или MD размером до 80 КБ.",
-                            );
-                            return;
-                          }
-                          try {
-                            const content = await file.text();
-                            if (
-                              content.length > 40000 ||
-                              content.includes("\uFFFD") ||
-                              content.includes("\0")
-                            )
-                              throw new Error(
-                                "Нужен текст в UTF-8, до 40 000 символов.",
-                              );
-                            setMaterial({
-                              ...material,
-                              title: material.title || file.name,
-                              fileName: file.name,
-                              content,
-                            });
-                            setDialogError("");
-                          } catch (reason) {
-                            setDialogError(
-                              reason instanceof Error
-                                ? reason.message
-                                : "Файл не прочитан",
-                            );
-                          }
-                        }}
-                      />
-                      {material.fileName && (
-                        <span className={styles.muted}>
-                          {material.fileName}
-                        </span>
-                      )}
-                    </label>
-                  )}
                   <label className={styles.field}>
                     Текст материала
                     <textarea
@@ -997,8 +980,8 @@ export function ContentCenterView({
                     />
                   </label>
                   <p className={styles.muted}>
-                    До 40 000 символов. PDF, Word, изображения и распознавание
-                    добавим отдельно.
+                    До 40 000 символов. Документы и изображения загружаются в
+                    блоке «Файлы проекта».
                   </p>
                 </>
               )}
@@ -1150,6 +1133,45 @@ export function ContentCenterView({
                 </p>
               )}
             </div>
+          </div>
+        </Dialog>
+      )}
+
+      {removeMaterial && (
+        <Dialog
+          title="Удалить материал?"
+          busy={busy}
+          close={() => setRemoveMaterial(null)}
+        >
+          {dialogError && (
+            <div className={styles.error} role="alert">
+              {dialogError}
+            </div>
+          )}
+          <p>
+            Материал «{removeMaterial.title}» будет удалён из текущего набора.
+            Уже созданные версии и контекст запущенной обработки сохранятся.
+          </p>
+          <div className={styles.actions}>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void act(async () => {
+                  await request(
+                    `${base}/materials/${removeMaterial.id}?revision=${removeMaterial.revision}`,
+                    "DELETE",
+                  );
+                  await load();
+                  setRemoveMaterial(null);
+                  setNotice("Материал удалён");
+                }, true)
+              }
+            >
+              Удалить материал
+            </button>
+            <button disabled={busy} onClick={() => setRemoveMaterial(null)}>
+              Отмена
+            </button>
           </div>
         </Dialog>
       )}

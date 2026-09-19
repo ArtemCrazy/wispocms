@@ -1,7 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import { Test } from '@nestjs/testing';
+import type { ExecutionContext } from '@nestjs/common';
+import request from 'supertest';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
+import { ContentCenterController } from './content-center.controller';
+import { MaterialUploadGuard } from './material-upload.guard';
+import * as publicMaterial from './public-material';
 import { DataSource } from 'typeorm';
 import { PlatformRole } from '../database/entities';
 import { ContentCenterPreparation1790020800000 } from '../database/migrations/1790020800000-ContentCenterPreparation';
+import { ContentCenterSourceFiles1790107200000 } from '../database/migrations/1790107200000-ContentCenterSourceFiles';
 import { ContentCenterService } from './content-center.service';
 import { PreparationAiService } from './preparation-ai.service';
 import type { PreparationProvider } from './preparation-ai.service';
@@ -51,6 +60,7 @@ integration('Content Center / isolated PostgreSQL', () => {
     const runner = db.createQueryRunner();
     try {
       await new ContentCenterPreparation1790020800000().up(runner);
+      await new ContentCenterSourceFiles1790107200000().up(runner);
     } finally {
       await runner.release();
     }
@@ -68,7 +78,11 @@ integration('Content Center / isolated PostgreSQL', () => {
     ]);
     service = new ContentCenterService(
       db,
-      new PreparationAiService({ name: 'integration-test-only', generate }),
+      new PreparationAiService({
+        name: 'integration-test-only',
+        supportsFiles: true,
+        generate,
+      }),
     );
   });
 
@@ -87,6 +101,222 @@ integration('Content Center / isolated PostgreSQL', () => {
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
+  });
+
+  it('stores link categories and distinguishes inaccessible pages from extracted content', async () => {
+    const read = jest
+      .spyOn(publicMaterial, 'readPublicMaterial')
+      .mockResolvedValue('Public page text');
+    try {
+      const dto = {
+        kind: 'url' as const,
+        title: 'Source',
+        sourceUrl: 'https://example.com',
+        urlCategory: 'social',
+      };
+      const { id } = await service.saveMaterial(workspace, admin, dto);
+      expect(await service.getMaterial(workspace, id, admin)).toMatchObject({
+        url_category: 'social',
+        content: 'Public page text',
+        source_error: null,
+      });
+      read.mockRejectedValue(new Error('Page unavailable'));
+      await service.saveMaterial(workspace, admin, { ...dto, revision: 1 }, id);
+      expect(await service.getMaterial(workspace, id, admin)).toMatchObject({
+        url_category: 'social',
+        content: '',
+        source_error: expect.stringContaining('недоступен'),
+      });
+      await service.start(workspace, admin, {
+        instruction: 'Read',
+        withoutMaterials: false,
+      });
+      await service.processNext();
+      expect(generate.mock.calls[0][0].context.materials[0].content).toContain(
+        'Текст источника не загружен',
+      );
+      await expect(
+        service.saveMaterial(workspace, admin, {
+          ...dto,
+          sourceUrl: 'https://127.0.0.1/private',
+        }),
+      ).rejects.toThrow();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('accepts multipart uploads and serves authenticated attachment downloads only', async () => {
+    const module = await Test.createTestingModule({
+      controllers: [ContentCenterController],
+      providers: [
+        { provide: ContentCenterService, useValue: service },
+        MaterialUploadGuard,
+      ],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate(context: ExecutionContext) {
+          context.switchToHttp().getRequest<AuthenticatedRequest>().auth =
+            employee;
+          return true;
+        },
+      })
+      .compile();
+    const app = module.createNestApplication();
+    await app.init();
+    try {
+      const http = app.getHttpServer() as import('node:http').Server;
+      const route = `/workspaces/${workspace}/content-center`;
+      const upload = await request(http)
+        .post(`${route}/files`)
+        .attach('file', Buffer.from('Test source'), 'source.txt')
+        .expect(201);
+      const id = (upload.body as { id: string }).id;
+      const response = await request(http)
+        .get(`${route}/materials/${id}/file`)
+        .expect(200);
+      expect(response.text).toBe('Test source');
+      expect(response.headers['content-disposition']).toContain('attachment;');
+      expect(response.headers['cache-control']).toContain('no-store');
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      await request(http)
+        .post(`/workspaces/${otherWorkspace}/content-center/files`)
+        .attach('file', Buffer.from('Secret'), 'source.txt')
+        .expect(404);
+      await request(http)
+        .get(
+          `/workspaces/${otherWorkspace}/content-center/materials/${id}/file`,
+        )
+        .expect(404);
+      await request(http)
+        .post(`${route}/files`)
+        .attach('file', Buffer.alloc(10 * 1024 * 1024 + 1), 'large.txt')
+        .expect(413);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('stores private originals, returns safe metadata and enforces workspace access', async () => {
+    const buffer = Buffer.from('%PDF-1.7\nTest document');
+    const { id } = await service.uploadFile(workspace, employee, {
+      originalname: 'Бриф.pdf',
+      buffer,
+    });
+    const material = await service.getMaterial(workspace, id, employee);
+    expect(material).toMatchObject({
+      file_name: 'Бриф.pdf',
+      file_size: buffer.length,
+      has_original: true,
+      media_type: 'application/pdf',
+      content: '',
+    });
+    expect(material).not.toHaveProperty('file_data');
+    const overview = await service.overview(workspace, employee);
+    expect(overview.materials[0]).not.toHaveProperty('file_data');
+    expect(overview.materials[0]).not.toHaveProperty('content');
+    expect(
+      (await service.getFile(workspace, id, employee)).data.equals(buffer),
+    ).toBe(true);
+    await expect(service.getFile(otherWorkspace, id, admin)).rejects.toThrow(
+      'не найден',
+    );
+    await expect(service.getFile(otherWorkspace, id, employee)).rejects.toThrow(
+      'недоступно',
+    );
+    await expect(
+      service.uploadFile(otherWorkspace, employee, {
+        originalname: 'Бриф.pdf',
+        buffer,
+      }),
+    ).rejects.toThrow('недоступно');
+    await expect(
+      service.saveMaterial(
+        workspace,
+        employee,
+        { title: 'Overwrite', kind: 'text', content: 'changed', revision: 1 },
+        id,
+      ),
+    ).rejects.toThrow('оригинал');
+  });
+
+  it('keeps original bytes in the queued snapshot when a source is removed', async () => {
+    const buffer = Buffer.from('%PDF-1.7\nOriginal');
+    const { id } = await service.uploadFile(workspace, admin, {
+      originalname: 'source.pdf',
+      buffer,
+    });
+    await service.start(workspace, admin, {
+      instruction: 'Read source',
+      withoutMaterials: false,
+    });
+    await service.deleteMaterial(workspace, id, 1, admin);
+    await service.processNext();
+    expect(generate.mock.calls[0][0].context.files).toEqual([
+      {
+        fileName: 'source.pdf',
+        mediaType: 'application/pdf',
+        dataBase64: buffer.toString('base64'),
+      },
+    ]);
+    expect((await service.overview(workspace, admin)).versions).toHaveLength(1);
+    await expect(service.getFile(workspace, id, admin)).rejects.toThrow(
+      'не найден',
+    );
+  });
+
+  it('extracts UTF-8 text and refuses to silently drop binary attachments', async () => {
+    await service.uploadFile(workspace, admin, {
+      originalname: 'notes.txt',
+      buffer: Buffer.from('Информация клиента'),
+    });
+    const textOnly = new ContentCenterService(
+      db,
+      new PreparationAiService({ name: 'text-only', generate }),
+    );
+    await textOnly.start(workspace, admin, {
+      instruction: 'Read',
+      withoutMaterials: false,
+    });
+    await textOnly.processNext();
+    expect(generate.mock.calls[0][0].context.materials[0].content).toBe(
+      'Информация клиента',
+    );
+    expect(generate.mock.calls[0][0].context.files).toBeUndefined();
+    await service.uploadFile(workspace, admin, {
+      originalname: 'image.jpg',
+      buffer: Buffer.from([255, 216, 255, 0]),
+    });
+    await expect(
+      textOnly.start(workspace, admin, {
+        instruction: 'Read',
+        withoutMaterials: false,
+      }),
+    ).rejects.toThrow('не умеет');
+  });
+
+  it('serializes file quota checks and preserves valid originals on rejection', async () => {
+    const buffer = Buffer.alloc(10 * 1024 * 1024);
+    buffer.write('%PDF-');
+    for (let i = 0; i < 4; i++)
+      await service.uploadFile(workspace, admin, {
+        originalname: `file-${i}.pdf`,
+        buffer,
+      });
+    const attempts = await Promise.allSettled(
+      [1, 2].map((i) =>
+        service.uploadFile(workspace, admin, {
+          originalname: `extra-${i}.pdf`,
+          buffer,
+        }),
+      ),
+    );
+    expect(attempts.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    expect((await service.overview(workspace, admin)).materials).toHaveLength(
+      5,
+    );
   });
 
   it('isolates overview, source, prompt, draft, version and run access by workspace', async () => {
