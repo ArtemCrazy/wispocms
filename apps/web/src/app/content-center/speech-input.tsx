@@ -148,11 +148,20 @@ export function SpeechInput({
     }
   }
 
+  const actionLabel = stopping
+    ? "Завершаем диктовку…"
+    : active
+      ? "Остановить диктовку"
+      : "Голосовой ввод";
+
   return (
     <div className={styles.voice}>
       <div className={styles.actions}>
         <button
           type="button"
+          className={styles.voiceButton}
+          aria-label={actionLabel}
+          title={actionLabel}
           aria-pressed={active}
           disabled={stopping || (!active && disabled)}
           onClick={() => {
@@ -165,11 +174,21 @@ export function SpeechInput({
             }
           }}
         >
-          {stopping
-            ? "Завершаем диктовку…"
-            : active
-              ? "Остановить диктовку"
-              : "Голосовой ввод"}
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
+          >
+            <rect x="9" y="2" width="6" height="12" rx="3" />
+            <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
+          </svg>
         </button>
         <span className={styles.muted} role="status">
           {active

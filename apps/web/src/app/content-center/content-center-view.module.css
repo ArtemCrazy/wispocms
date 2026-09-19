@@ -733,6 +733,19 @@
 .voice .error {
   margin-top: 12px;
 }
+.voice .voiceButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+}
+.voice .voiceButton[aria-pressed="true"] {
+  color: #674ad3;
+  background: #eee9ff;
+  border-color: #aa96f5;
+}
 .dictationPreview {
   padding: 10px 12px;
   border-left: 2px solid #7054ec;
