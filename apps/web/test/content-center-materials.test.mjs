@@ -47,7 +47,15 @@ test('text-only collection is not shown as empty', () => {
   assert.match(html, /<table/);
   assert.match(html, /0 симв\./);
   assert.doesNotMatch(html, /Файлов и текстов пока нет/);
-  assert.match(render([]), /Файлов и текстов пока нет/);
+});
+
+test('empty collection keeps add actions without an empty-state banner or table', () => {
+  const html = render([]);
+  assert.doesNotMatch(html, /Файлов и текстов пока нет/);
+  assert.doesNotMatch(html, /<table/);
+  assert.doesNotMatch(source, /styles\.empty/);
+  assert.match(html, /Загрузить файл/);
+  assert.match(html, /Добавить текст/);
 });
 
 test('saved originals link to private downloads and never claim AI processing', () => {
