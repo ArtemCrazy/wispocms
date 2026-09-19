@@ -4,6 +4,7 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { AiProviderError } from '../ai/ai-provider.error';
 
 export type PreparationInput = {
   materials: Array<{
@@ -71,13 +72,17 @@ export class PreparationAiService {
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
             controller.abort();
-            reject(new Error('AI timeout'));
+            reject(
+              new AiProviderError(
+                'Истекло время ожидания AI. Новая версия не создана. Повторите запуск позже.',
+              ),
+            );
           }, 180000);
         }),
       ]);
       const content = result.content?.trim();
       if (!content || content.length > 80000 || content.includes('\0')) {
-        throw new ServiceUnavailableException(
+        throw new AiProviderError(
           'AI вернул неполный результат. Текущая версия сохранена; уточните задачу и повторите запуск.',
         );
       }

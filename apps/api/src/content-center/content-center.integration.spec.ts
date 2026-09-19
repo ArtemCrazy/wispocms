@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { GlobalPromptLibrary1790486400000 } from '../database/migrations/1790486400000-GlobalPromptLibrary';
 import { PlatformPromptsService } from '../platform/platform-prompts.service';
+import { AiProviderError } from '../ai/ai-provider.error';
 import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import type { ExecutionContext } from '@nestjs/common';
@@ -667,6 +668,42 @@ integration('Content Center / isolated PostgreSQL', () => {
       (await service.getVersion(workspace, first.id, admin)).content,
     ).toContain('Факты из тестового');
   });
+
+  it.each([
+    'Недостаточно средств на аккаунте DeepSeek.',
+    'DeepSeek отклонил ключ. Замените его в настройках.',
+    'DeepSeek не ответил вовремя. Результат не сохранён.',
+    'DeepSeek вернул неполный или некорректный результат. Текущая версия не изменена.',
+  ])(
+    'persists trusted provider failure without retrying or changing the saved result: %s',
+    async (message) => {
+      await service.start(workspace, admin, {
+        instruction: 'First',
+        withoutMaterials: true,
+      });
+      await service.processNext();
+      const previous = (await service.overview(workspace, admin)).versions[0];
+      generate.mockRejectedValue(new AiProviderError(message));
+      const failed = await service.start(workspace, admin, {
+        instruction: 'Retry',
+        withoutMaterials: true,
+      });
+      await service.processNext();
+      await service.processNext();
+      const state = await service.overview(workspace, employee);
+      expect(state.run.status).toBe('failed');
+      expect(state.run.error).toBe(message);
+      expect(state.versions).toHaveLength(1);
+      expect(state.versions[0].id).toBe(previous.id);
+      expect(generate).toHaveBeenCalledTimes(2);
+      expect(
+        await db.query(
+          'SELECT input_context FROM cc_preparation_runs WHERE id=$1',
+          [failed.id],
+        ),
+      ).toEqual([{ input_context: null }]);
+    },
+  );
 
   it('keeps the last result on failure and recovers abandoned jobs', async () => {
     await service.start(workspace, admin, {

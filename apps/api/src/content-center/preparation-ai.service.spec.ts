@@ -58,7 +58,7 @@ describe('provider-neutral preparation', () => {
         generate: () => new Promise(() => {}),
       });
       const promise = expect(ai.generate('Задача', context)).rejects.toThrow(
-        'AI timeout',
+        'Истекло время ожидания AI',
       );
       await jest.advanceTimersByTimeAsync(180001);
       await promise;

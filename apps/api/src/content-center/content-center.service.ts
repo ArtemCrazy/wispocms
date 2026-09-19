@@ -20,6 +20,7 @@ import type {
   UpdateMaterialDto,
 } from './content-center.dto';
 import { PreparationAiService } from './preparation-ai.service';
+import { AiProviderError } from '../ai/ai-provider.error';
 import type { PreparationInput } from './preparation-ai.service';
 import {
   materialText,
@@ -537,14 +538,16 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             [run.id],
           );
         });
-      } catch {
+      } catch (error) {
         await this.db.query(
           `UPDATE cc_preparation_runs SET status='failed',error=$2,input_context=NULL,finished_at=now() WHERE id=$1 AND status='processing'`,
           [
             run.id,
-            this.ai.configured
-              ? 'Не удалось завершить обработку. Текущая версия сохранена. Повторите запуск.'
-              : 'AI ещё не подключён. Повторите запуск после подключения.',
+            error instanceof AiProviderError
+              ? error.message
+              : this.ai.configured
+                ? 'Не удалось завершить обработку. Текущая версия сохранена. Повторите запуск.'
+                : 'AI ещё не подключён. Повторите запуск после подключения.',
           ],
         );
       }
