@@ -29,7 +29,7 @@ test('registry is optional, read-only and renders saved text as escaped data', (
   assert.doesNotMatch(html, /href="javascript:|<script|type="checkbox"/);
 });
 
-test('coverage distinguishes read pages from excluded, failed and duplicate pages without renumbering', () => {
+test('coverage distinguishes page statuses without exposing internal source identifiers', () => {
   const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{
     sourceId: 'S2', title: 'Материалы сайта', checkedAt: '2026-09-19T12:00:00Z', warnings: ['Статьи отобраны выборочно'], pages: [
       { title: 'Архив', url: 'https://example.com/news', status: 'found' },
@@ -42,8 +42,9 @@ test('coverage distinguishes read pages from excluded, failed and duplicate page
   for (const [status, label] of [['loaded', 'Прочитано'], ['found', 'Не включено'], ['failed', 'Недоступно'], ['duplicate', 'Дубликаты']]) {
     assert.ok(html.includes(`data-status="${status}"><dt>${label}</dt><dd>1</dd>`));
   }
-  assert.match(html, /\[S2\.1\]<\/span><h4>Архив/);
-  assert.match(html, /\[S2\.2\]<\/span><h4>Компания/);
+  assert.match(html, /<h4>Архив<\/h4>/);
+  assert.match(html, /<h4>Компания<\/h4>/);
+  assert.doesNotMatch(html, /\[S\d+(?:\.\d+)?\]/);
   assert.match(html, /Совпадает с https:\/\/example.com\/about/);
   assert.match(html, /Статьи отобраны выборочно/);
   assert.match(html, /не полный аудит сайта/);

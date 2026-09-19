@@ -177,9 +177,6 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                     key={`${page.url}-${index}`}
                   >
                     <div className={styles.sourcePageHeading}>
-                      <span className={styles.sourceReference}>
-                        [{source.sourceId}.{index + 1}]
-                      </span>
                       <h4>{page.title}</h4>
                       <span
                         className={styles.sourceStatus}
