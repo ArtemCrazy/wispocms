@@ -12,7 +12,35 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const target = { exports: {} };
 const require = createRequire(import.meta.url);
 new Function('require', 'module', 'exports', compiled.outputText)(id => id === './materials' ? materials : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
-const render = items => renderToStaticMarkup(React.createElement(target.exports.ProjectMaterials, { materials: items, busy: false, base: '/api/workspaces/one/content-center', add() {}, edit() {}, remove() {}, upload() {} }));
+const render = (items, props = {}) => renderToStaticMarkup(React.createElement(target.exports.ProjectMaterials, { materials: items, busy: false, base: '/api/workspaces/one/content-center', add() {}, edit() {}, remove() {}, upload() {}, ...props }));
+
+test('checked website groups URL, source information icon and remove action in that order', () => {
+  const html = render([{ id: 'site', kind: 'url', url_category: materials.SOURCE_CATEGORIES[0].id, title: 'Сайт компании', source_url: 'https://example.com/', site_checked_at: '2026-09-19T00:00:00Z' }], { showSources() {} });
+  const edit = html.indexOf('aria-label="Изменить ссылку');
+  const info = html.indexOf('aria-label="Информация об источнике');
+  const remove = html.indexOf('aria-label="Удалить ссылку');
+  const add = html.indexOf('aria-label="Добавить ссылку', remove);
+  assert.ok(edit >= 0 && info > edit && remove > info && add > remove);
+  assert.match(html, /title="Информация об источнике"/);
+  assert.match(html, /<svg[^>]+aria-hidden="true"/);
+  assert.doesNotMatch(html, />Страницы</);
+  assert.match(html.slice(info, remove), /<\/button><button type="button"/);
+});
+
+test('unchecked website keeps edit and remove, without a dead information button', () => {
+  const html = render([{ id: 'site', kind: 'url', url_category: materials.SOURCE_CATEGORIES[0].id, title: 'Сайт', source_url: 'https://example.com/' }], { showSources() {} });
+  assert.match(html, /Изменить ссылку/);
+  assert.match(html, /Удалить ссылку/);
+  assert.doesNotMatch(html, /Информация об источнике/);
+});
+
+test('source information remains disabled during a pending operation', () => {
+  const html = render([{ id: 'site', kind: 'url', url_category: materials.SOURCE_CATEGORIES[0].id, title: 'Сайт', source_url: 'https://example.com/', site_checked_at: '2026-09-19T00:00:00Z' }], { showSources() {}, busy: true });
+  const buttons = html.match(/<button[^>]*>/g);
+  for (const label of ['Изменить ссылку', 'Информация об источнике', 'Удалить ссылку']) {
+    assert.match(buttons.find(button => button.includes(label)), /disabled=""/);
+  }
+});
 
 test('source collection exposes categorized links and a real file input', () => {
   const html = render([]);

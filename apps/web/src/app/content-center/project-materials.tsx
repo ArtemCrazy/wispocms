@@ -56,34 +56,61 @@ export function ProjectMaterials({
                 )
                 .map((m) => (
                   <div key={m.id} className={styles.sourceItem}>
-                    <button
-                      disabled={busy}
-                      onClick={() => edit(m)}
-                      title={m.source_url ?? m.title}
-                      aria-label={`Изменить ссылку «${m.title}»`}
-                    >
-                      {m.source_url}
-                    </button>
-                    <button
-                      disabled={busy}
-                      onClick={() => remove(m)}
-                      aria-label={`Удалить ссылку «${m.title}»`}
-                    >
-                      ×
-                    </button>
+                    <div className={styles.sourceChip}>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => edit(m)}
+                        title={m.source_url ?? m.title}
+                        aria-label={`Изменить ссылку «${m.title}»`}
+                      >
+                        {m.source_url}
+                      </button>
+                      {m.site_checked_at && showSources && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => showSources(m)}
+                          title="Информация об источнике"
+                          aria-label={`Информация об источнике «${m.title}»`}
+                        >
+                          <svg
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.75"
+                            strokeLinecap="round"
+                            aria-hidden="true"
+                            focusable="false"
+                          >
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="M12 11v6" />
+                            <circle
+                              cx="12"
+                              cy="7.5"
+                              r=".75"
+                              fill="currentColor"
+                              stroke="none"
+                            />
+                          </svg>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => remove(m)}
+                        title="Удалить ссылку"
+                        aria-label={`Удалить ссылку «${m.title}»`}
+                      >
+                        ×
+                      </button>
+                    </div>
                     {m.source_error && (
                       <span className={styles.sourceWarning}>
                         {m.source_error}
                       </span>
-                    )}
-                    {m.site_checked_at && showSources && (
-                      <button
-                        disabled={busy}
-                        onClick={() => showSources(m)}
-                        aria-label={`Страницы источника «${m.title}»`}
-                      >
-                        Страницы
-                      </button>
                     )}
                   </div>
                 ))}
