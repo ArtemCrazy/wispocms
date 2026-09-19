@@ -2,6 +2,10 @@ import {
   PreparationAiService,
   type PreparationProvider,
 } from './preparation-ai.service';
+import {
+  preparationRequestSize,
+  PREPARATION_REQUEST_LIMIT,
+} from './preparation-budget';
 
 describe('provider-neutral preparation', () => {
   const context = {
@@ -67,11 +71,9 @@ describe('provider-neutral preparation', () => {
     }
   });
   it('stages large input in bounded batches and does not send the source archive twice', async () => {
-    const generate = jest
-      .fn()
-      .mockResolvedValue({
-        content: '[S1.1] Компания продаёт оборудование. https://example.com/',
-      });
+    const generate = jest.fn().mockResolvedValue({
+      content: '[S1.1] Компания продаёт оборудование. https://example.com/',
+    });
     const progress = jest.fn();
     const input = {
       materials: [
@@ -128,5 +130,141 @@ describe('provider-neutral preparation', () => {
     expect(progress).not.toHaveBeenCalledWith(
       expect.objectContaining({ stage: 'synthesizing' }),
     );
+  });
+  it('stages input between 60k and 120k and bounds the complete final request too', async () => {
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockResolvedValue({ content: '[S1.1] Цена 2500 ₽, условия сохранены.' });
+    await new PreparationAiService({ name: 'test', generate }).generate(
+      'Обзор',
+      {
+        materials: [
+          {
+            title: '[S1.1] Цены',
+            content: 'Цена: 2500 ₽.\n'.repeat(6000),
+            sourceUrl: 'https://example.com/price',
+          },
+        ],
+        previousResult: null,
+      },
+    );
+    expect(generate.mock.calls.length).toBeGreaterThan(1);
+    for (const [call] of generate.mock.calls)
+      expect(
+        preparationRequestSize(call.instruction, call.context),
+      ).toBeLessThanOrEqual(PREPARATION_REQUEST_LIMIT);
+  });
+  it('compresses an oversized previous version separately and preserves current evidence unchanged', async () => {
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockResolvedValue({
+        content: 'Исторические сведения, не свежий источник.',
+      });
+    const previousResult = 'Исторические факты.\n\n'.repeat(3500);
+    const input = {
+      materials: [
+        {
+          title: '[S1.1] Сейчас',
+          content: 'Новая цена 3000 ₽',
+          sourceUrl: 'https://example.com/price',
+        },
+      ],
+      previousResult,
+    };
+    await new PreparationAiService({ name: 'test', generate }).generate(
+      'Обнови информацию',
+      input,
+    );
+    const requests = generate.mock.calls.map(([call]) => call);
+    expect(
+      requests
+        .slice(0, -1)
+        .flatMap((r) => r.context.materials)
+        .map((m) => m.content)
+        .join(''),
+    ).toBe(previousResult);
+    expect(
+      requests
+        .slice(0, -1)
+        .every((r) => r.instruction.includes('исторические')),
+    ).toBe(true);
+    expect(requests.at(-1)?.context.materials).toEqual(input.materials);
+    expect(requests.at(-1)?.context.previousResult).not.toBe(previousResult);
+    expect(input.previousResult).toBe(previousResult);
+    expect(
+      requests.every(
+        (r) =>
+          preparationRequestSize(r.instruction, r.context) <=
+          PREPARATION_REQUEST_LIMIT,
+      ),
+    ).toBe(true);
+  });
+  it('includes a long instruction when deciding whether an otherwise small material fits', async () => {
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockResolvedValue({ content: '[S1.1] Факты.' });
+    await new PreparationAiService({ name: 'test', generate }).generate(
+      'a'.repeat(12000),
+      {
+        materials: [
+          { title: '[S1.1]', content: 'b'.repeat(47000), sourceUrl: null },
+        ],
+        previousResult: null,
+      },
+    );
+    expect(generate.mock.calls.length).toBeGreaterThan(1);
+    expect(
+      generate.mock.calls.every(
+        ([r]) =>
+          preparationRequestSize(r.instruction, r.context) <=
+          PREPARATION_REQUEST_LIMIT,
+      ),
+    ).toBe(true);
+  });
+  it('bounds re-aggregation when intermediate registers still do not fit', async () => {
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockResolvedValue({ content: 'Факты '.repeat(1200) });
+    await new PreparationAiService({ name: 'test', generate }).generate(
+      'Обзор',
+      {
+        materials: Array.from({ length: 20 }, (_, i) => ({
+          title: `[S${i}.1]`,
+          content: 'x'.repeat(40000),
+          sourceUrl: null,
+        })),
+        previousResult: null,
+      },
+    );
+    expect(generate.mock.calls.length).toBeGreaterThan(21);
+    expect(
+      generate.mock.calls.every(
+        ([r]) =>
+          preparationRequestSize(r.instruction, r.context) <=
+          PREPARATION_REQUEST_LIMIT,
+      ),
+    ).toBe(true);
+  });
+  it('rejects an oversized instruction before any provider call', async () => {
+    const generate = jest.fn();
+    await expect(
+      new PreparationAiService({ name: 'test', generate }).generate(
+        'x'.repeat(61000),
+        context,
+      ),
+    ).rejects.toThrow('Сократите');
+    expect(generate).not.toHaveBeenCalled();
   });
 });

@@ -65,16 +65,18 @@ describe('DeepSeek adapter', () => {
   let settings: DeepseekSettingsService;
   let ai: DeepseekService;
   function respond(output: unknown, finish = 'stop') {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              finish_reason: finish,
-              message: { content: JSON.stringify(output) },
-            },
-          ],
-        }),
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: finish,
+                message: { content: JSON.stringify(output) },
+              },
+            ],
+          }),
+        ),
       ),
     );
   }
@@ -94,6 +96,43 @@ describe('DeepSeek adapter', () => {
     ai = new DeepseekService(settings);
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('keeps every staged preparation request including the final DeepSeek system message within 60k', async () => {
+    respond({ content: '[S1.1] Компания, цена 2500 ₽, условия.' });
+    await new PreparationAiService(ai).generate('Подготовь обзор', {
+      materials: [
+        {
+          title: '[S1.1] Компания',
+          content: 'Факты о компании.\n'.repeat(6000),
+          sourceUrl: 'https://example.com/',
+        },
+      ],
+      previousResult: 'Предыдущая версия.\n'.repeat(3500),
+    });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(2);
+    for (const call of fetchMock.mock.calls as [string, RequestInit][]) {
+      const body = JSON.parse(call[1].body as string) as {
+        messages: unknown[];
+      };
+      expect(JSON.stringify(body.messages).length).toBeLessThanOrEqual(60000);
+    }
+  });
+
+  it('rejects an oversized direct preparation call without sending it to DeepSeek', async () => {
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
+        context: {
+          materials: [
+            { title: 'Компания', content: 'x'.repeat(60000), sourceUrl: null },
+          ],
+          previousResult: null,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('60 000');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
   it('enables both processes only after settings become configured', async () => {
     settings.configured = false;

@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { AiProviderError as DeepseekError } from './ai-provider.error';
 import { DeepseekSettingsService } from './deepseek-settings.service';
+import {
+  preparationRequestSize,
+  PREPARATION_REQUEST_LIMIT,
+} from '../content-center/preparation-budget';
 import type {
   PreparationInput,
   PreparationProvider,
@@ -199,11 +203,22 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     }
   }
 
+  measureInput(instruction: string, context: PreparationInput) {
+    return preparationRequestSize(instruction, context, PREPARATION_PROMPT);
+  }
+
   async generate(request: {
     instruction: string;
     context: PreparationInput;
     signal: AbortSignal;
   }): Promise<{ content: string }> {
+    if (
+      this.measureInput(request.instruction, request.context) >
+      PREPARATION_REQUEST_LIMIT
+    )
+      throw new DeepseekError(
+        'Полный вход подготовки информации превышает 60 000 символов. Требуется поэтапная обработка.',
+      );
     if (request.context.files?.length)
       throw new DeepseekError(
         'Подключение пока принимает текстовые материалы, но не PDF, Office и изображения.',
