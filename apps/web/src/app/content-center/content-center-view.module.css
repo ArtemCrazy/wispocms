@@ -922,25 +922,236 @@
 }
 .sourceRegistry {
   margin-top: 20px;
-  border-top: 1px solid #e0e3ee;
-  padding-top: 16px;
+  display: grid;
+  gap: 16px;
   overflow-wrap: anywhere;
 }
-.sourceRegistry summary {
+.sourceCard {
+  min-width: 0;
+  border: 1px solid #e3e2ed;
+  border-radius: 14px;
+  background: #fff;
+}
+.sourceHeading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 14px;
   cursor: pointer;
-  padding: 8px 0;
+  list-style: none;
+}
+.sourceHeading::-webkit-details-marker {
+  display: none;
+}
+.sourceHeading:hover {
+  background: #f8f7ff;
+}
+.sourceHeadingText {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.sourceTitle {
+  color: #202127;
+  font-size: 16px;
   font-weight: 600;
 }
-.sourceRegistry ul {
-  padding-left: 20px;
+.sourceDate {
+  color: #6c7282;
+  font-size: 14px;
+  font-weight: 400;
 }
-.sourceRegistry li {
-  margin: 12px 0;
+.sourceCoverage {
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #eee9ff;
+  color: #674ad3;
+  font-size: 14px;
+  white-space: nowrap;
 }
-.sourceRegistry pre {
+.sourceChevron {
+  width: 8px;
+  height: 8px;
+  margin: 0 3px;
+  border-right: 2px solid #6c7282;
+  border-bottom: 2px solid #6c7282;
+  transform: rotate(45deg);
+  flex-shrink: 0;
+}
+.sourceCard[open] > .sourceHeading .sourceChevron {
+  transform: rotate(225deg);
+}
+.sourceBody {
+  padding: 0 18px 18px;
+}
+.sourceStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+.sourceStats > div {
+  display: flex;
+  flex: 1 1 130px;
+  flex-direction: column-reverse;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f7f7fa;
+}
+.sourceStats dt {
+  color: #6c7282;
+  font-size: 14px;
+}
+.sourceStats dd {
+  margin: 0;
+  color: #202127;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.sourceStats [data-status="loaded"] dd {
+  color: #276349;
+}
+.sourceStats [data-status="failed"] dd {
+  color: #a23232;
+}
+.sourceNote {
+  padding: 12px 14px;
+  border: 1px solid #e3ddfa;
+  border-radius: 10px;
+  background: #f8f7ff;
+  color: #6c7282;
+}
+.sourceNote p {
+  margin: 0;
+}
+.sourceNote p + p {
+  margin-top: 6px;
+}
+.sourceListHeading {
+  margin: 20px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #454354;
+}
+.sourcePages {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.sourcePage {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #e3e2ed;
+  border-radius: 10px;
+}
+.sourcePageHeading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.sourcePageHeading h4 {
+  flex: 1 1 200px;
+  margin: 0;
+  color: #202127;
+  font-size: 14px;
+  font-weight: 600;
+}
+.sourceReference {
+  color: #6c7282;
+  font-size: 14px;
+}
+.sourceStatus {
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #6c7282;
+  background: #f1f2f5;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.sourceStatus[data-status="loaded"] {
+  color: #276349;
+  background: #e8f5ed;
+}
+.sourceStatus[data-status="failed"] {
+  color: #a23232;
+  background: #fff0f0;
+}
+.sourceUrl {
+  margin-top: 6px;
+  font-size: 14px;
+}
+.sourceUrl a {
+  color: #6849df;
+  text-decoration: none;
+}
+.sourceUrl a:hover {
+  text-decoration: underline;
+}
+.sourceReason {
+  margin: 8px 0 0;
+  color: #6c7282;
+  font-size: 14px;
+}
+.sourceReason:empty {
+  display: none;
+}
+.sourceReason[data-status="failed"] {
+  color: #a23232;
+}
+.sourceText {
+  margin-top: 10px;
+  border-top: 1px solid #ecebf2;
+}
+.sourceText summary {
+  width: fit-content;
+  padding-top: 10px;
+  color: #6849df;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+.sourceHeading:focus-visible,
+.sourceText summary:focus-visible,
+.sourceUrl a:focus-visible {
+  outline: 2px solid #7256ee;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.sourceText pre {
+  margin: 10px 0 0;
+  padding: 14px;
+  border-radius: 8px;
+  background: #f7f7fa;
+  color: #454354;
   white-space: pre-wrap;
   font: inherit;
   line-height: 1.6;
   max-height: 360px;
   overflow: auto;
+}
+@media (max-width: 600px) {
+  .sourceHeading {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px;
+  }
+  .sourceHeadingText {
+    flex-basis: calc(100% - 28px);
+  }
+  .sourceCoverage {
+    order: 1;
+  }
+  .sourceBody {
+    padding: 0 14px 14px;
+  }
+  .sourcePageHeading h4 {
+    flex-basis: calc(100% - 80px);
+  }
 }
