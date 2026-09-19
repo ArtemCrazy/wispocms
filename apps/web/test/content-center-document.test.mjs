@@ -27,3 +27,35 @@ test('AI-supplied HTML and executable links remain inert text', () => {
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /javascript:alert/);
 });
+
+test('prepared document renders bold labels and keeps surrounding text', () => {
+  const html = render('**Подтверждено (главная страница сайта):**\nОбычный текст, **важный факт** и __нет данных__.\n**А**');
+  assert.match(html, /<p><strong>Подтверждено \(главная страница сайта\):<\/strong><\/p>/);
+  assert.match(html, /<p>Обычный текст, <strong>важный факт<\/strong> и <strong>нет данных<\/strong>\.<\/p>/);
+  assert.match(html, /<p><strong>А<\/strong><\/p>/);
+  assert.doesNotMatch(html, /\*\*|__/);
+});
+
+test('bold formatting works in every supported document block', () => {
+  const html = render('# **Компания**\n- **Факт:** описание\n1. **Вопрос**\n| **Поле** | Значение |\n| --- | --- |\n| Название | **Клиника** |');
+  assert.match(html, /<h2><strong>Компания<\/strong><\/h2>/);
+  assert.match(html, /<ul><li><strong>Факт:<\/strong> описание<\/li><\/ul>/);
+  assert.match(html, /<ol><li><strong>Вопрос<\/strong><\/li><\/ol>/);
+  assert.match(html, /<th><strong>Поле<\/strong><\/th>/);
+  assert.match(html, /<td><strong>Клиника<\/strong><\/td>/);
+});
+
+test('incomplete and whitespace-only bold markers remain readable text', () => {
+  const html = render('Незакрытый **текст\n____\n** **\nОбычный *текст*');
+  assert.doesNotMatch(html, /<strong>/);
+  assert.match(html, /Незакрытый \*\*текст/);
+  assert.match(html, /____/);
+  assert.match(html, /\*\* \*\*/);
+});
+
+test('bold AI text is escaped and cannot inject HTML', () => {
+  const html = render('**<script>alert(1)</script>**\n- __<img src=x onerror=alert(1)>__');
+  assert.doesNotMatch(html, /<(script|img)\b/);
+  assert.match(html, /<strong>&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/strong>/);
+  assert.match(html, /<strong>&lt;img src=x onerror=alert\(1\)&gt;<\/strong>/);
+});

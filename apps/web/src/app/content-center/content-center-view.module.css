@@ -757,6 +757,9 @@
 .document {
   overflow-wrap: anywhere;
 }
+.document strong {
+  font-weight: 700;
+}
 .document h2 {
   font-size: 24px;
   margin: 24px 0 12px;

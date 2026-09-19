@@ -1,5 +1,17 @@
 import type { ReactNode } from "react";
 
+function renderInline(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(/(\*\*|__)(?=\S)(.+?\S|\S)\1/g)) {
+    parts.push(text.slice(cursor, match.index));
+    parts.push(<strong key={match.index}>{match[2]}</strong>);
+    cursor = match.index + match[0].length;
+  }
+  parts.push(text.slice(cursor));
+  return parts;
+}
+
 // Render a deliberately small Markdown subset as React text. Never execute AI HTML.
 export function PreparedDocument({ content }: { content: string }) {
   const lines = content.split(/\r?\n/);
@@ -11,7 +23,7 @@ export function PreparedDocument({ content }: { content: string }) {
     if (heading) {
       const Tag = `h${Math.min(heading[1].length + 1, 4)}` as
         "h2" | "h3" | "h4";
-      blocks.push(<Tag key={i}>{heading[2]}</Tag>);
+      blocks.push(<Tag key={i}>{renderInline(heading[2])}</Tag>);
     } else if (
       line.includes("|") &&
       /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] ?? "")
@@ -34,7 +46,7 @@ export function PreparedDocument({ content }: { content: string }) {
             <thead>
               <tr>
                 {headers.map((h, n) => (
-                  <th key={n}>{h}</th>
+                  <th key={n}>{renderInline(h)}</th>
                 ))}
               </tr>
             </thead>
@@ -42,7 +54,7 @@ export function PreparedDocument({ content }: { content: string }) {
               {rows.map((row, n) => (
                 <tr key={n}>
                   {row.map((cell, c) => (
-                    <td key={c}>{cell}</td>
+                    <td key={c}>{renderInline(cell)}</td>
                   ))}
                 </tr>
               ))}
@@ -58,7 +70,7 @@ export function PreparedDocument({ content }: { content: string }) {
       blocks.push(
         <ul key={i}>
           {items.map((item, n) => (
-            <li key={n}>{item}</li>
+            <li key={n}>{renderInline(item)}</li>
           ))}
         </ul>,
       );
@@ -70,12 +82,12 @@ export function PreparedDocument({ content }: { content: string }) {
       blocks.push(
         <ol key={i}>
           {items.map((item, n) => (
-            <li key={n}>{item}</li>
+            <li key={n}>{renderInline(item)}</li>
           ))}
         </ol>,
       );
     } else {
-      blocks.push(<p key={i}>{line}</p>);
+      blocks.push(<p key={i}>{renderInline(line)}</p>);
     }
   }
   return <>{blocks}</>;
