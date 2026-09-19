@@ -1167,6 +1167,127 @@ integration('Content Center / isolated PostgreSQL', () => {
     }
   });
 
+  it('runs AI selection only for preparation, archives reasons and preserves the last version on selection failure', async () => {
+    const pages: SitePage[] = [
+      {
+        url: 'https://example.com/',
+        title: 'Компания',
+        group: 'Главная',
+        recommended: true,
+        status: 'found',
+      },
+      {
+        url: 'https://example.com/blog/general',
+        title: 'Общая статья',
+        group: 'Блог и новости',
+        recommended: false,
+        status: 'found',
+      },
+    ];
+    const discover = jest
+      .spyOn(SiteCrawler.prototype, 'discover')
+      .mockResolvedValue({
+        root: pages[0].url,
+        pages,
+        warnings: [],
+        discovery: {
+          state: 'finished',
+          checkedPages: 1,
+          pendingPages: 0,
+          pendingSitemaps: 0,
+          reasons: [],
+        },
+      });
+    const collect = jest
+      .spyOn(SiteCrawler.prototype, 'collect')
+      .mockImplementation((items) =>
+        Promise.resolve(
+          items.map((item) => ({
+            ...item,
+            status: 'loaded',
+            content: `${item.title} UNIQUE TEXT`,
+          })),
+        ),
+      );
+    const selectPages = jest.fn().mockResolvedValue([
+      {
+        id: 1,
+        decision: 'exclude',
+        reason: 'Общая статья без сведений о компании',
+      },
+    ]);
+    const worker = new ContentCenterService(
+      db,
+      new PreparationAiService({
+        name: 'selection-test',
+        generate,
+        selectPages,
+      }),
+    );
+    try {
+      const material = await worker.saveMaterial(workspace, admin, {
+        kind: 'url',
+        title: 'Сайт',
+        sourceUrl: pages[0].url,
+        urlCategory: 'site',
+      });
+      await worker.start(workspace, employee, {
+        instruction: 'Обзор компании',
+        withoutMaterials: false,
+      });
+      await worker.processNext();
+      const first = await worker.overview(workspace, admin);
+      expect(first.run.status).toBe('succeeded');
+      expect(selectPages).toHaveBeenCalledTimes(1);
+      const version = await worker.getVersion(
+        workspace,
+        first.versions[0].id,
+        admin,
+      );
+      expect(version.sources?.[0].pages[1]).toMatchObject({
+        status: 'found',
+        recommended: false,
+        reason: 'AI — не включена: Общая статья без сведений о компании',
+      });
+      expect(JSON.stringify(generate.mock.calls[0][0].context)).not.toContain(
+        'Общая статья UNIQUE TEXT',
+      );
+      expect(generate.mock.calls[0][0].context.sources).toBeUndefined();
+      await expect(
+        worker.getVersion(otherWorkspace, version.id, employee),
+      ).rejects.toThrow();
+
+      generate.mockClear();
+      selectPages.mockRejectedValue(new AiProviderError('Отбор не завершён'));
+      await worker.start(workspace, employee, {
+        instruction: 'Повторный обзор',
+        withoutMaterials: false,
+      });
+      await worker.processNext();
+      const failed = await worker.overview(workspace, admin);
+      expect(failed.run.status).toBe('failed');
+      expect(failed.run.error).toBe('Отбор не завершён');
+      expect(failed.versions).toHaveLength(1);
+      expect(generate).not.toHaveBeenCalled();
+
+      selectPages.mockClear();
+      await worker.refreshSource(workspace, material.id, admin, 1);
+      await worker.processNext();
+      expect(
+        (await worker.getMaterial(workspace, material.id, admin)).collection_run
+          ?.status,
+      ).toBe('succeeded');
+      expect(selectPages).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+      expect(
+        (await worker.getVersion(workspace, version.id, admin)).sources,
+      ).toEqual(version.sources);
+    } finally {
+      discover.mockRestore();
+      collect.mockRestore();
+    }
+  });
+
   it('collects a website on launch, keeps archived sources after edits and preserves them on restore', async () => {
     const page: SitePage = {
       url: 'https://example.com/about',

@@ -660,7 +660,15 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           AbortSignal.timeout(6 * 60_000),
           run.operation === 'collect'
             ? { persistSnapshots: false, allowUnread: true }
-            : {},
+            : {
+                selectPages: (pages, signal) =>
+                  this.ai.selectSitePages(
+                    run.instruction,
+                    pages,
+                    signal,
+                    progress,
+                  ),
+              },
         );
         if (run.operation === 'collect') {
           await this.db.transaction(async (manager) => {

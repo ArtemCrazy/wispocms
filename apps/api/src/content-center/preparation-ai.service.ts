@@ -8,6 +8,11 @@ import { AiProviderError } from '../ai/ai-provider.error';
 import type { SitePage, SiteCoverage } from './site-crawler';
 import type { PreparationTopic } from './preparation-topics';
 import {
+  selectSourcePages,
+  type PageSelectionInput,
+  type PageDecision,
+} from './site-page-selection';
+import {
   preparationBatches,
   preparationRequestSize,
   PREPARATION_REQUEST_LIMIT,
@@ -63,6 +68,10 @@ export interface PreparationProvider {
   readonly configured?: boolean;
   readonly name: string;
   readonly supportsFiles?: boolean;
+  selectPages?(
+    input: PageSelectionInput,
+    signal: AbortSignal,
+  ): Promise<PageDecision[]>;
   measureInput?(instruction: string, context: PreparationInput): number;
   generate(request: {
     instruction: string;
@@ -87,6 +96,15 @@ export class PreparationAiService {
   }
   get supportsFiles() {
     return this.provider?.supportsFiles === true;
+  }
+
+  selectSitePages(
+    task: string,
+    pages: SitePage[],
+    signal: AbortSignal,
+    progress: (value: PreparationProgress) => Promise<void>,
+  ) {
+    return selectSourcePages(this.provider, task, pages, signal, progress);
   }
 
   async generate(

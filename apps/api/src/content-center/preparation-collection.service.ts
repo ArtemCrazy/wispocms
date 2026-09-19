@@ -4,6 +4,7 @@ import { AiProviderError } from '../ai/ai-provider.error';
 import { readPublicMaterial } from './public-material';
 import {
   SiteCrawler,
+  SITE_RULE_SELECTION_NOTE,
   siteCoverage,
   type SitePage,
   type SiteDiscovery,
@@ -26,7 +27,14 @@ export class PreparationCollectionService {
     input: PreparationInput,
     progress: (value: PreparationProgress) => Promise<void>,
     signal: AbortSignal,
-    options: { persistSnapshots?: boolean; allowUnread?: boolean } = {},
+    options: {
+      persistSnapshots?: boolean;
+      allowUnread?: boolean;
+      selectPages?: (
+        pages: SitePage[],
+        signal: AbortSignal,
+      ) => Promise<SitePage[]>;
+    } = {},
   ): Promise<PreparationInput> {
     const materials: PreparationInput['materials'] = [];
     const sources: SourceSnapshot[] = [];
@@ -82,9 +90,15 @@ export class PreparationCollectionService {
               total: found,
             });
           });
-          discovered = discovery.pages;
+          discovered = options.selectPages
+            ? discovery.pages.map((page) => ({ ...page, recommended: true }))
+            : discovery.pages;
           discoveryStatus = discovery.discovery;
-          snapshot.warnings = discovery.warnings;
+          snapshot.warnings = options.selectPages
+            ? discovery.warnings.filter(
+                (warning) => warning !== SITE_RULE_SELECTION_NOTE,
+              )
+            : discovery.warnings;
           const selected = discovered.filter((page) => page.recommended);
           loaded = await crawler.collect(selected, async (pages) => {
             loaded = pages;
@@ -126,6 +140,13 @@ export class PreparationCollectionService {
             status: 'failed',
             error: 'Сайт не удалось прочитать',
           });
+        if (options.selectPages) {
+          // AI failures must fail the run explicitly, not be mistaken for crawler errors.
+          snapshot.pages = await options.selectPages(snapshot.pages, signal);
+          snapshot.warnings.push(
+            'Основные страницы включены программно. Дополнительные страницы оценены AI по фрагментам и задаче; при сомнении доступный полный текст включён в анализ. Недоступные и не проверенные страницы AI не оценивал. Отбор не гарантирует полноту сайта.',
+          );
+        }
         snapshot.coverage = siteCoverage(discoveryStatus, snapshot.pages);
       } else {
         let content = material.content;
@@ -156,7 +177,8 @@ export class PreparationCollectionService {
         if (material.sourceUrl && content) snapshot.pages[0].status = 'loaded';
       }
       for (const [pageIndex, page] of snapshot.pages.entries()) {
-        if (page.status !== 'loaded' || !page.content) continue;
+        if (!page.recommended || page.status !== 'loaded' || !page.content)
+          continue;
         characters += page.content.length;
         if (characters > PREPARATION_CONTEXT_LIMIT)
           throw new AiProviderError(

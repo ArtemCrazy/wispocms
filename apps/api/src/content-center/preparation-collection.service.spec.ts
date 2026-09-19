@@ -2,6 +2,7 @@ import { PreparationCollectionService } from './preparation-collection.service';
 import { SiteCrawler, type SitePage } from './site-crawler';
 import { DataSource } from 'typeorm';
 import type { SourceSnapshot } from './preparation-ai.service';
+import { selectSourcePages } from './site-page-selection';
 
 describe('preparation source snapshots', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -144,5 +145,128 @@ describe('preparation source snapshots', () => {
       (JSON.parse(query.mock.calls[0][1][3] as string) as SourceSnapshot)
         .pages[0].status,
     ).toBe('failed');
+  });
+
+  it('AI selection sees excluded blog pages, archives decisions, and never sends rejected text to analysis', async () => {
+    const optional: SitePage[] = ['case', 'generic', 'terms'].map((name) => ({
+      ...page,
+      url: `https://example.com/blog/${name}`,
+      title: name,
+      group: 'Блог и новости',
+      recommended: false,
+      status: 'found',
+      content: undefined,
+    }));
+    jest.spyOn(SiteCrawler.prototype, 'discover').mockResolvedValue({
+      root: material.sourceUrl,
+      pages: [page, ...optional],
+      warnings: [],
+      discovery: {
+        state: 'finished',
+        checkedPages: 1,
+        pendingPages: 0,
+        pendingSitemaps: 0,
+        reasons: [],
+      },
+    });
+    const collect = jest
+      .spyOn(SiteCrawler.prototype, 'collect')
+      .mockImplementation((pages) =>
+        Promise.resolve(
+          pages.map((item) => ({
+            ...item,
+            status: 'loaded',
+            content: `${item.title} UNIQUE CONTENT`,
+          })),
+        ),
+      );
+    const selectPages = jest.fn().mockResolvedValue([
+      { id: 1, decision: 'include', reason: 'Реальный кейс' },
+      { id: 2, decision: 'exclude', reason: 'Общая справка' },
+      { id: 3, decision: 'uncertain', reason: 'Недостаточно фрагмента' },
+    ]);
+    const query = jest.fn().mockResolvedValue([]);
+    const collector = new PreparationCollectionService({
+      query,
+    } as unknown as DataSource);
+    const result = await collector.collect(
+      'workspace',
+      { materials: [material], previousResult: null },
+      async () => {},
+      new AbortController().signal,
+      {
+        selectPages: (pages, signal) =>
+          selectSourcePages(
+            { name: 'test', generate: jest.fn(), selectPages },
+            'Профиль',
+            pages,
+            signal,
+            async () => {},
+          ),
+      },
+    );
+    expect(collect.mock.calls[0][0]).toHaveLength(4);
+    expect(
+      result.materials.map((item) => item.content).join('\n'),
+    ).not.toContain('generic UNIQUE CONTENT');
+    expect(result.materials.some((item) => item.title.includes('[S1.4]'))).toBe(
+      true,
+    );
+    expect(result.sources?.[0].pages[2]).toMatchObject({
+      recommended: false,
+      status: 'found',
+      content: 'generic UNIQUE CONTENT',
+      reason: 'AI — не включена: Общая справка',
+    });
+    expect(result.sources?.[0].coverage).toMatchObject({
+      selected: 3,
+      read: 3,
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+
+    // Free refresh has no selector: it keeps the programmatic sample and never calls AI.
+    selectPages.mockClear();
+    collect.mockClear();
+    await collector.collect(
+      'workspace',
+      { materials: [material], previousResult: null },
+      async () => {},
+      new AbortController().signal,
+      { persistSnapshots: false, allowUnread: true },
+    );
+    expect(collect.mock.calls[0][0]).toHaveLength(1);
+    expect(selectPages).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not swallow AI selection failures or replace the saved snapshot', async () => {
+    jest.spyOn(SiteCrawler.prototype, 'discover').mockResolvedValue({
+      root: material.sourceUrl,
+      pages: [page],
+      warnings: [],
+      discovery: {
+        state: 'finished',
+        checkedPages: 1,
+        pendingPages: 0,
+        pendingSitemaps: 0,
+        reasons: [],
+      },
+    });
+    jest.spyOn(SiteCrawler.prototype, 'collect').mockResolvedValue([page]);
+    const query = jest.fn();
+    await expect(
+      new PreparationCollectionService({
+        query,
+      } as unknown as DataSource).collect(
+        'workspace',
+        { materials: [material], previousResult: null },
+        async () => {},
+        new AbortController().signal,
+        {
+          selectPages: () => Promise.reject(new Error('AI selection failed')),
+        },
+      ),
+    ).rejects.toThrow('AI selection failed');
+    expect(query).not.toHaveBeenCalled();
   });
 });

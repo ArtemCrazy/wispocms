@@ -97,6 +97,55 @@ describe('DeepSeek adapter', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
+  it('uses the configured model for bounded JSON page selection, not final-document generation', async () => {
+    const selection = {
+      task: 'Профиль компании',
+      project: [],
+      pages: [
+        {
+          id: 4,
+          url: 'https://example.com/blog/case',
+          title: 'Кейс',
+          excerpt: 'Описание проекта компании.',
+        },
+      ],
+    };
+    respond({
+      pages: [{ id: 4, decision: 'include', reason: 'Кейс компании' }],
+    });
+    expect(
+      await ai.selectPages(selection, new AbortController().signal),
+    ).toEqual([{ id: 4, decision: 'include', reason: 'Кейс компании' }]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as {
+      model: string;
+      response_format: unknown;
+      messages: Array<{ content: string }>;
+      max_tokens: number;
+    };
+    expect(url).toBe('https://api.deepseek.com/chat/completions');
+    expect(body.model).toBe('deepseek-flash');
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.messages[0].content).toContain('Основные страницы');
+    expect(JSON.parse(body.messages[1].content)).toEqual(selection);
+    expect(body.max_tokens).toBe(4096);
+    expect(JSON.stringify(body.messages).length).toBeLessThanOrEqual(60000);
+    fetchMock.mockClear();
+    await expect(
+      ai.selectPages(
+        { ...selection, task: 'x'.repeat(60000) },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('60 000');
+    expect(fetchMock).not.toHaveBeenCalled();
+    respond({
+      pages: [{ id: 99, decision: 'exclude', reason: 'Чужая страница' }],
+    });
+    await expect(
+      ai.selectPages(selection, new AbortController().signal),
+    ).rejects.toThrow('некорректный отбор');
+  });
+
   it('keeps every staged preparation request including the final DeepSeek system message within 60k', async () => {
     respond({ content: '[S1.1] Компания, цена 2500 ₽, условия.' });
     await new PreparationAiService(ai).generate('Подготовь обзор', {
@@ -266,7 +315,10 @@ describe('DeepSeek adapter', () => {
       context,
       signal: new AbortController().signal,
     });
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as {
+      messages: Array<{ content: string }>;
+    };
     expect(body.messages[0].content).toContain('НЕ пишешь итоговый документ');
     expect(body.messages[0].content).toContain('до 6000 символов');
     expect(body.messages[0].content).not.toContain('максимум 80000');

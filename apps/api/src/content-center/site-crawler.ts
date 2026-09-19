@@ -9,6 +9,8 @@ export const SITE_ADDRESS_LIMIT = 2000;
 export const SITE_SITEMAP_LIMIT = 64;
 export const SITE_REQUEST_LIMIT = 180;
 export const SITE_TEXT_LIMIT = 1_200_000;
+export const SITE_RULE_SELECTION_NOTE =
+  'Проверяются найденные страницы компании, услуг и продуктов. Блог и новости — до трёх примеров; юридические страницы исключены. Скрытые и недоступные ссылки могут остаться вне обхода.';
 const AGENT = 'WispoCMS';
 export type SitePage = {
   url: string;
@@ -544,9 +546,7 @@ export class SiteCrawler {
       reasons.add(
         `Не проверены ссылки на выбранных страницах: ${pendingPages}. В них могут быть другие важные разделы.`,
       );
-    warnings.push(
-      'Проверяются найденные страницы компании, услуг и продуктов. Блог и новости — до трёх примеров; юридические страницы исключены. Скрытые и недоступные ссылки могут остаться вне обхода.',
-    );
+    warnings.push(SITE_RULE_SELECTION_NOTE);
     const discovery: SiteDiscovery = {
       state: reasons.size ? 'partial' : 'finished',
       checkedPages: inspected.size,

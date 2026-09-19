@@ -3,6 +3,12 @@ import { AiProviderError as DeepseekError } from './ai-provider.error';
 import { DeepseekSettingsService } from './deepseek-settings.service';
 import { escapeJsonTextWhitespace } from './json-text-whitespace';
 import {
+  PAGE_SELECTION_PROMPT,
+  checkedPageDecisions,
+  selectionRequestSize,
+  type PageSelectionInput,
+} from '../content-center/site-page-selection';
+import {
   preparationRequestSize,
   PREPARATION_REQUEST_LIMIT,
 } from '../content-center/preparation-budget';
@@ -263,6 +269,15 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
         'DeepSeek вернул некорректную обработанную информацию.',
       );
     return { content: result.content.trim() };
+  }
+
+  async selectPages(input: PageSelectionInput, signal: AbortSignal) {
+    if (selectionRequestSize(input) > PREPARATION_REQUEST_LIMIT)
+      throw new DeepseekError(
+        'Вход AI-отбора страниц превышает 60 000 символов.',
+      );
+    const result = await this.json(PAGE_SELECTION_PROMPT, input, signal, 4096);
+    return checkedPageDecisions(result, input);
   }
 
   async produce(
