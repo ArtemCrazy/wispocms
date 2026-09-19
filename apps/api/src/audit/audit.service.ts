@@ -14,7 +14,8 @@ import {
   WorkspaceMembershipEntity,
 } from '../database/entities';
 
-const secretKey = /password|passphrase|token|secret|authorization|cookie|hash/i;
+const secretKey =
+  /password|passphrase|token|secret|authorization|cookie|hash|api.?key|encrypted.?key/i;
 
 export function sanitizeAuditChanges(value: unknown) {
   const redactedFields: string[] = [];

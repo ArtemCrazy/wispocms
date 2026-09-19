@@ -19,6 +19,7 @@ export const PREPARATION_PROVIDER = Symbol('PREPARATION_PROVIDER');
 
 /** Implement this contract when an AI provider is selected. Keep credentials on the server. */
 export interface PreparationProvider {
+  readonly configured?: boolean;
   readonly name: string;
   readonly supportsFiles?: boolean;
   generate(request: {
@@ -40,7 +41,7 @@ export class PreparationAiService {
     return this.provider?.name ?? 'not-connected';
   }
   get configured() {
-    return Boolean(this.provider);
+    return Boolean(this.provider && this.provider.configured !== false);
   }
   get supportsFiles() {
     return this.provider?.supportsFiles === true;
@@ -50,7 +51,7 @@ export class PreparationAiService {
     instruction: string,
     input: PreparationInput,
   ): Promise<string> {
-    if (!this.provider)
+    if (!this.provider || !this.configured)
       throw new ServiceUnavailableException(
         'AI ещё не подключён. Материалы и промпты можно подготовить заранее.',
       );

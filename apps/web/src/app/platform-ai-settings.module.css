@@ -1,0 +1,21 @@
+.root { width: 100%; padding: 24px 32px 48px; font-size: 14px; color: var(--ink, #1c2440); }
+.root h1 { margin: 0 0 8px; font-size: 28px; font-weight: 650; }
+.root h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }
+.root p { line-height: 1.6; margin: 6px 0 16px; color: #62708a; }
+.card { margin-top: 24px; padding: 24px; border: 1px solid #e0e5ef; border-radius: 12px; background: #fff; }
+.heading { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 20px; }
+.status { padding: 6px 10px; border-radius: 6px; background: #f0f4fa; color: #334a75; }
+.root fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 10px; }
+.root label { font-weight: 600; }
+.root input, .root select { min-height: 44px; border: 1px solid #ccd5e4; border-radius: 8px; padding: 10px 12px; width: 100%; background: #fff; color: var(--ink, #1c2440); font: inherit; }
+.root select { max-width: 360px; }
+.root button { min-height: 42px; border: 1px solid #ccd5e4; border-radius: 8px; padding: 10px 16px; background: #fff; font: inherit; cursor: pointer; }
+.root button:disabled, .root fieldset:disabled button { opacity: .5; cursor: not-allowed; }
+.root button:focus-visible, .root input:focus-visible, .root select:focus-visible { outline: 2px solid #3974ea; outline-offset: 3px; }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 10px; }
+.root .primary { background: #2864df; border-color: #2864df; color: white; }
+.details { margin-top: 24px; padding-top: 20px; border-top: 1px solid #e0e5ef; }
+.root .notice { padding: 12px 16px; color: #205f46; background: #eef9f3; border-radius: 8px; }
+.root .error { padding: 12px 16px; color: #a22828; background: #fff2f2; border-radius: 8px; }
+.root .remove { color: #ac3636; }
+@media (max-width: 720px) { .root { padding: 20px 16px; } .card { padding: 16px; } }

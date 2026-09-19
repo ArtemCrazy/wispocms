@@ -10,6 +10,7 @@ import type {
   CreationSnapshot,
   ClusterRow,
 } from './creation-model';
+import { AiProviderError } from '../ai/ai-provider.error';
 
 export const CREATION_PROVIDER = Symbol('CREATION_PROVIDER');
 export type CreationAiInput = {
@@ -21,6 +22,7 @@ export type CreationAiInput = {
 };
 /** Structured output is untrusted and validated by the domain service, never directly published. */
 export interface CreationProvider {
+  readonly configured?: boolean;
   supportsFiles?: boolean;
   produce(
     input: CreationAiInput,
@@ -50,13 +52,13 @@ export class CreationAiService {
     private readonly provider?: CreationProvider,
   ) {}
   get connected() {
-    return Boolean(this.provider);
+    return Boolean(this.provider && this.provider.configured !== false);
   }
   get supportsFiles() {
     return Boolean(this.provider?.supportsFiles);
   }
   async produce(input: CreationAiInput) {
-    if (!this.provider)
+    if (!this.provider || !this.connected)
       throw new ServiceUnavailableException(
         'AI ещё не подключён. Генерация не запускалась.',
       );
@@ -74,7 +76,8 @@ export class CreationAiService {
           }, 90000);
         }),
       ]);
-    } catch {
+    } catch (error) {
+      if (error instanceof AiProviderError) throw error;
       throw new ServiceUnavailableException(
         'AI не завершил операцию. Статья не изменена; можно повторить запуск.',
       );

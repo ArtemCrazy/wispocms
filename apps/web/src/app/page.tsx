@@ -10,6 +10,7 @@ import {
 } from "react";
 import { LoginScreen } from "./login-screen";
 import { PlatformView } from "./platform-views";
+import { PlatformAiSettings } from "./platform-ai-settings";
 import { ContentView } from "./content-view";
 import { PagesView } from "./pages-view";
 import { SiteDirectoryView } from "./site-directories-view";
@@ -217,6 +218,7 @@ function Dashboard({
     | "all-projects"
     | "global-search"
     | "overview"
+    | "platform-settings"
     | "workspaces"
     | "team"
     | "audit"
@@ -338,6 +340,11 @@ function Dashboard({
       const url = new URL(window.location.href);
       const siteId = url.searchParams.get("site");
       const view = url.searchParams.get("view");
+      if (view === "platform-settings" && isWispoAdmin) {
+        setActiveView("platform-settings");
+        setNavigationTarget(null);
+        return;
+      }
       if (view === "content-center") {
         const workspaceId = url.searchParams.get("workspace");
         if (session.workspaces.some((item) => item.id === workspaceId)) {
@@ -406,7 +413,7 @@ function Dashboard({
     }
     window.addEventListener("popstate", restoreSiteView);
     return () => window.removeEventListener("popstate", restoreSiteView);
-  }, [session.workspaces]);
+  }, [session.workspaces, isWispoAdmin]);
 
   function confirmDiscardChanges() {
     if (!hasUnsavedChanges) return true;
@@ -429,7 +436,16 @@ function Dashboard({
     )
       return false;
     if (view !== "banners") setBannerLibraryContext(null);
-    if (activeView === "content-center" && view !== "content-center") {
+    if (view === "platform-settings" || activeView === "platform-settings") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("site");
+      url.searchParams.delete("workspace");
+      url.searchParams.delete("cc");
+      if (view === "platform-settings") url.searchParams.set("view", view);
+      else url.searchParams.delete("view");
+      window.history.pushState({}, "", url);
+    }
+    if (activeView === "content-center" && view !== "content-center" && view !== "platform-settings") {
       const url = new URL(window.location.href);
       for (const key of ["cc", "ccVersion", "workspace", "view"]) url.searchParams.delete(key);
       window.history.replaceState({}, "", url);
@@ -457,6 +473,7 @@ function Dashboard({
         "all-projects",
         "global-search",
         "overview",
+        "platform-settings",
         "workspaces",
         "team",
         "audit",
@@ -485,7 +502,7 @@ function Dashboard({
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  const isPlatform = ["overview", "workspaces", "team", "audit"].includes(
+  const isPlatform = ["overview", "workspaces", "team", "audit", "platform-settings"].includes(
     activeView,
   );
   const showsPlatformMenu = isPlatform;
@@ -1171,7 +1188,7 @@ function Dashboard({
                   <button
                     onClick={() => {
                       setSwitcherOpen(false);
-                      if (isWispoAdmin) navigateTo("workspaces");
+                      if (isWispoAdmin) navigateTo("platform-settings");
                       else showAllProjects();
                     }}
                   >
@@ -1287,6 +1304,14 @@ function Dashboard({
           {showsPlatformMenu && isWispoAdmin ? (
             <>
               <p className="nav-label">Управление Wispo</p>
+              <button
+                title="Настройки платформы"
+                className={`nav-item ${activeView === "platform-settings" ? "active" : ""}`}
+                onClick={() => navigateTo("platform-settings")}
+              >
+                <Icon><span className="weeek-icon weeek-icon-settings" aria-hidden="true" /></Icon>
+                <span className="nav-text">Настройки платформы</span>
+              </button>
               <button
                 title="Обзор платформы"
                 className={`nav-item ${activeView === "overview" ? "active" : ""}`}
@@ -2108,6 +2133,8 @@ function Dashboard({
           />
         ) : activeView === "history" && site ? (
           <AuditLogView siteId={site.id} />
+        ) : isWispoAdmin && activeView === "platform-settings" ? (
+          <PlatformAiSettings onDirtyChange={setHasUnsavedChanges} />
         ) : isWispoAdmin && isPlatform ? (
           <PlatformView
             view={activeView as "overview" | "workspaces" | "team" | "audit"}
