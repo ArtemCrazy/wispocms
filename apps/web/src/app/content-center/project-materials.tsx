@@ -18,6 +18,7 @@ export function ProjectMaterials({
   edit,
   remove,
   upload,
+  showSources,
 }: {
   materials: ProjectMaterial[];
   busy: boolean;
@@ -26,6 +27,7 @@ export function ProjectMaterials({
   edit: (material: ProjectMaterial) => void;
   remove: (material: ProjectMaterial) => void;
   upload: (file: File) => void;
+  showSources?: (material: ProjectMaterial) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const files = materials.filter((m) => m.kind === "file");
@@ -73,6 +75,15 @@ export function ProjectMaterials({
                       <span className={styles.sourceWarning}>
                         {m.source_error}
                       </span>
+                    )}
+                    {m.site_checked_at && showSources && (
+                      <button
+                        disabled={busy}
+                        onClick={() => showSources(m)}
+                        aria-label={`Страницы источника «${m.title}»`}
+                      >
+                        Страницы
+                      </button>
                     )}
                   </div>
                 ))}

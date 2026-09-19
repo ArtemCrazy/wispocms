@@ -31,6 +31,21 @@ export const SOURCE_CATEGORIES = [
   },
 ] as const;
 export type SourceCategory = (typeof SOURCE_CATEGORIES)[number]["id"];
+export type SourceSnapshot = {
+  sourceId: string;
+  title: string;
+  checkedAt: string;
+  warnings: string[];
+  pages: Array<{
+    url: string;
+    title: string;
+    status: "found" | "loaded" | "failed" | "duplicate";
+    content?: string;
+    error?: string;
+    reason?: string;
+    duplicateOf?: string;
+  }>;
+};
 export type ProjectMaterial = {
   id: string;
   title: string;
@@ -47,6 +62,8 @@ export type ProjectMaterial = {
   media_type: string | null;
   has_original: boolean;
   source_error: string | null;
+  site_checked_at?: string | null;
+  site_pages?: SourceSnapshot | null;
 };
 export const FILE_ACCEPT =
   ".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv";

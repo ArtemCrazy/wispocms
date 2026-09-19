@@ -18,6 +18,7 @@ import { AiModule } from '../ai/ai.module';
 import { DeepseekService } from '../ai/deepseek.service';
 import { CreationRunsService } from './creation-runs.service';
 import { CreationPublicationService } from './creation-publication.service';
+import { PreparationCollectionService } from './preparation-collection.service';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
@@ -31,6 +32,7 @@ import { CreationPublicationService } from './creation-publication.service';
     { provide: CREATION_PROVIDER, useExisting: DeepseekService },
     ContentCenterService,
     PreparationAiService,
+    PreparationCollectionService,
     MaterialUploadGuard,
     ResearchService,
     ResearchSearchService,

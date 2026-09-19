@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
+import { SiteCrawler, type SitePage } from './site-crawler';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { GlobalPromptLibrary1790486400000 } from '../database/migrations/1790486400000-GlobalPromptLibrary';
@@ -68,6 +70,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       await new ContentCenterPreparation1790020800000().up(runner);
       await new ContentCenterSourceFiles1790107200000().up(runner);
       await new GlobalPromptLibrary1790486400000().up(runner);
+      await new ContentCenterSiteImports1790572800000().up(runner);
     } finally {
       await runner.release();
     }
@@ -250,9 +253,10 @@ integration('Content Center / isolated PostgreSQL', () => {
         withoutMaterials: false,
       });
       await service.processNext();
-      expect(generate.mock.calls[0][0].context.materials[0].content).toContain(
-        'Текст источника не загружен',
-      );
+      expect(generate).not.toHaveBeenCalled();
+      const state = await service.overview(workspace, admin);
+      expect(state.run.status).toBe('failed');
+      expect(state.versions).toHaveLength(0);
       await expect(
         service.saveMaterial(workspace, admin, {
           ...dto,
@@ -632,6 +636,85 @@ integration('Content Center / isolated PostgreSQL', () => {
     await expect(
       service.restore(workspace, first.versions[0].id, employee, 2),
     ).rejects.toThrow('Появилась новая версия');
+  });
+
+  it('collects a website on launch, keeps archived sources after edits and preserves them on restore', async () => {
+    const page: SitePage = {
+      url: 'https://example.com/about',
+      title: 'Компания',
+      group: 'О компании',
+      recommended: true,
+      status: 'loaded',
+      content: 'Факты о компании из второй страницы',
+    };
+    const discover = jest
+      .spyOn(SiteCrawler.prototype, 'discover')
+      .mockResolvedValue({
+        root: 'https://example.com/',
+        pages: [page],
+        warnings: [],
+      });
+    const collect = jest
+      .spyOn(SiteCrawler.prototype, 'collect')
+      .mockImplementation(async () => {
+        await service.saveMaterial(
+          workspace,
+          admin,
+          {
+            kind: 'url',
+            title: 'Другой сайт',
+            sourceUrl: 'https://other.example.com/',
+            urlCategory: 'site',
+            revision: 1,
+          },
+          material.id,
+        );
+        return [page];
+      });
+    const material = await service.saveMaterial(workspace, admin, {
+      kind: 'url',
+      title: 'Компания',
+      sourceUrl: 'https://example.com/',
+      urlCategory: 'site',
+    });
+    try {
+      expect(discover).not.toHaveBeenCalled();
+      await service.start(workspace, admin, {
+        instruction: 'Проанализируй компанию',
+        withoutMaterials: false,
+      });
+      await service.processNext();
+      const state = await service.overview(workspace, admin);
+      expect(state.run.status).toBe('succeeded');
+      expect(
+        (await service.getMaterial(workspace, material.id, admin)).site_pages,
+      ).toBeNull();
+      const version = await service.getVersion(
+        workspace,
+        state.versions[0].id,
+        admin,
+      );
+      expect(version.sources?.[0].sourceUrl).toBe('https://example.com/');
+      expect(version.sources?.[0].pages[0].content).toContain(
+        'второй страницы',
+      );
+      await service.deleteMaterial(workspace, material.id, 2, admin);
+      await expect(
+        service.getVersion(otherWorkspace, version.id, employee),
+      ).rejects.toThrow();
+      await service.start(workspace, admin, {
+        instruction: 'Новое сообщение без источников',
+        withoutMaterials: true,
+      });
+      await service.processNext();
+      const restored = await service.restore(workspace, version.id, admin, 2);
+      expect(
+        (await service.getVersion(workspace, restored.id, admin)).sources,
+      ).toEqual(version.sources);
+    } finally {
+      discover.mockRestore();
+      collect.mockRestore();
+    }
   });
 
   it('uses only the message after the last material is deleted, without old result facts', async () => {

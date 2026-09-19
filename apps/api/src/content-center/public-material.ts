@@ -82,11 +82,26 @@ export function materialText(source: string, html: boolean): string {
 }
 
 // DNS is validated and pinned for every hop; redirects cannot reach internal services.
-export async function readPublicMaterial(
+export type PublicResource = {
+  body: string;
+  html: boolean;
+  url: string;
+  status: number;
+};
+
+export async function readPublicResource(
   value: string,
+  options: {
+    beforeRequest?: (url: URL) => void | Promise<void>;
+    allowNotFound?: boolean;
+    xml?: boolean;
+    signal?: AbortSignal;
+  } = {},
   hops = 0,
-): Promise<string> {
+): Promise<PublicResource> {
   const url = publicMaterialUrl(value);
+  await options.beforeRequest?.(url);
+  options.signal?.throwIfAborted();
   let dnsTimer: ReturnType<typeof setTimeout> | undefined;
   const addresses = await Promise.race([
     lookup(url.hostname, { family: 4, all: true }),
@@ -103,6 +118,7 @@ export async function readPublicMaterial(
   const result = await new Promise<{
     body: string;
     html: boolean;
+    status: number;
     redirect?: string;
   }>((resolve, reject) => {
     const req = request(
@@ -110,12 +126,16 @@ export async function readPublicMaterial(
       {
         method: 'GET',
         agent: false,
-        signal: AbortSignal.timeout(12000),
+        signal: options.signal
+          ? AbortSignal.any([options.signal, AbortSignal.timeout(12000)])
+          : AbortSignal.timeout(12000),
         family: 4,
         lookup: (_hostname, _options, callback) =>
           callback(null, addresses[0].address, 4),
         headers: {
-          Accept: 'text/html, text/plain, text/markdown',
+          Accept: options.xml
+            ? 'application/xml, text/xml, text/plain, text/html'
+            : 'text/html, text/plain, text/markdown',
           'Accept-Encoding': 'identity',
           'User-Agent': 'WispoCMS/1.0 MaterialImport',
         },
@@ -132,6 +152,7 @@ export async function readPublicMaterial(
             resolve({
               body: '',
               html: false,
+              status,
               redirect: new URL(response.headers.location, url).href,
             });
           } catch {
@@ -144,9 +165,18 @@ export async function readPublicMaterial(
           return;
         }
         const type = response.headers['content-type'] ?? '';
+        if (options.allowNotFound && [404, 410].includes(status)) {
+          response.destroy();
+          resolve({ body: '', html: false, status });
+          return;
+        }
         if (
           status !== 200 ||
-          !/^text\/(html|plain|markdown)\b/i.test(type) ||
+          !(
+            /^text\/(html|plain|markdown)\b/i.test(type) ||
+            (options.xml &&
+              /^(application|text)\/(xml|[^;]+\+xml)\b/i.test(type))
+          ) ||
           (response.headers['content-encoding'] &&
             response.headers['content-encoding'] !== 'identity')
         ) {
@@ -172,6 +202,7 @@ export async function readPublicMaterial(
           resolve({
             body: Buffer.concat(chunks).toString('utf8'),
             html: /^text\/html/i.test(type),
+            status,
           }),
         );
       },
@@ -182,7 +213,15 @@ export async function readPublicMaterial(
   if (result.redirect) {
     if (hops >= 3)
       throw new BadRequestException('Слишком много перенаправлений источника');
-    return readPublicMaterial(result.redirect, hops + 1);
+    return readPublicResource(result.redirect, options, hops + 1);
   }
+  return { ...result, url: url.href };
+}
+
+export async function readPublicMaterial(
+  value: string,
+  hops = 0,
+): Promise<string> {
+  const result = await readPublicResource(value, {}, hops);
   return materialText(result.body, result.html);
 }

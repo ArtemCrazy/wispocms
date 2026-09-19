@@ -1,0 +1,189 @@
+import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { AiProviderError } from '../ai/ai-provider.error';
+import { readPublicMaterial } from './public-material';
+import { SiteCrawler, type SitePage } from './site-crawler';
+import type {
+  PreparationInput,
+  PreparationProgress,
+  SourceSnapshot,
+} from './preparation-ai.service';
+
+export const PREPARATION_CONTEXT_LIMIT = 2_200_000;
+
+@Injectable()
+export class PreparationCollectionService {
+  constructor(private readonly db: DataSource) {}
+
+  async collect(
+    workspaceId: string,
+    input: PreparationInput,
+    progress: (value: PreparationProgress) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<PreparationInput> {
+    const materials: PreparationInput['materials'] = [];
+    const sources: SourceSnapshot[] = [];
+    let characters = 0;
+    let readable = 0;
+    for (const [index, material] of input.materials.entries()) {
+      signal.throwIfAborted();
+      const sourceId = `S${index + 1}`;
+      const snapshot: SourceSnapshot = {
+        sourceId,
+        materialId: material.id,
+        title: material.title,
+        sourceUrl: material.sourceUrl,
+        checkedAt: new Date().toISOString(),
+        mode: material.sourceUrl
+          ? material.urlCategory === 'site'
+            ? 'main-pages'
+            : 'single-page'
+          : 'provided',
+        warnings: [],
+        pages: [],
+      };
+      await progress({
+        stage: 'collecting',
+        message: `Сбор источника: ${material.title}`,
+        completed: index,
+        total: input.materials.length,
+      });
+      if (material.sourceUrl && material.urlCategory === 'site') {
+        let discovered: SitePage[] = [];
+        let loaded: SitePage[] = [];
+        try {
+          const crawler = new SiteCrawler(
+            material.sourceUrl,
+            () => {
+              signal.throwIfAborted();
+              return Promise.resolve();
+            },
+            signal,
+          );
+          const discovery = await crawler.discover();
+          discovered = discovery.pages;
+          snapshot.warnings = discovery.warnings;
+          const selected = discovered.filter((page) => page.recommended);
+          loaded = await crawler.collect(selected, async (pages) => {
+            loaded = pages;
+            await progress({
+              stage: 'collecting',
+              message: `${material.title}: прочитано ${pages.filter((p) => p.status === 'loaded').length}, проверено ${pages.length} из ${selected.length}`,
+              completed: pages.length,
+              total: selected.length,
+            });
+          });
+        } catch {
+          signal.throwIfAborted();
+          snapshot.warnings.push(
+            'Обход сайта завершён не полностью: доступ ограничен, истекло время или сайт не отдал читаемый текст.',
+          );
+        }
+        // Preserve failures and exclusions in the registry, but never pretend they were read.
+        snapshot.pages = discovered.map((page) => {
+          // Redirected pages remain attached to their original selection by position below.
+          const selectedIndex = discovered
+            .filter((item) => item.recommended)
+            .indexOf(page);
+          if (selectedIndex >= 0 && loaded[selectedIndex])
+            return loaded[selectedIndex];
+          return page.recommended
+            ? {
+                ...page,
+                status: 'failed',
+                error: 'Не удалось завершить загрузку страницы',
+              }
+            : page;
+        });
+        if (!snapshot.pages.length)
+          snapshot.pages.push({
+            url: material.sourceUrl,
+            title: material.title,
+            group: 'Главная',
+            recommended: true,
+            status: 'failed',
+            error: 'Сайт не удалось прочитать',
+          });
+      } else {
+        let content = material.content;
+        let error: string | undefined;
+        if (material.sourceUrl) {
+          try {
+            content = await readPublicMaterial(material.sourceUrl);
+          } catch {
+            content = '';
+            error =
+              'Страница недоступна. Старый текст не используется как актуальный.';
+          }
+        }
+        snapshot.pages = [
+          {
+            url: material.sourceUrl ?? '',
+            title: material.title,
+            group: 'Материал',
+            recommended: true,
+            status: content && !material.sourceError ? 'loaded' : 'failed',
+            content,
+            error:
+              error ?? (!content ? 'Текст материала не загружен' : undefined),
+            checkedAt: snapshot.checkedAt,
+          },
+        ];
+        // A successfully refreshed URL supersedes the warning saved when it was first added.
+        if (material.sourceUrl && content) snapshot.pages[0].status = 'loaded';
+      }
+      for (const [pageIndex, page] of snapshot.pages.entries()) {
+        if (page.status !== 'loaded' || !page.content) continue;
+        characters += page.content.length;
+        if (characters > PREPARATION_CONTEXT_LIMIT)
+          throw new AiProviderError(
+            'Собранные материалы превышают безопасный объём одного запуска (2,2 млн символов). Уменьшите число источников. Предыдущая версия сохранена.',
+          );
+        readable++;
+        materials.push({
+          title: `[${sourceId}.${pageIndex + 1}] ${page.title}`,
+          content: page.content,
+          sourceUrl: page.url || null,
+        });
+      }
+      const failed = snapshot.pages.filter((page) => page.status === 'failed');
+      materials.push({
+        title: `[${sourceId}] Охват источника «${material.title}»`,
+        sourceUrl: material.sourceUrl,
+        content: JSON.stringify({
+          mode: snapshot.mode,
+          warnings: snapshot.warnings,
+          loaded: snapshot.pages
+            .filter((p) => p.status === 'loaded')
+            .map((p) => p.url),
+          unavailable: failed.map((p) => ({ url: p.url, reason: p.error })),
+          excluded: snapshot.pages.filter((p) => !p.recommended).length,
+          rule: 'Выводы только по прочитанным материалам. Не найдено в выборке не означает отсутствие у компании. Маркетинговые заявления не являются независимо проверенными фактами.',
+        }),
+      });
+      sources.push(snapshot);
+      if (
+        material.id &&
+        material.sourceUrl &&
+        material.urlCategory === 'site'
+      ) {
+        // An edit/deletion during collection cannot be overwritten or resurrected.
+        await this.db.query(
+          `UPDATE cc_materials SET site_pages=$4::jsonb,site_checked_at=now() WHERE workspace_id=$1 AND id=$2 AND revision=$3 AND source_url=$5`,
+          [
+            workspaceId,
+            material.id,
+            material.revision,
+            JSON.stringify(snapshot),
+            material.sourceUrl,
+          ],
+        );
+      }
+    }
+    if (input.materials.length && !readable && !input.files?.length)
+      throw new AiProviderError(
+        'Не удалось прочитать ни один источник. Проверьте ссылки или добавьте текст вручную. Новая версия не создана.',
+      );
+    return { ...input, materials, sources };
+  }
+}

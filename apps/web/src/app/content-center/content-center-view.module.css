@@ -920,3 +920,27 @@
     font-size: 24px;
   }
 }
+.sourceRegistry {
+  margin-top: 20px;
+  border-top: 1px solid #e0e3ee;
+  padding-top: 16px;
+  overflow-wrap: anywhere;
+}
+.sourceRegistry summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 600;
+}
+.sourceRegistry ul {
+  padding-left: 20px;
+}
+.sourceRegistry li {
+  margin: 12px 0;
+}
+.sourceRegistry pre {
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.6;
+  max-height: 360px;
+  overflow: auto;
+}

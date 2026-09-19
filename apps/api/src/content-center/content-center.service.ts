@@ -21,7 +21,15 @@ import type {
 } from './content-center.dto';
 import { PreparationAiService } from './preparation-ai.service';
 import { AiProviderError } from '../ai/ai-provider.error';
-import type { PreparationInput } from './preparation-ai.service';
+import type {
+  PreparationInput,
+  PreparationProgress,
+  SourceSnapshot,
+} from './preparation-ai.service';
+import {
+  PreparationCollectionService,
+  PREPARATION_CONTEXT_LIMIT,
+} from './preparation-collection.service';
 import {
   materialText,
   publicMaterialUrl,
@@ -44,6 +52,8 @@ type Material = {
   media_type: string | null;
   has_original: boolean;
   source_error: string | null;
+  site_pages?: SourceSnapshot | null;
+  site_checked_at?: Date | null;
 };
 type Version = {
   id: string;
@@ -54,6 +64,7 @@ type Version = {
   reason: string;
   restored_from: number | null;
   created_at: Date;
+  sources?: SourceSnapshot[] | null;
 };
 type RunSummary = {
   id: string;
@@ -78,7 +89,7 @@ type Run = {
   status: string;
 };
 const RUN_FIELDS =
-  'id, status, actor_name, error, created_at, started_at, finished_at';
+  'id, status, actor_name, error, progress, created_at, started_at, finished_at';
 
 @Injectable()
 export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
@@ -89,6 +100,9 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly db: DataSource,
     private readonly ai: PreparationAiService,
+    private readonly collection: PreparationCollectionService = new PreparationCollectionService(
+      db,
+    ),
   ) {}
 
   onModuleInit() {
@@ -135,7 +149,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           Omit<Material, 'content'> & { characters: number; updated_at: Date }
         >
       >(
-        `SELECT id, title, kind, source_url, file_name, revision, url_category, file_size, media_type, source_error, (file_data IS NOT NULL) AS has_original, length(content) AS characters, created_at, updated_at FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at DESC`,
+        `SELECT id, title, kind, source_url, file_name, revision, url_category, file_size, media_type, source_error, site_checked_at, (file_data IS NOT NULL) AS has_original, length(content) AS characters, created_at, updated_at FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at DESC`,
         [workspaceId],
       ),
       this.db.query<Array<{ id: string; title: string; content: string }>>(
@@ -171,7 +185,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
   async getMaterial(workspaceId: string, id: string, actor: Actor) {
     await this.access(workspaceId, actor);
     const [row] = await this.db.query<Material[]>(
-      `SELECT id, title, kind, source_url, file_name, content, revision, url_category, file_size, media_type, source_error, (file_data IS NOT NULL) AS has_original FROM cc_materials WHERE workspace_id=$1 AND id=$2`,
+      `SELECT id, title, kind, source_url, file_name, content, revision, url_category, file_size, media_type, source_error, site_pages, site_checked_at, (file_data IS NOT NULL) AS has_original FROM cc_materials WHERE workspace_id=$1 AND id=$2`,
       [workspaceId, id],
     );
     if (!row) throw new NotFoundException('Материал не найден');
@@ -247,13 +261,17 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     let sourceError: string | null = null;
     if (dto.kind === 'url') {
       publicMaterialUrl(dto.sourceUrl ?? '');
-      try {
-        content = await readPublicMaterial(dto.sourceUrl ?? '');
-      } catch {
+      if (dto.urlCategory === 'site') {
+        // Collection belongs to the explicit run, not to saving a link.
         content = '';
-        sourceError =
-          'Ссылка сохранена, но текст страницы недоступен. При необходимости добавьте его вручную.';
-      }
+      } else
+        try {
+          content = await readPublicMaterial(dto.sourceUrl ?? '');
+        } catch {
+          content = '';
+          sourceError =
+            'Ссылка сохранена, но текст страницы недоступен. При необходимости добавьте его вручную.';
+        }
     } else {
       if (dto.kind === 'file' && !/\.(txt|md)$/i.test(dto.fileName ?? ''))
         throw new BadRequestException(
@@ -283,7 +301,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       ];
       const rows = id
         ? await manager.query<Array<{ id: string }>>(
-            `WITH changed AS (UPDATE cc_materials SET title=$2, kind=$3, source_url=$4, file_name=$5, content=$6, url_category=$7, source_error=$8, revision=revision+1, updated_at=now() WHERE workspace_id=$1 AND id=$9 AND revision=$10 AND file_data IS NULL RETURNING id) SELECT * FROM changed`,
+            `WITH changed AS (UPDATE cc_materials SET title=$2, kind=$3, source_url=$4, file_name=$5, content=$6, url_category=$7, source_error=$8, site_pages=NULL,site_checked_at=NULL, revision=revision+1, updated_at=now() WHERE workspace_id=$1 AND id=$9 AND revision=$10 AND file_data IS NULL RETURNING id) SELECT * FROM changed`,
             [...params, id, (dto as UpdateMaterialDto).revision],
           )
         : await manager.query<Array<{ id: string }>>(
@@ -360,7 +378,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       const materials = await manager.query<
         Array<Material & { file_data: Buffer | null }>
       >(
-        `SELECT title, content, source_url, source_error, file_name, media_type, file_data FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at`,
+        `SELECT id,revision,url_category,title,content,source_url,source_error,file_name,media_type,file_data FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at`,
         [workspaceId],
       );
       if (!materials.length && !dto.withoutMaterials)
@@ -377,12 +395,12 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       );
       const input: PreparationInput = {
         materials: materials.map((m) => ({
+          id: m.id,
+          revision: m.revision,
+          urlCategory: m.url_category,
+          sourceError: m.source_error,
           title: m.title,
-          content:
-            m.content ||
-            (m.source_error
-              ? '[Текст источника не загружен. Не делайте выводов о его содержимом по одной ссылке.]'
-              : ''),
+          content: m.content,
           sourceUrl: m.source_url,
         })),
         // With no materials the specification permits only the user's message.
@@ -391,9 +409,9 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           ? null
           : (previous?.content ?? null),
       };
-      if (JSON.stringify(input).length > 180000)
+      if (JSON.stringify(input).length > PREPARATION_CONTEXT_LIMIT)
         throw new BadRequestException(
-          'Материалы и предыдущий результат превышают 180 000 символов. Сократите материалы перед запуском.',
+          'Материалы превышают безопасный объём запуска (2,2 млн символов). Сократите материалы перед запуском.',
         );
       const files = materials
         .filter((m) => m.file_data && !m.content)
@@ -451,12 +469,20 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     actorName: string,
     reason: string,
     restoredFrom: number | null = null,
+    sources: SourceSnapshot[] | null = null,
   ) {
     // Caller holds the workspace transaction lock. MAX+1 therefore cannot race.
     const [row] = await manager.query<Array<{ id: string; number: number }>>(
-      `INSERT INTO cc_preparation_versions (workspace_id,number,content,actor_name,reason,restored_from)
-      SELECT $1,COALESCE(MAX(number),0)+1,$2,$3,$4,$5 FROM cc_preparation_versions WHERE workspace_id=$1 RETURNING id,number`,
-      [workspaceId, content, actorName, reason, restoredFrom],
+      `INSERT INTO cc_preparation_versions (workspace_id,number,content,actor_name,reason,restored_from,sources)
+      SELECT $1,COALESCE(MAX(number),0)+1,$2,$3,$4,$5,$6::jsonb FROM cc_preparation_versions WHERE workspace_id=$1 RETURNING id,number`,
+      [
+        workspaceId,
+        content,
+        actorName,
+        reason,
+        restoredFrom,
+        JSON.stringify(sources),
+      ],
     );
     return row;
   }
@@ -493,6 +519,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         actorName,
         `Восстановление V${version.number}`,
         version.number,
+        version.sources ?? null,
       );
     });
   }
@@ -503,21 +530,49 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     try {
       // A terminated worker must not leave the workspace locked forever. Never retry a paid call automatically.
       await this.db.query(
-        `UPDATE cc_preparation_runs SET status='failed', error='Обработка прервалась. Повторите запуск.', input_context=NULL, finished_at=now() WHERE status='processing' AND started_at < now()-interval '5 minutes'`,
+        `UPDATE cc_preparation_runs SET status='failed', error='Обработка прервалась. Повторите запуск.', input_context=NULL, finished_at=now() WHERE status='processing' AND COALESCE(heartbeat_at,started_at) < now()-interval '5 minutes'`,
       );
       await this.db.query(
         `UPDATE cc_preparation_runs SET status='failed', error='Истекло время ожидания обработки. Повторите запуск.', input_context=NULL, finished_at=now() WHERE status='queued' AND created_at < now()-interval '30 minutes'`,
       );
       if (!this.ai.configured) return;
       const [run] = await this.db.query<Run[]>(
-        `WITH claimed AS (UPDATE cc_preparation_runs SET status='processing',started_at=now() WHERE id=(SELECT id FROM cc_preparation_runs WHERE status='queued' AND provider=$1 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *) SELECT * FROM claimed`,
+        `WITH claimed AS (UPDATE cc_preparation_runs SET status='processing',started_at=now(),heartbeat_at=now() WHERE id=(SELECT id FROM cc_preparation_runs WHERE status='queued' AND provider=$1 ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *) SELECT * FROM claimed`,
         [this.ai.name],
       );
       if (!run) return;
+      const heartbeat = setInterval(() => {
+        void this.db
+          .query(
+            `UPDATE cc_preparation_runs SET heartbeat_at=now() WHERE id=$1 AND status='processing'`,
+            [run.id],
+          )
+          .catch(() => undefined);
+      }, 15000);
+      heartbeat.unref();
       try {
+        const progress = async (value: PreparationProgress) => {
+          const rows = await this.db.query<Array<{ id: string }>>(
+            `UPDATE cc_preparation_runs SET progress=$2::jsonb,heartbeat_at=now() WHERE id=$1 AND status='processing' RETURNING id`,
+            [run.id, JSON.stringify(value)],
+          );
+          if (!rows.length)
+            throw new AiProviderError('Запуск больше не активен');
+        };
+        const resolved = await this.collection.collect(
+          run.workspace_id,
+          run.input_context,
+          progress,
+          AbortSignal.timeout(6 * 60_000),
+        );
+        await this.db.query(
+          `UPDATE cc_preparation_runs SET input_context=$2::jsonb WHERE id=$1 AND status='processing'`,
+          [run.id, JSON.stringify(resolved)],
+        );
         const content = await this.ai.generate(
           run.instruction,
-          run.input_context,
+          resolved,
+          progress,
         );
         await this.db.transaction(async (manager) => {
           await this.lock(manager, run.workspace_id);
@@ -532,6 +587,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             content,
             run.actor_name,
             'Обработка материалов',
+            null,
+            resolved.sources ?? null,
           );
           await manager.query(
             `UPDATE cc_preparation_runs SET status='succeeded',input_context=NULL,finished_at=now() WHERE id=$1`,
@@ -550,6 +607,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
                 : 'AI ещё не подключён. Повторите запуск после подключения.',
           ],
         );
+      } finally {
+        clearInterval(heartbeat);
       }
     } finally {
       this.working = false;

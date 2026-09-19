@@ -12,12 +12,14 @@ import { PreparedDocument } from "./prepared-document";
 import { ContentCenterBreadcrumbs } from "./content-center-breadcrumbs";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
+import { SourceRegistry } from "./source-registry";
 import { ResearchView } from "./research-view";
 import { CreationView } from "./creation-view";
 import {
   SOURCE_CATEGORIES,
   type ProjectMaterial as Material,
   type SourceCategory,
+  type SourceSnapshot,
 } from "./materials";
 import { appendDictation, preparationSteps } from "./preparation-state";
 import {
@@ -37,6 +39,7 @@ type Version = {
   reason: string;
   restored_from: number | null;
   content?: string;
+  sources?: SourceSnapshot[];
 };
 type Overview = {
   materials: Material[];
@@ -46,6 +49,7 @@ type Overview = {
     id: string;
     status: "queued" | "processing" | "succeeded" | "failed";
     error: string | null;
+    progress?: { message: string } | null;
   } | null;
   ai: { connected: boolean };
   draft: { instruction: string; without_materials: boolean; revision: number };
@@ -163,6 +167,9 @@ export function ContentCenterView({
   const [screen, setScreen] = useState<Screen>("root");
   const [versionId, setVersionId] = useState<string | null>(null);
   const [document, setDocument] = useState<Version | null>(null);
+  const [sourceDetails, setSourceDetails] = useState<SourceSnapshot | null>(
+    null,
+  );
   const [instruction, setInstruction] = useState("");
   const instructionRef = useRef("");
   const [voiceActive, setVoiceActive] = useState(false);
@@ -468,6 +475,14 @@ export function ContentCenterView({
                   materials={data.materials}
                   busy={busy}
                   base={base}
+                  showSources={(item) =>
+                    void act(async () => {
+                      const row = await request<Material>(
+                        `${base}/materials/${item.id}`,
+                      );
+                      setSourceDetails(row.site_pages ?? null);
+                    })
+                  }
                   add={(kind, urlCategory) => {
                     setMaterial({ ...blankMaterial(), kind, urlCategory });
                     setDialogError("");
@@ -638,7 +653,8 @@ export function ContentCenterView({
                         {data.run.status === "queued"
                           ? "Задача в очереди. Можно уйти со страницы — обработка продолжится."
                           : data.run.status === "processing"
-                            ? "AI готовит документ. Текущая версия остаётся доступной."
+                            ? (data.run.progress?.message ??
+                              "AI готовит документ. Текущая версия остаётся доступной.")
                             : data.run.status === "failed"
                               ? data.run.error
                               : "Обработка завершена. Новая версия доступна ниже."}
@@ -847,6 +863,7 @@ export function ContentCenterView({
                     )}
                   </div>
                   <PreparedDocument content={document.content ?? ""} />
+                  <SourceRegistry sources={document.sources ?? []} />
                 </>
               )}
             </article>
@@ -854,6 +871,15 @@ export function ContentCenterView({
         </>
       )}
 
+      {sourceDetails && (
+        <Dialog
+          title="Источники и охват"
+          busy={false}
+          close={() => setSourceDetails(null)}
+        >
+          <SourceRegistry sources={[sourceDetails]} />
+        </Dialog>
+      )}
       {material && (
         <Dialog
           title={material.id ? "Изменить материал" : "Добавить материал"}
@@ -928,7 +954,9 @@ export function ContentCenterView({
                     </select>
                   </label>
                   <label className={styles.field}>
-                    Адрес страницы
+                    {material.urlCategory === "site"
+                      ? "Адрес сайта"
+                      : "Адрес страницы"}
                     <input
                       type="url"
                       required
@@ -941,9 +969,16 @@ export function ContentCenterView({
                     />
                   </label>
                   <p className={styles.muted}>
-                    Сохраним ссылку и попробуем прочитать одну публичную
-                    HTTPS-страницу. Если сайт закрывает доступ или требует
-                    JavaScript, ссылка останется в материалах с предупреждением.
+                    {material.urlCategory === "site" ? (
+                      "При запуске обработки автоматически соберём основные страницы о компании и продукте. Блог и новости прочитаем выборочно. Выбирать страницы вручную не нужно."
+                    ) : (
+                      <>
+                        Сохраним ссылку и попробуем прочитать одну публичную
+                        HTTPS-страницу. Если сайт закрывает доступ или требует
+                        JavaScript, ссылка останется в материалах с
+                        предупреждением.
+                      </>
+                    )}
                     Добавьте недоступный текст вручную. При сохранении ссылка
                     читается заново.
                   </p>
@@ -1002,7 +1037,11 @@ export function ContentCenterView({
         <GlobalPromptPicker
           close={() => setPromptsOpen(false)}
           onSelect={(content) => {
-            if (instruction.trim() && !window.confirm("Заменить текущую инструкцию текстом промпта?")) return;
+            if (
+              instruction.trim() &&
+              !window.confirm("Заменить текущую инструкцию текстом промпта?")
+            )
+              return;
             changeInstruction(content);
             setPromptsOpen(false);
           }}
