@@ -67,6 +67,12 @@ export class PromptDto {
 }
 
 export class PreparationDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(160)
+  promptTitle?: string;
+
   @Transform(trim)
   @IsString()
   @MinLength(1)
@@ -78,6 +84,12 @@ export class PreparationDto {
 }
 
 export class PreparationDraftDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(160)
+  promptTitle?: string;
+
   @IsString()
   @MaxLength(12000)
   instruction!: string;

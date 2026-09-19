@@ -29,6 +29,10 @@ import {
 } from "./navigation";
 import styles from "./content-center-view.module.css";
 import { GlobalPromptPicker } from "./global-prompt-picker";
+import {
+  preparationDraftTitle,
+  preparationVersionLabel,
+} from "./preparation-version";
 
 type Prompt = { id: string; title: string; content: string };
 type Version = {
@@ -40,6 +44,8 @@ type Version = {
   restored_from: number | null;
   content?: string;
   sources?: SourceSnapshot[];
+  prompt_title?: string | null;
+  instruction?: string | null;
 };
 type Overview = {
   materials: Material[];
@@ -52,7 +58,12 @@ type Overview = {
     progress?: { message: string } | null;
   } | null;
   ai: { connected: boolean };
-  draft: { instruction: string; without_materials: boolean; revision: number };
+  draft: {
+    instruction: string;
+    prompt_title?: string | null;
+    without_materials: boolean;
+    revision: number;
+  };
 };
 type MaterialDraft = {
   id?: string;
@@ -171,6 +182,7 @@ export function ContentCenterView({
     null,
   );
   const [instruction, setInstruction] = useState("");
+  const [promptTitle, setPromptTitle] = useState("");
   const instructionRef = useRef("");
   const [voiceActive, setVoiceActive] = useState(false);
   const [withoutMaterials, setWithoutMaterials] = useState(false);
@@ -210,6 +222,7 @@ export function ContentCenterView({
       .then((payload) => {
         if (!active) return;
         setInstruction(payload.draft.instruction);
+        setPromptTitle(preparationDraftTitle(payload.draft, payload.prompts));
         instructionRef.current = payload.draft.instruction;
         setWithoutMaterials(
           payload.materials.length ? false : payload.draft.without_materials,
@@ -310,6 +323,7 @@ export function ContentCenterView({
   async function saveDraft() {
     const result = await request<{ revision: number }>(`${base}/draft`, "PUT", {
       instruction,
+      promptTitle,
       withoutMaterials: data?.materials.length ? false : withoutMaterials,
       revision: draftRevision,
     });
@@ -546,6 +560,20 @@ export function ContentCenterView({
                     корректировки предыдущего результата.
                   </p>
                   <label className={styles.field}>
+                    Название запроса
+                    <input
+                      disabled={busy}
+                      value={promptTitle}
+                      maxLength={160}
+                      placeholder="Например, Анализ компании"
+                      onChange={(event) => {
+                        setPromptTitle(event.target.value);
+                        setDirty(true);
+                        setNotice("");
+                      }}
+                    />
+                  </label>
+                  <label className={styles.field}>
                     Ваша инструкция
                     <textarea
                       disabled={busy}
@@ -592,6 +620,7 @@ export function ContentCenterView({
                           if (dirty) await saveDraft();
                           await request(`${base}/runs`, "POST", {
                             instruction,
+                            promptTitle,
                             withoutMaterials: data.materials.length
                               ? false
                               : withoutMaterials,
@@ -727,7 +756,7 @@ export function ContentCenterView({
                               className={styles.link}
                               onClick={() => navigate("document", version.id)}
                             >
-                              Открыть версию {version.number} ↗
+                              {preparationVersionLabel(version)} ↗
                             </button>
                             {version.id === latest?.id && (
                               <span className={styles.badge}>Текущая</span>
@@ -759,7 +788,7 @@ export function ContentCenterView({
                   <table>
                     <thead>
                       <tr>
-                        <th>Версия</th>
+                        <th>Запрос и версия</th>
                         <th>Создана</th>
                         <th>Пользователь</th>
                         <th>Основание</th>
@@ -770,7 +799,7 @@ export function ContentCenterView({
                       {data.versions.map((v) => (
                         <tr key={v.id}>
                           <td>
-                            V{v.number}{" "}
+                            {preparationVersionLabel(v)}{" "}
                             {v.id === latest?.id && (
                               <span className={styles.badge}>Текущая</span>
                             )}
@@ -811,6 +840,7 @@ export function ContentCenterView({
                 <>
                   <div className={styles.cardHead}>
                     <div>
+                      <h2>{preparationVersionLabel(document)}</h2>
                       <span className={styles.badge}>
                         V{document.number} ·{" "}
                         {document.id === latest?.id
@@ -834,6 +864,12 @@ export function ContentCenterView({
                       </button>
                     )}
                   </div>
+                  {document.instruction && (
+                    <details className={styles.versionInstruction}>
+                      <summary>Промпт этого запроса</summary>
+                      <pre>{document.instruction}</pre>
+                    </details>
+                  )}
                   <PreparedDocument content={document.content ?? ""} />
                   <SourceRegistry sources={document.sources ?? []} />
                 </>
@@ -1008,13 +1044,14 @@ export function ContentCenterView({
       {promptsOpen && (
         <GlobalPromptPicker
           close={() => setPromptsOpen(false)}
-          onSelect={(content) => {
+          onSelect={(content, title) => {
             if (
               instruction.trim() &&
               !window.confirm("Заменить текущую инструкцию текстом промпта?")
             )
               return;
             changeInstruction(content);
+            setPromptTitle(title);
             setPromptsOpen(false);
           }}
         />

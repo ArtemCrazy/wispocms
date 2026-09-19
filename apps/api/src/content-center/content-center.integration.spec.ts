@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
+import { PreparationRequestLabels1790659200000 } from '../database/migrations/1790659200000-PreparationRequestLabels';
 import { SiteCrawler, type SitePage } from './site-crawler';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -71,6 +72,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       await new ContentCenterSourceFiles1790107200000().up(runner);
       await new GlobalPromptLibrary1790486400000().up(runner);
       await new ContentCenterSiteImports1790572800000().up(runner);
+      await new PreparationRequestLabels1790659200000().up(runner);
     } finally {
       await runner.release();
     }
@@ -111,6 +113,183 @@ integration('Content Center / isolated PostgreSQL', () => {
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
+  });
+
+  it('snapshots request names and instructions through queueing, library edits and restoration', async () => {
+    const library = new PlatformPromptsService(db);
+    const prompt = await library.create({
+      title: 'Анализ компании',
+      content: 'Original task',
+    });
+    const task = {
+      instruction: 'Original task with my changes',
+      promptTitle: prompt.title,
+      withoutMaterials: true,
+    };
+    await service.saveDraft(workspace, employee, { ...task, revision: 0 });
+    expect(
+      (await service.overview(workspace, employee)).draft.prompt_title,
+    ).toBe(prompt.title);
+    await service.start(workspace, employee, task);
+    await service.saveDraft(workspace, employee, {
+      ...task,
+      promptTitle: 'Следующая задача',
+      revision: 1,
+    });
+    await library.update(prompt.id, {
+      title: 'New library title',
+      content: 'New template',
+      revision: 1,
+    });
+    await library.remove(prompt.id, 2);
+    await service.processNext();
+    const first = (await service.overview(workspace, employee)).versions[0];
+    expect(first.prompt_title).toBe('Анализ компании');
+    expect(first).not.toHaveProperty('instruction');
+    expect(
+      await service.getVersion(workspace, first.id, employee),
+    ).toMatchObject({
+      prompt_title: 'Анализ компании',
+      instruction: task.instruction,
+    });
+    expect(generate.mock.calls[0][0].instruction).toBe(task.instruction);
+    await service.start(workspace, employee, {
+      ...task,
+      promptTitle: 'Другой запрос',
+    });
+    await service.processNext();
+    const restored = await service.restore(workspace, first.id, employee, 2);
+    expect(
+      await service.getVersion(workspace, restored.id, employee),
+    ).toMatchObject({
+      number: 3,
+      restored_from: 1,
+      prompt_title: 'Анализ компании',
+      instruction: task.instruction,
+    });
+    expect((await service.overview(otherWorkspace, admin)).versions).toEqual(
+      [],
+    );
+    await expect(
+      service.getVersion(otherWorkspace, first.id, employee),
+    ).rejects.toThrow('недоступно');
+    await expect(
+      service.getVersion(otherWorkspace, first.id, admin),
+    ).rejects.toThrow('не найдена');
+  });
+
+  it('allows unnamed requests and preserves draft title concurrency', async () => {
+    await service.saveDraft(workspace, employee, {
+      instruction: 'Task',
+      promptTitle: 'First',
+      withoutMaterials: true,
+      revision: 0,
+    });
+    await service.saveDraft(workspace, employee, {
+      instruction: 'Task',
+      promptTitle: 'Second',
+      withoutMaterials: true,
+      revision: 1,
+    });
+    await expect(
+      service.saveDraft(workspace, employee, {
+        instruction: 'Task',
+        promptTitle: 'Stale',
+        withoutMaterials: true,
+        revision: 1,
+      }),
+    ).rejects.toThrow('другим сотрудником');
+    expect(
+      (await service.overview(workspace, employee)).draft.prompt_title,
+    ).toBe('Second');
+    await service.start(workspace, employee, {
+      instruction: 'My task',
+      withoutMaterials: true,
+    });
+    await service.processNext();
+    const version = (await service.overview(workspace, employee)).versions[0];
+    expect(version.prompt_title).toBe('Свой запрос');
+    expect(
+      (await service.getVersion(workspace, version.id, employee)).instruction,
+    ).toBe('My task');
+  });
+
+  it('backfills only unambiguous run and prompt matches without changing legacy results', async () => {
+    const runner = db.createQueryRunner();
+    const migration = new PreparationRequestLabels1790659200000();
+    try {
+      await migration.down(runner);
+      await db.query(
+        `INSERT INTO cc_preparation_versions (workspace_id,number,content,actor_name,reason) VALUES ($1,1,'Legacy result','Employee','Обработка материалов')`,
+        [workspace],
+      );
+      await db.query(
+        `INSERT INTO platform_prompts (title,content) VALUES ('Анализ компании','Exact task'),('First title','Ambiguous task'),('Second title','Ambiguous task')`,
+      );
+      await db.query(
+        `INSERT INTO cc_preparation_versions (workspace_id,number,content,actor_name,reason,created_at) VALUES
+        ($1,2,'Matched result','Employee','Обработка материалов','2026-09-19T12:00:00Z'),
+        ($1,3,'Ambiguous result','Employee','Обработка материалов','2026-09-19T13:00:00Z'),
+        ($1,4,'No local run','Employee','Обработка материалов','2026-09-19T14:00:00Z'),
+        ($1,5,'Ambiguous runs','Employee','Обработка материалов','2026-09-19T15:00:00Z')`,
+        [workspace],
+      );
+      await db.query(
+        `INSERT INTO cc_preparation_runs (workspace_id,status,actor_name,instruction,provider,finished_at) VALUES
+        ($1,'succeeded','Employee','Exact task','test','2026-09-19T12:00:00Z'),
+        ($1,'succeeded','Employee','Ambiguous task','test','2026-09-19T13:00:00Z'),
+        ($2,'succeeded','Employee','Exact task','test','2026-09-19T14:00:00Z'),
+        ($1,'succeeded','Employee','Exact task','test','2026-09-19T15:00:00Z'),
+        ($1,'succeeded','Employee','Exact task','test','2026-09-19T15:00:00Z')`,
+        [workspace, otherWorkspace],
+      );
+    } finally {
+      await migration.up(runner);
+      await runner.release();
+    }
+    const rows = await db.query<
+      Array<{
+        number: number;
+        content: string;
+        prompt_title: string | null;
+        instruction: string | null;
+      }>
+    >(
+      `SELECT number,content,prompt_title,instruction FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number`,
+      [workspace],
+    );
+    expect(rows).toEqual([
+      {
+        number: 1,
+        content: 'Legacy result',
+        prompt_title: null,
+        instruction: null,
+      },
+      {
+        number: 2,
+        content: 'Matched result',
+        prompt_title: 'Анализ компании',
+        instruction: 'Exact task',
+      },
+      {
+        number: 3,
+        content: 'Ambiguous result',
+        prompt_title: null,
+        instruction: 'Ambiguous task',
+      },
+      {
+        number: 4,
+        content: 'No local run',
+        prompt_title: null,
+        instruction: null,
+      },
+      {
+        number: 5,
+        content: 'Ambiguous runs',
+        prompt_title: null,
+        instruction: null,
+      },
+    ]);
   });
 
   it('shares prompts across workspaces without sharing project data or rewriting copied tasks', async () => {

@@ -6,7 +6,7 @@ import styles from "./content-center-view.module.css";
 
 export function GlobalPromptPicker({ close, onSelect }: {
   close: () => void;
-  onSelect: (content: string) => void;
+  onSelect: (content: string, title: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [prompts, setPrompts] = useState<PlatformPrompt[] | null>(null);
@@ -32,7 +32,7 @@ export function GlobalPromptPicker({ close, onSelect }: {
       {selected && <div>
         <h3>{selected.title}</h3>
         <div className={styles.promptText}>{selected.content}</div>
-        <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => onSelect(selected.content)}>Использовать в задаче</button></div>
+        <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => onSelect(selected.content, selected.title)}>Использовать в задаче</button></div>
         <p className={styles.muted}>Текст скопируется в вашу инструкцию. Его можно изменить для этой задачи — общий промпт и другие проекты не изменятся.</p>
       </div>}
     </div>}

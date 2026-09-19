@@ -31,6 +31,7 @@ import { CreationPublicationTargets1790340000000 } from './migrations/1790340000
 import { DeepseekIntegration1790400000000 } from './migrations/1790400000000-DeepseekIntegration';
 import { GlobalPromptLibrary1790486400000 } from './migrations/1790486400000-GlobalPromptLibrary';
 import { ContentCenterSiteImports1790572800000 } from './migrations/1790572800000-ContentCenterSiteImports';
+import { PreparationRequestLabels1790659200000 } from './migrations/1790659200000-PreparationRequestLabels';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -68,6 +69,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       DeepseekIntegration1790400000000,
       GlobalPromptLibrary1790486400000,
       ContentCenterSiteImports1790572800000,
+      PreparationRequestLabels1790659200000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

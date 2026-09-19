@@ -7,6 +7,10 @@ import {
   preparationSteps,
   speechErrorMessage,
 } from "../src/app/content-center/preparation-state.ts";
+import {
+  preparationDraftTitle,
+  preparationVersionLabel,
+} from "../src/app/content-center/preparation-version.ts";
 
 test("preparation opens saved results from history without a duplicate result card", () => {
   const view = readFileSync(
@@ -19,8 +23,49 @@ test("preparation opens saved results from history without a duplicate result ca
   assert.doesNotMatch(view, /Открыть обработанную информацию ↗/);
   assert.doesNotMatch(view, /<h2>Обработанная информация<\/h2>/);
   assert.match(view, /<h2>История версий<\/h2>/);
-  assert.match(view, /Открыть версию \{version\.number\} ↗/);
+  assert.match(view, /\{preparationVersionLabel\(version\)\} ↗/);
   assert.match(view, /onClick=\{\(\) => navigate\("document", version\.id\)\}/);
+});
+
+test("version labels use the saved request name, not a current template or a guessed legacy name", () => {
+  assert.equal(
+    preparationVersionLabel({ number: 3, prompt_title: "Анализ компании" }),
+    "Анализ компании · версия 3",
+  );
+  assert.equal(
+    preparationVersionLabel({ number: 1, prompt_title: null }),
+    "Запрос без сохранённого названия · версия 1",
+  );
+  assert.equal(
+    preparationVersionLabel({ number: 2 }),
+    "Запрос без сохранённого названия · версия 2",
+  );
+});
+
+test("draft prefill preserves a snapshot and only matches unambiguous exact copied prompts", () => {
+  const prompts = [{ title: "Анализ компании", content: "Task" }];
+  assert.equal(
+    preparationDraftTitle(
+      { prompt_title: "Saved title", instruction: "Task" },
+      prompts,
+    ),
+    "Saved title",
+  );
+  assert.equal(
+    preparationDraftTitle({ instruction: "Task" }, prompts),
+    "Анализ компании",
+  );
+  assert.equal(
+    preparationDraftTitle({ instruction: "Different task" }, prompts),
+    "",
+  );
+  assert.equal(
+    preparationDraftTitle({ instruction: "Task" }, [
+      ...prompts,
+      { title: "Another name", content: "Task" },
+    ]),
+    "",
+  );
 });
 
 test("dictation appends to the current instruction without replacing manual edits", () => {

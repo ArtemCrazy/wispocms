@@ -65,6 +65,8 @@ type Version = {
   restored_from: number | null;
   created_at: Date;
   sources?: SourceSnapshot[] | null;
+  prompt_title: string | null;
+  instruction: string | null;
 };
 type RunSummary = {
   id: string;
@@ -77,6 +79,7 @@ type RunSummary = {
 };
 type Draft = {
   instruction: string;
+  prompt_title: string | null;
   without_materials: boolean;
   revision: number;
 };
@@ -84,6 +87,7 @@ type Run = {
   id: string;
   workspace_id: string;
   instruction: string;
+  prompt_title: string | null;
   actor_name: string;
   input_context: PreparationInput;
   status: string;
@@ -155,8 +159,10 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       this.db.query<Array<{ id: string; title: string; content: string }>>(
         `SELECT id, title, content FROM platform_prompts ORDER BY created_at DESC,id`,
       ),
-      this.db.query<Array<Omit<Version, 'workspace_id' | 'content'>>>(
-        `SELECT id, number, actor_name, reason, restored_from, created_at FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC`,
+      this.db.query<
+        Array<Omit<Version, 'workspace_id' | 'content' | 'instruction'>>
+      >(
+        `SELECT id, number, actor_name, reason, restored_from, created_at, prompt_title FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC`,
         [workspaceId],
       ),
       this.db.query<RunSummary[]>(
@@ -164,7 +170,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         [workspaceId],
       ),
       this.db.query<Draft[]>(
-        `SELECT instruction, without_materials, revision FROM cc_preparation_drafts WHERE workspace_id=$1`,
+        `SELECT instruction, prompt_title, without_materials, revision FROM cc_preparation_drafts WHERE workspace_id=$1`,
         [workspaceId],
       ),
     ]);
@@ -175,6 +181,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       run: runs[0] ?? null,
       draft: drafts[0] ?? {
         instruction: '',
+        prompt_title: null,
         without_materials: false,
         revision: 0,
       },
@@ -348,15 +355,27 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       await this.lock(manager, workspaceId);
       const rows = await manager.query<Array<{ revision: number }>>(
         `
-        INSERT INTO cc_preparation_drafts (workspace_id,instruction,without_materials)
-        SELECT $1,$2,$3 WHERE $4::integer=0
+        INSERT INTO cc_preparation_drafts (workspace_id,instruction,without_materials,prompt_title)
+        SELECT $1,$2,$3,$5 WHERE $4::integer=0
         ON CONFLICT (workspace_id) DO NOTHING RETURNING revision`,
-        [workspaceId, dto.instruction, dto.withoutMaterials, dto.revision],
+        [
+          workspaceId,
+          dto.instruction,
+          dto.withoutMaterials,
+          dto.revision,
+          dto.promptTitle?.trim() || null,
+        ],
       );
       if (rows.length) return rows[0];
       const updated = await manager.query<Array<{ revision: number }>>(
-        `WITH changed AS (UPDATE cc_preparation_drafts SET instruction=$2, without_materials=$3, revision=revision+1 WHERE workspace_id=$1 AND revision=$4 RETURNING revision) SELECT * FROM changed`,
-        [workspaceId, dto.instruction, dto.withoutMaterials, dto.revision],
+        `WITH changed AS (UPDATE cc_preparation_drafts SET instruction=$2, without_materials=$3, prompt_title=$5, revision=revision+1 WHERE workspace_id=$1 AND revision=$4 RETURNING revision) SELECT * FROM changed`,
+        [
+          workspaceId,
+          dto.instruction,
+          dto.withoutMaterials,
+          dto.revision,
+          dto.promptTitle?.trim() || null,
+        ],
       );
       if (!updated.length)
         throw new ConflictException(
@@ -428,13 +447,14 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         input.files = files;
       }
       const [row] = await manager.query<RunSummary[]>(
-        `INSERT INTO cc_preparation_runs (workspace_id,status,actor_name,instruction,input_context,provider) VALUES ($1,'queued',$2,$3,$4::jsonb,$5) RETURNING ${RUN_FIELDS}`,
+        `INSERT INTO cc_preparation_runs (workspace_id,status,actor_name,instruction,input_context,provider,prompt_title) VALUES ($1,'queued',$2,$3,$4::jsonb,$5,$6) RETURNING ${RUN_FIELDS}`,
         [
           workspaceId,
           actorName,
           dto.instruction,
           JSON.stringify(input),
           this.ai.name,
+          dto.promptTitle?.trim() || 'Свой запрос',
         ],
       );
       return row;
@@ -470,11 +490,13 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     reason: string,
     restoredFrom: number | null = null,
     sources: SourceSnapshot[] | null = null,
+    promptTitle: string | null = null,
+    instruction: string | null = null,
   ) {
     // Caller holds the workspace transaction lock. MAX+1 therefore cannot race.
     const [row] = await manager.query<Array<{ id: string; number: number }>>(
-      `INSERT INTO cc_preparation_versions (workspace_id,number,content,actor_name,reason,restored_from,sources)
-      SELECT $1,COALESCE(MAX(number),0)+1,$2,$3,$4,$5,$6::jsonb FROM cc_preparation_versions WHERE workspace_id=$1 RETURNING id,number`,
+      `INSERT INTO cc_preparation_versions (workspace_id,number,content,actor_name,reason,restored_from,sources,prompt_title,instruction)
+      SELECT $1,COALESCE(MAX(number),0)+1,$2,$3,$4,$5,$6::jsonb,$7,$8 FROM cc_preparation_versions WHERE workspace_id=$1 RETURNING id,number`,
       [
         workspaceId,
         content,
@@ -482,6 +504,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         reason,
         restoredFrom,
         JSON.stringify(sources),
+        promptTitle,
+        instruction,
       ],
     );
     return row;
@@ -520,6 +544,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         `Восстановление V${version.number}`,
         version.number,
         version.sources ?? null,
+        version.prompt_title,
+        version.instruction,
       );
     });
   }
@@ -589,6 +615,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             'Обработка материалов',
             null,
             resolved.sources ?? null,
+            run.prompt_title,
+            run.instruction,
           );
           await manager.query(
             `UPDATE cc_preparation_runs SET status='succeeded',input_context=NULL,finished_at=now() WHERE id=$1`,
