@@ -35,7 +35,7 @@ import {
   publicMaterialUrl,
   readPublicMaterial,
 } from './public-material';
-import { validateMaterialFile, WORKSPACE_FILES_LIMIT } from './material-file';
+import { validateMaterialFile } from './material-file';
 import type { MaterialUpload } from './material-file';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
@@ -204,18 +204,12 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     const file = validateMaterialFile(upload);
     return this.db.transaction(async (manager) => {
       await this.lock(manager, workspaceId);
-      const [usage] = await manager.query<
-        Array<{ total: string; bytes: string }>
-      >(
-        `SELECT count(*) AS total, coalesce(sum(file_size),0) AS bytes FROM cc_materials WHERE workspace_id=$1`,
+      const [usage] = await manager.query<Array<{ total: string }>>(
+        `SELECT count(*) AS total FROM cc_materials WHERE workspace_id=$1`,
         [workspaceId],
       );
       if (Number(usage.total) >= 50)
         throw new BadRequestException('Можно добавить до 50 материалов');
-      if (Number(usage.bytes) + file.size > WORKSPACE_FILES_LIMIT)
-        throw new BadRequestException(
-          'Общий размер файлов пространства не должен превышать 50 МБ',
-        );
       const [row] = await manager.query<Array<{ id: string }>>(
         `INSERT INTO cc_materials (workspace_id,title,kind,file_name,content,file_data,file_size,media_type) VALUES ($1,$2,'file',$3,$4,$5,$6,$7) RETURNING id`,
         [

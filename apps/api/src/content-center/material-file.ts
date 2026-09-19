@@ -3,7 +3,6 @@ import { extname } from 'node:path';
 import { materialText } from './public-material';
 
 export const MATERIAL_FILE_LIMIT = 10 * 1024 * 1024;
-export const WORKSPACE_FILES_LIMIT = 50 * 1024 * 1024;
 export type MaterialUpload = { originalname: string; buffer: Buffer };
 
 const mediaTypes: Record<string, string> = {

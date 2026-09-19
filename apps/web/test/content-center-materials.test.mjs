@@ -49,6 +49,7 @@ test('source collection exposes categorized links and a real file input', () => 
   assert.ok(html.includes(materials.FILE_ACCEPT));
   assert.equal((html.match(/<article\b/g) ?? []).length, 1);
   assert.match(html, /<h3>Файлы и тексты проекта<\/h3>/);
+  assert.doesNotMatch(html, /из 50 МБ/);
   assert.match(html, /Добавить текст/);
   assert.doesNotMatch(html, /Текстовые материалы/);
   assert.ok(html.indexOf('Другие источники') < html.indexOf('<h3>Файлы и тексты проекта'));
@@ -90,6 +91,7 @@ test('saved originals link to private downloads and never claim AI processing', 
   const html = render([{ id: 'file-id', kind: 'file', title: 'Бриф.pdf', file_name: 'Бриф.pdf', file_size: 24576, characters: 0, has_original: true, created_at: '2026-09-19T00:00:00Z' }]);
   assert.match(html, /href="\/api\/workspaces\/one\/content-center\/materials\/file-id\/file"/);
   assert.match(html, /24 КБ/);
+  assert.doesNotMatch(html, /из 50 МБ/);
   assert.match(html, /Оригинал сохранён/);
   assert.match(html, /обработка после подключения AI/);
 });

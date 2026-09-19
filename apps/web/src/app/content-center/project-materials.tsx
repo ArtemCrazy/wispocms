@@ -30,7 +30,6 @@ export function ProjectMaterials({
   showSources?: (material: ProjectMaterial) => void;
 }) {
   const input = useRef<HTMLInputElement>(null);
-  const files = materials.filter((m) => m.kind === "file");
   const documents = materials.filter(
     (m) => m.kind === "file" || m.kind === "text",
   );
@@ -132,12 +131,6 @@ export function ProjectMaterials({
       >
         <div className={styles.cardHead}>
           <h3>Файлы и тексты проекта</h3>
-          <span className={styles.muted}>
-            {fileSize(
-              files.reduce((sum, file) => sum + (file.file_size ?? 0), 0),
-            )}{" "}
-            из 50 МБ
-          </span>
         </div>
         <p className={styles.muted}>
           Загрузите документы, таблицы, презентации и изображения или добавьте

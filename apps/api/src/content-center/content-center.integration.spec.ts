@@ -654,7 +654,7 @@ integration('Content Center / isolated PostgreSQL', () => {
     ).rejects.toThrow('не умеет');
   });
 
-  it('serializes file quota checks and preserves valid originals on rejection', async () => {
+  it('accepts parallel uploads above 50 MB total and preserves their original bytes', async () => {
     const buffer = Buffer.alloc(10 * 1024 * 1024);
     buffer.write('%PDF-');
     for (let i = 0; i < 4; i++)
@@ -670,11 +670,18 @@ integration('Content Center / isolated PostgreSQL', () => {
         }),
       ),
     );
-    expect(attempts.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    expect(attempts.filter((r) => r.status === 'rejected')).toHaveLength(1);
-    expect((await service.overview(workspace, admin)).materials).toHaveLength(
-      5,
-    );
+    expect(attempts.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
+    expect(attempts.filter((r) => r.status === 'rejected')).toHaveLength(0);
+    const { materials } = await service.overview(workspace, admin);
+    expect(materials).toHaveLength(6);
+    expect(
+      materials.reduce((sum, material) => sum + Number(material.file_size), 0),
+    ).toBe(60 * 1024 * 1024);
+    expect(
+      (await service.getFile(workspace, materials[0].id, admin)).data.equals(
+        buffer,
+      ),
+    ).toBe(true);
   });
 
   it('isolates overview, source, prompt, draft, version and run access by workspace', async () => {
