@@ -138,13 +138,6 @@ export function SourceRefresh({
         youtube) && (
         <>
           <div className={styles.sourceRefreshBar}>
-            <span className={styles.muted}>
-              Только сбор{" "}
-              {vk || telegram || instagram || youtube
-                ? "публикаций"
-                : "страниц"}{" "}
-              — без AI и изменения версий.
-            </span>
             <button
               type="button"
               disabled={

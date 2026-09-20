@@ -23,10 +23,10 @@ const render = changes => renderToStaticMarkup(React.createElement(component.Sou
   request: () => { throw new Error('render must not start a request'); }, onUpdated: async () => {},
 }));
 
-test('refresh is available before the first crawl and explicitly does not start AI or change versions', () => {
+test('refresh is available before the first crawl without rendering the obsolete collection hint', () => {
   const html = render({ site_pages: null });
   assert.match(html, /<button type="button">Обновить сбор<\/button>/);
-  assert.match(html, /без AI и изменения версий/);
+  assert.doesNotMatch(html, /Только сбор|без AI и изменения версий/);
   assert.match(html, /Сохранённого сбора пока нет/);
 });
 test('queued and processing states disable resubmission and keep the previous snapshot readable', () => {
@@ -52,7 +52,6 @@ test('Telegram has an immediately available refresh without key, bot or connecti
   assert.match(html, /<button type="button">Обновить сбор<\/button>/);
   assert.match(html, /без ограничения по давности/);
   assert.doesNotMatch(html, /type="checkbox"|Подключить сообщество|Проверяем настройки VK/);
-  assert.match(html, /без AI и изменения версий/);
 });
 
 test('VK waits only for common-key readiness and has no manual connection step', () => {
@@ -70,7 +69,6 @@ test('Instagram and YouTube expose collection but wait for verified configuratio
     assert.ok(html.includes(network));
     assert.match(html, /disabled="">Обновить сбор/);
     assert.match(html, /Проверяем подключение/);
-    assert.match(html, /без AI и изменения версий/);
   }
 });
 

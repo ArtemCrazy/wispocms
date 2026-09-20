@@ -918,7 +918,7 @@
   color: #674ad3;
 }
 .sourceRefreshBar {
-  margin: 12px 0;
+  margin: 0;
 }
 .sourceRefreshBar > button {
   position: absolute;
@@ -1323,8 +1323,9 @@
   .sourceRefreshBar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: 12px;
+    margin: 12px 0;
   }
   .sourceRefreshBar > button {
     position: static;
