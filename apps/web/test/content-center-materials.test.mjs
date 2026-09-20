@@ -12,6 +12,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const target = { exports: {} };
 const require = createRequire(import.meta.url);
 const iconSource = await readFile(new URL('../src/app/content-center/social-icon.tsx', import.meta.url), 'utf8');
+const websiteIconSource = await readFile(new URL('../public/icons/source/website.svg', import.meta.url), 'utf8');
 const iconCompiled = ts.transpileModule(iconSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
 const iconTarget = { exports: {} };
 new Function('require', 'module', 'exports', iconCompiled.outputText)(id => id.endsWith('.css') ? { default: {} } : require(id), iconTarget, iconTarget.exports);
@@ -58,6 +59,11 @@ test('unchecked website exposes the source dialog to start collection without AI
   assert.match(html, /Изменить ссылку/);
   assert.match(html, /Удалить ссылку/);
   assert.match(html, /Информация об источнике/);
+});
+
+test('website icon fills its canvas without the catalogue white tile', () => {
+  assert.match(websiteIconSource, /viewBox="6\.07812 5 19\.842 22\.5"/);
+  assert.doesNotMatch(websiteIconSource, /<rect\b/);
 });
 
 test('source information remains disabled during a pending operation', () => {

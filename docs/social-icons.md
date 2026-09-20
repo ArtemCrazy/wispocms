@@ -27,5 +27,7 @@ Website sources use the HTML icon from Trace Logo’s. It is stored locally as
 `apps/web/public/icons/source/website.svg` and remains decorative in the UI.
 Source page: https://trace-logos.ru/logos/dev/html/
 Original SVG: https://trace-logos.ru/assets/logos/svgs/html.svg
-The artwork is copied without modification; trademark rights remain with their
-rightsholder.
+The catalogue's white 32 × 32 canvas was removed and the viewBox was tightened
+to the shield bounds so the mark fills the same 20 × 20 UI box as the social
+icons. The shield geometry and brand colours remain unchanged; trademark rights
+remain with their rightsholder.
