@@ -13,6 +13,12 @@ import { ContentCenterBreadcrumbs } from "./content-center-breadcrumbs";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
 import { SiteMaterialFields, siteMaterialTitle } from "./site-material-fields";
+import {
+  SocialMaterialFields,
+  socialNetworkForUrl,
+  socialSourceUrl,
+  type SocialNetwork,
+} from "./social-material-fields";
 import { SourceRegistry } from "./source-registry";
 import { SourceRefresh } from "./source-refresh";
 import { ResearchView } from "./research-view";
@@ -198,6 +204,8 @@ export function ContentCenterView({
   const [notice, setNotice] = useState("");
   const [material, setMaterial] = useState<MaterialDraft | null>(null);
   const [siteMaterialMode, setSiteMaterialMode] = useState(false);
+  const [socialMaterialMode, setSocialMaterialMode] = useState(false);
+  const [socialNetwork, setSocialNetwork] = useState<SocialNetwork>("vk");
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
@@ -502,6 +510,10 @@ export function ContentCenterView({
                     })
                   }
                   add={(kind, urlCategory) => {
+                    setSocialMaterialMode(
+                      kind === "url" && urlCategory === "social",
+                    );
+                    setSocialNetwork("vk");
                     setSiteMaterialMode(
                       kind === "url" && urlCategory === "site",
                     );
@@ -515,6 +527,12 @@ export function ContentCenterView({
                       );
                       setSiteMaterialMode(
                         row.kind === "url" && row.url_category === "site",
+                      );
+                      setSocialMaterialMode(
+                        row.kind === "url" && row.url_category === "social",
+                      );
+                      setSocialNetwork(
+                        socialNetworkForUrl(row.source_url ?? ""),
                       );
                       setMaterial({
                         id: row.id,
@@ -914,9 +932,13 @@ export function ContentCenterView({
               ? material.id
                 ? "Изменить сайт"
                 : "Добавить сайт"
-              : material.id
-                ? "Изменить материал"
-                : "Добавить материал"
+              : socialMaterialMode
+                ? material.id
+                  ? "Изменить социальную сеть"
+                  : "Добавить социальную сеть"
+                : material.id
+                  ? "Изменить материал"
+                  : "Добавить материал"
           }
           busy={busy}
           close={() => setMaterial(null)}
@@ -942,7 +964,20 @@ export function ContentCenterView({
                           material.title ||
                           siteMaterialTitle(material.sourceUrl),
                       }
-                    : material,
+                    : socialMaterialMode
+                      ? {
+                          ...material,
+                          kind: "url",
+                          urlCategory: "social",
+                          sourceUrl: socialSourceUrl(
+                            material.sourceUrl,
+                            socialNetwork,
+                          ),
+                          title:
+                            material.title ||
+                            siteMaterialTitle(material.sourceUrl),
+                        }
+                      : material,
                 );
                 await load();
                 setMaterial(null);
@@ -969,6 +1004,19 @@ export function ContentCenterView({
                   onChange={(sourceUrl) =>
                     setMaterial({ ...material, sourceUrl })
                   }
+                />
+              ) : socialMaterialMode ? (
+                <SocialMaterialFields
+                  network={socialNetwork}
+                  sourceUrl={material.sourceUrl}
+                  onNetworkChange={(network) => {
+                    setSocialNetwork(network);
+                    setDialogError("");
+                  }}
+                  onChange={(sourceUrl) => {
+                    setMaterial({ ...material, sourceUrl });
+                    setDialogError("");
+                  }}
                 />
               ) : (
                 <>
@@ -1041,7 +1089,11 @@ export function ContentCenterView({
                         />
                       </label>
                       <p className={styles.muted}>
-                        {isVkMaterial({ kind: material.kind, url_category: material.urlCategory ?? "other", source_url: material.sourceUrl }) ? (
+                        {isVkMaterial({
+                          kind: material.kind,
+                          url_category: material.urlCategory ?? "other",
+                          source_url: material.sourceUrl,
+                        }) ? (
                           "После сохранения подключите VK ключом администратора сообщества. Сбор публикаций запускается отдельно."
                         ) : material.urlCategory === "site" ? (
                           "При запуске обработки автоматически соберём основные страницы о компании и продукте. Блог и новости прочитаем выборочно. Выбирать страницы вручную не нужно."
@@ -1099,7 +1151,9 @@ export function ContentCenterView({
                     ? "Сохраняем…"
                     : siteMaterialMode
                       ? "Сохранить сайт"
-                      : "Сохранить материал"}
+                      : socialMaterialMode
+                        ? "Сохранить"
+                        : "Сохранить материал"}
                 </button>
                 <button
                   type="button"
