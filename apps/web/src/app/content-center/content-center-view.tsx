@@ -12,6 +12,7 @@ import { PreparedDocument } from "./prepared-document";
 import { ContentCenterBreadcrumbs } from "./content-center-breadcrumbs";
 import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
+import { SiteMaterialFields, siteMaterialTitle } from "./site-material-fields";
 import { SourceRegistry } from "./source-registry";
 import { SourceRefresh } from "./source-refresh";
 import { ResearchView } from "./research-view";
@@ -195,6 +196,7 @@ export function ContentCenterView({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [material, setMaterial] = useState<MaterialDraft | null>(null);
+  const [siteMaterialMode, setSiteMaterialMode] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
@@ -499,6 +501,9 @@ export function ContentCenterView({
                     })
                   }
                   add={(kind, urlCategory) => {
+                    setSiteMaterialMode(
+                      kind === "url" && urlCategory === "site",
+                    );
                     setMaterial({ ...blankMaterial(), kind, urlCategory });
                     setDialogError("");
                   }}
@@ -506,6 +511,9 @@ export function ContentCenterView({
                     void act(async () => {
                       const row = await request<Material>(
                         `${base}/materials/${item.id}`,
+                      );
+                      setSiteMaterialMode(
+                        row.kind === "url" && row.url_category === "site",
                       );
                       setMaterial({
                         id: row.id,
@@ -900,7 +908,15 @@ export function ContentCenterView({
       )}
       {material && (
         <Dialog
-          title={material.id ? "Изменить материал" : "Добавить материал"}
+          title={
+            siteMaterialMode
+              ? material.id
+                ? "Изменить сайт"
+                : "Добавить сайт"
+              : material.id
+                ? "Изменить материал"
+                : "Добавить материал"
+          }
           busy={busy}
           close={() => setMaterial(null)}
         >
@@ -916,7 +932,16 @@ export function ContentCenterView({
                 await request(
                   `${base}/materials${material.id ? `/${material.id}` : ""}`,
                   material.id ? "PUT" : "POST",
-                  material,
+                  siteMaterialMode
+                    ? {
+                        ...material,
+                        kind: "url",
+                        urlCategory: "site",
+                        title:
+                          material.title ||
+                          siteMaterialTitle(material.sourceUrl),
+                      }
+                    : material,
                 );
                 await load();
                 setMaterial(null);
@@ -925,106 +950,127 @@ export function ContentCenterView({
             }}
           >
             <fieldset disabled={busy} className={styles.formFields}>
-              {!material.id && (
-                <div className={styles.actions}>
-                  {(["text", "url"] as const).map((kind) => (
-                    <button
-                      type="button"
-                      key={kind}
-                      className={material.kind === kind ? styles.selected : ""}
-                      onClick={() => setMaterial({ ...blankMaterial(), kind })}
-                    >
-                      {{ text: "Текст", url: "Ссылка", file: "Файл" }[kind]}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <label className={styles.field}>
-                Название
-                <input
-                  autoFocus
-                  required
-                  maxLength={160}
-                  value={material.title}
-                  onChange={(e) =>
-                    setMaterial({ ...material, title: e.target.value })
+              {siteMaterialMode ? (
+                <SiteMaterialFields
+                  sourceUrl={material.sourceUrl}
+                  onChange={(sourceUrl) =>
+                    setMaterial({ ...material, sourceUrl })
                   }
                 />
-              </label>
-              {material.kind === "url" ? (
-                <>
-                  <label className={styles.field}>
-                    Категория источника
-                    <select
-                      value={material.urlCategory ?? "other"}
-                      onChange={(event) =>
-                        setMaterial({
-                          ...material,
-                          urlCategory: event.target.value as SourceCategory,
-                        })
-                      }
-                    >
-                      {SOURCE_CATEGORIES.map((category) => (
-                        <option key={category.id} value={category.id}>
-                          {category.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className={styles.field}>
-                    {material.urlCategory === "site"
-                      ? "Адрес сайта"
-                      : "Адрес страницы"}
-                    <input
-                      type="url"
-                      required
-                      maxLength={2048}
-                      value={material.sourceUrl}
-                      placeholder="https://example.ru/about"
-                      onChange={(e) =>
-                        setMaterial({ ...material, sourceUrl: e.target.value })
-                      }
-                    />
-                  </label>
-                  <p className={styles.muted}>
-                    {material.urlCategory === "site" ? (
-                      "При запуске обработки автоматически соберём основные страницы о компании и продукте. Блог и новости прочитаем выборочно. Выбирать страницы вручную не нужно."
-                    ) : (
-                      <>
-                        Сохраним ссылку и попробуем прочитать одну публичную
-                        HTTPS-страницу. Если сайт закрывает доступ или требует
-                        JavaScript, ссылка останется в материалах с
-                        предупреждением.
-                      </>
-                    )}
-                    Добавьте недоступный текст вручную. При сохранении ссылка
-                    читается заново.
-                  </p>
-                  {material.content && (
-                    <details>
-                      <summary>Ранее загруженный текст</summary>
-                      <div className={styles.promptText}>
-                        {material.content}
-                      </div>
-                    </details>
-                  )}
-                </>
               ) : (
                 <>
+                  {!material.id && (
+                    <div className={styles.actions}>
+                      {(["text", "url"] as const).map((kind) => (
+                        <button
+                          type="button"
+                          key={kind}
+                          className={
+                            material.kind === kind ? styles.selected : ""
+                          }
+                          onClick={() =>
+                            setMaterial({ ...blankMaterial(), kind })
+                          }
+                        >
+                          {{ text: "Текст", url: "Ссылка", file: "Файл" }[kind]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <label className={styles.field}>
-                    Текст материала
-                    <textarea
+                    Название
+                    <input
+                      autoFocus
                       required
-                      value={material.content}
+                      maxLength={160}
+                      value={material.title}
                       onChange={(e) =>
-                        setMaterial({ ...material, content: e.target.value })
+                        setMaterial({ ...material, title: e.target.value })
                       }
                     />
                   </label>
-                  <p className={styles.muted}>
-                    Документы и изображения загружаются в разделе «Файлы и
-                    тексты проекта».
-                  </p>
+                  {material.kind === "url" ? (
+                    <>
+                      <label className={styles.field}>
+                        Категория источника
+                        <select
+                          value={material.urlCategory ?? "other"}
+                          onChange={(event) =>
+                            setMaterial({
+                              ...material,
+                              urlCategory: event.target.value as SourceCategory,
+                            })
+                          }
+                        >
+                          {SOURCE_CATEGORIES.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className={styles.field}>
+                        {material.urlCategory === "site"
+                          ? "Адрес сайта"
+                          : "Адрес страницы"}
+                        <input
+                          type="url"
+                          required
+                          maxLength={2048}
+                          value={material.sourceUrl}
+                          placeholder="https://example.ru/about"
+                          onChange={(e) =>
+                            setMaterial({
+                              ...material,
+                              sourceUrl: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <p className={styles.muted}>
+                        {material.urlCategory === "site" ? (
+                          "При запуске обработки автоматически соберём основные страницы о компании и продукте. Блог и новости прочитаем выборочно. Выбирать страницы вручную не нужно."
+                        ) : (
+                          <>
+                            Сохраним ссылку и попробуем прочитать одну публичную
+                            HTTPS-страницу. Если сайт закрывает доступ или
+                            требует JavaScript, ссылка останется в материалах с
+                            предупреждением.
+                          </>
+                        )}
+                        Добавьте недоступный текст вручную. При сохранении
+                        ссылка читается заново.
+                      </p>
+                      {material.content && (
+                        <details>
+                          <summary>Ранее загруженный текст</summary>
+                          <div className={styles.promptText}>
+                            {material.content}
+                          </div>
+                        </details>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <label className={styles.field}>
+                        Текст материала
+                        <textarea
+                          required
+                          value={material.content}
+                          onChange={(e) =>
+                            setMaterial({
+                              ...material,
+                              content: e.target.value,
+                            })
+                          }
+                        />
+                      </label>
+                      <p className={styles.muted}>
+                        Документы и изображения загружаются в разделе «Файлы и
+                        тексты проекта».
+                      </p>
+                    </>
+                  )}
                 </>
               )}
               <div className={styles.actions} style={{ marginTop: 20 }}>
@@ -1035,7 +1081,11 @@ export function ContentCenterView({
                     busy || (material.kind === "file" && !material.fileName)
                   }
                 >
-                  {busy ? "Сохраняем…" : "Сохранить материал"}
+                  {busy
+                    ? "Сохраняем…"
+                    : siteMaterialMode
+                      ? "Сохранить сайт"
+                      : "Сохранить материал"}
                 </button>
                 <button
                   type="button"
