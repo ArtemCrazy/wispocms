@@ -1008,6 +1008,10 @@
   font-weight: 600;
 }
 .sourceDate {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   color: #6c7282;
   font-size: 14px;
   font-weight: 400;
@@ -1023,7 +1027,7 @@
   margin-bottom: 10px;
 }
 
-.sourceToolbar .sourceInfo {
+.sourceDate .sourceInfo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1039,12 +1043,12 @@
   color: #6c7282;
   cursor: pointer;
 }
-.sourceToolbar .sourceInfo:hover,
-.sourceToolbar .sourceInfo[aria-expanded="true"] {
+.sourceDate .sourceInfo:hover,
+.sourceDate .sourceInfo[aria-expanded="true"] {
   background: #eee9ff;
   color: #674ad3;
 }
-.sourceToolbar .sourceInfo:focus-visible {
+.sourceDate .sourceInfo:focus-visible {
   outline: 2px solid #7054ec;
   outline-offset: 2px;
 }

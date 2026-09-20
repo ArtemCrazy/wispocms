@@ -116,7 +116,29 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
               <span className={styles.sourceHeadingText}>
                 <span className={styles.sourceTitle}>{source.title}</span>
                 <span className={styles.sourceDate}>
-                  Снимок от {new Date(source.checkedAt).toLocaleString("ru-RU")}
+                  <span>
+                    Снимок от {new Date(source.checkedAt).toLocaleString("ru-RU")}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.sourceInfo}
+                    aria-label={`Пояснение об охвате: ${source.title}`}
+                    aria-expanded={hintOpen}
+                    aria-controls={panelId}
+                    title="Пояснение об охвате"
+                    onClick={() => {
+                      setOpenHints((current) => ({
+                        ...current,
+                        [source.sourceId]: !current[source.sourceId],
+                      }));
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 11v6" />
+                      <circle cx="12" cy="7.5" r=".75" fill="currentColor" stroke="none" />
+                    </svg>
+                  </button>
                 </span>
               </span>
             </header>
@@ -151,26 +173,6 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                     );
                   })}
                 </div>
-                <button
-                  type="button"
-                  className={styles.sourceInfo}
-                  aria-label={`Пояснение об охвате: ${source.title}`}
-                  aria-expanded={hintOpen}
-                  aria-controls={panelId}
-                  title="Что означают эти числа"
-                  onClick={() => {
-                    setOpenHints((current) => ({
-                      ...current,
-                      [source.sourceId]: !current[source.sourceId],
-                    }));
-                  }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 11v6" />
-                    <circle cx="12" cy="7.5" r=".75" fill="currentColor" stroke="none" />
-                  </svg>
-                </button>
               </div>
               <div id={panelId} className={styles.sourceNote} hidden={!hintOpen}>
                 <p>

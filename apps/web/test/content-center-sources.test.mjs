@@ -135,7 +135,9 @@ test('110 found addresses are partitioned once, with coverage details collapsed 
   assert.doesNotMatch(html, /Включено 81 из 110/);
   assert.doesNotMatch(html, /Страницы источника|<h3/);
   assert.match(html, /<div><div role="group" aria-label="Фильтр страниц: Сайт">/);
-  assert.match(html, /<\/button><\/div><button type="button" aria-label="Пояснение об охвате: Сайт"/);
+  assert.match(html, /<span>Снимок от [^<]+<\/span><button type="button" aria-label="Пояснение об охвате: Сайт"/);
+  assert.match(html, /<\/button><\/span><\/span><\/header>/);
+  assert.equal((html.match(/aria-label="Пояснение об охвате: Сайт"/g) ?? []).length, 1);
   for (const [label, count] of [['Все', 110], ['Включено', 81], ['Не включено', 25], ['Недоступно', 4]])
     assert.ok(html.includes(`${label} <span>${count}</span>`));
   assert.doesNotMatch(html, /<dl|Охват неполный|Прочитано 110/);
