@@ -148,6 +148,7 @@ export class VkSourceClient {
     token: string,
     sourceUrl: string,
     signal: AbortSignal,
+    requireAdmin = true,
   ): Promise<VkCommunity> {
     const data = await this.call(
       'groups.getById',
@@ -160,13 +161,13 @@ export class VkSourceClient {
     );
     const groups = Array.isArray(data) ? data : record(data).groups;
     const group = record(Array.isArray(groups) ? groups[0] : undefined);
-    if (
-      !Number.isSafeInteger(group.id) ||
-      Number(group.id) <= 0 ||
-      group.is_admin !== 1
-    )
+    if (!Number.isSafeInteger(group.id) || Number(group.id) <= 0)
       throw new VkSourceError(
-        'Нужен пользовательский ключ VK администратора этого сообщества. Чужие сообщества не подключаем.',
+        'Открытое сообщество VK не найдено. Проверьте ссылку.',
+      );
+    if (requireAdmin && group.is_admin !== 1)
+      throw new VkSourceError(
+        'Старое подключение VK больше не подтверждает права администратора. Подключите источник заново через общее подключение CMS.',
       );
     if (group.is_closed !== 0)
       throw new VkSourceError(

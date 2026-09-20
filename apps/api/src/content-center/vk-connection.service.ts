@@ -5,8 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { decryptVkToken, encryptVkToken } from './vk-secret';
+import { decryptVkToken } from './vk-secret';
 import { VkSourceClient, VkSourceError, vkCommunityAddress } from './vk-source';
+import { PlatformVkSettingsService } from './platform-vk-settings.service';
 
 type VkMaterial = {
   id: string;
@@ -21,6 +22,9 @@ export class VkConnectionService {
   constructor(
     private readonly db: DataSource,
     private readonly client: VkSourceClient = new VkSourceClient(),
+    private readonly settings: PlatformVkSettingsService = new PlatformVkSettingsService(
+      db,
+    ),
   ) {}
 
   private async material(
@@ -44,18 +48,30 @@ export class VkConnectionService {
   async status(workspaceId: string, id: string) {
     const material = await this.material(workspaceId, id);
     const [row] = await this.db.query<
-      Array<{ group_id: string; group_name: string; updated_at: string }>
+      Array<{
+        group_id: string;
+        group_name: string;
+        updated_at: string;
+        legacy: boolean;
+      }>
     >(
-      'SELECT group_id,group_name,updated_at FROM cc_vk_connections WHERE workspace_id=$1 AND material_id=$2 AND source_url=$3',
+      'SELECT group_id,group_name,updated_at,encrypted_token IS NOT NULL AS legacy FROM cc_vk_connections WHERE workspace_id=$1 AND material_id=$2 AND source_url=$3',
       [workspaceId, id, material.source_url],
     );
+    const platform = await this.settings.status();
     return row
       ? {
           connected: true,
+          ready: row.legacy ? platform.storageReady : platform.configured,
+          platformConfigured: platform.configured,
           groupName: row.group_name,
           updatedAt: row.updated_at,
         }
-      : { connected: false };
+      : {
+          connected: false,
+          ready: false,
+          platformConfigured: platform.configured,
+        };
   }
 
   private async lockIdle(manager: EntityManager, workspaceId: string) {
@@ -72,21 +88,11 @@ export class VkConnectionService {
       );
   }
 
-  async connect(
-    workspaceId: string,
-    id: string,
-    revision: number,
-    token: string,
-  ) {
+  async connect(workspaceId: string, id: string, revision: number) {
     const material = await this.material(workspaceId, id);
     if (material.revision !== revision)
       throw new ConflictException('Источник изменён. Откройте его заново.');
-    if (!/^[A-Za-z0-9_.-]{16,1024}$/.test(token))
-      throw new BadRequestException(
-        'Введите пользовательский ключ доступа VK без пробелов',
-      );
-    // Check the encryption setup before transmitting a credential to VK.
-    const encrypted = encryptVkToken(token, workspaceId, id);
+    const { token, revision: keyRevision } = await this.settings.credentials();
     let community;
     try {
       const signal = AbortSignal.timeout(35_000);
@@ -94,6 +100,7 @@ export class VkConnectionService {
         token,
         material.source_url,
         signal,
+        false,
       );
       await this.client.posts(token, community.id, 0, signal, 1);
     } catch (error) {
@@ -105,6 +112,13 @@ export class VkConnectionService {
     }
     await this.db.transaction(async (manager) => {
       await this.lockIdle(manager, workspaceId);
+      const [currentKey] = await manager.query<Array<{ revision: number }>>(
+        "SELECT revision FROM platform_vk_settings WHERE id='vk' AND encrypted_key IS NOT NULL FOR SHARE",
+      );
+      if (currentKey?.revision !== keyRevision)
+        throw new ConflictException(
+          'Общее подключение VK изменено. Повторите подключение источника.',
+        );
       const changed = await manager.query<Array<{ id: string }>>(
         "UPDATE cc_materials SET revision=revision+1,site_pages=NULL,site_checked_at=NULL,source_error=NULL,content='',updated_at=now() WHERE workspace_id=$1 AND id=$2 AND revision=$3 AND source_url=$4 AND kind='url' AND url_category='social' RETURNING id",
         [workspaceId, id, revision, material.source_url],
@@ -122,7 +136,7 @@ export class VkConnectionService {
           material.source_url,
           community.id,
           community.name,
-          encrypted,
+          null,
         ],
       );
     });
@@ -144,7 +158,7 @@ export class VkConnectionService {
         [workspaceId, id],
       );
     });
-    return { connected: false };
+    return this.status(workspaceId, id);
   }
 
   async collect(
@@ -155,7 +169,7 @@ export class VkConnectionService {
     signal: AbortSignal,
   ) {
     const [connection] = await this.db.query<
-      Array<{ encrypted_token: string; group_id: string }>
+      Array<{ encrypted_token: string | null; group_id: string }>
     >(
       `SELECT c.encrypted_token,c.group_id FROM cc_vk_connections c JOIN cc_materials m ON m.workspace_id=c.workspace_id AND m.id=c.material_id
       WHERE c.workspace_id=$1 AND c.material_id=$2 AND c.source_url=$3 AND m.source_url=c.source_url AND m.revision=$4 AND m.kind='url' AND m.url_category='social'`,
@@ -165,8 +179,15 @@ export class VkConnectionService {
       throw new VkSourceError(
         'Сообщество VK не подключено или ссылка изменилась. Откройте информацию об источнике и подключите VK.',
       );
-    const token = decryptVkToken(connection.encrypted_token, workspaceId, id!);
-    const community = await this.client.community(token, sourceUrl, signal);
+    const token = connection.encrypted_token
+      ? decryptVkToken(connection.encrypted_token, workspaceId, id!)
+      : (await this.settings.credentials()).token;
+    const community = await this.client.community(
+      token,
+      sourceUrl,
+      signal,
+      Boolean(connection.encrypted_token),
+    );
     if (community.id !== Number(connection.group_id))
       throw new VkSourceError(
         'Адрес VK теперь указывает на другое сообщество. Подключите источник заново.',

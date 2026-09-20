@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import styles from "./platform-ai-settings.module.css";
 import { PlatformPromptSettings } from "./platform-prompt-settings";
+import { PlatformVkSettings } from "./platform-vk-settings";
 
 type Settings = {
   configured: boolean; hasKey: boolean; storageReady: boolean;
@@ -33,7 +34,8 @@ export function PlatformAiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: 
   const [error, setError] = useState("");
   const aiDirty = Boolean(apiKey || (settings && model !== settings.model));
   const [promptsDirty, setPromptsDirty] = useState(false);
-  const dirty = aiDirty || promptsDirty;
+  const [vkDirty, setVkDirty] = useState(false);
+  const dirty = aiDirty || promptsDirty || vkDirty;
 
   useEffect(() => {
     let active = true;
@@ -96,6 +98,7 @@ export function PlatformAiSettings({ onDirtyChange }: { onDirtyChange?: (dirty: 
       </div>
       {settings.hasKey && <button type="button" className={styles.remove} disabled={Boolean(busy) || aiDirty} onClick={() => void act("remove")}>{busy === "remove" ? "Удаляем…" : "Удалить ключ"}</button>}
     </article>}
+    <PlatformVkSettings onDirtyChange={setVkDirty} />
     <PlatformPromptSettings onDirtyChange={setPromptsDirty} />
   </section>;
 }

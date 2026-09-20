@@ -22,12 +22,16 @@ import { PreparationCollectionService } from './preparation-collection.service';
 import { VkConnectionController } from './vk-connection.controller';
 import { VkConnectionService } from './vk-connection.service';
 import { VkSourceClient } from './vk-source';
+import { PlatformVkSettingsService } from './platform-vk-settings.service';
+import { PlatformVkSettingsController } from './platform-vk-settings.controller';
+import { PlatformAdminGuard } from '../platform/platform-admin.guard';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
   controllers: [
     ContentCenterController,
     VkConnectionController,
+    PlatformVkSettingsController,
     ResearchController,
     CreationController,
   ],
@@ -39,6 +43,8 @@ import { VkSourceClient } from './vk-source';
     PreparationCollectionService,
     VkConnectionService,
     VkSourceClient,
+    PlatformVkSettingsService,
+    PlatformAdminGuard,
     MaterialUploadGuard,
     ResearchService,
     ResearchSearchService,

@@ -55,11 +55,26 @@ describe('customer VK collection', () => {
     call.mockResolvedValue([{ ...group, is_admin: 0, is_closed: 0 }]);
     await expect(
       client.community('key', 'https://vk.com/club77', signal()),
-    ).rejects.toThrow('Чужие сообщества');
+    ).rejects.toThrow('права администратора');
+    expect(
+      await client.community(
+        'service-key',
+        'https://vk.com/club77',
+        signal(),
+        false,
+      ),
+    ).toMatchObject(group);
     call.mockResolvedValue([{ ...group, is_admin: 1, is_closed: 1 }]);
     await expect(
       client.community('key', 'https://vk.com/club77', signal()),
     ).rejects.toThrow('открытые');
+    await expect(
+      client.community('service-key', 'https://vk.com/club77', signal(), false),
+    ).rejects.toThrow('открытые');
+    call.mockResolvedValue({ groups: [] });
+    await expect(
+      client.community('service-key', 'https://vk.com/club77', signal(), false),
+    ).rejects.toThrow('не найдено');
   });
   it('uses POST to the fixed VK API and never exposes echoed tokens from provider errors', async () => {
     const token = 'DO_NOT_ECHO_VK_TOKEN';

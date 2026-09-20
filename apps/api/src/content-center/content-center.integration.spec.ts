@@ -3,6 +3,11 @@ import type { Server } from 'node:http';
 import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
 import { SourceRefreshJobs1790832000000 } from '../database/migrations/1790832000000-SourceRefreshJobs';
 import { ContentCenterVkSources1790918400000 } from '../database/migrations/1790918400000-ContentCenterVkSources';
+import { PlatformVkIntegration1791004800000 } from '../database/migrations/1791004800000-PlatformVkIntegration';
+import { PlatformVkSettingsService } from './platform-vk-settings.service';
+import { PlatformVkSettingsController } from './platform-vk-settings.controller';
+import { PlatformAdminGuard } from '../platform/platform-admin.guard';
+import { encryptVkToken } from './vk-secret';
 import { VkConnectionService } from './vk-connection.service';
 import { VkConnectionController } from './vk-connection.controller';
 import { VkSourceClient } from './vk-source';
@@ -86,6 +91,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       await new PreparationRequestLabels1790659200000().up(runner);
       await new SourceRefreshJobs1790832000000().up(runner);
       await new ContentCenterVkSources1790918400000().up(runner);
+      await new PlatformVkIntegration1791004800000().up(runner);
     } finally {
       await runner.release();
     }
@@ -123,15 +129,18 @@ integration('Content Center / isolated PostgreSQL', () => {
     await db.query(
       `TRUNCATE cc_vk_connections,cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts,platform_prompts`,
     );
+    await db.query(
+      'UPDATE platform_vk_settings SET encrypted_key=NULL,revision=0,verified_at=NULL,updated_at=NULL,updated_by=NULL',
+    );
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
   });
 
-  it('connects only an authorized VK source, encrypts the key, collects without AI and invalidates changed links', async () => {
+  it('uses an admin-only global VK key, connects an authorized source without customer secrets and collects without AI', async () => {
     const previousKey = process.env.AI_ENCRYPTION_KEY;
     process.env.AI_ENCRYPTION_KEY = '34'.repeat(32);
-    const token = 'test-only-vk-user-token';
+    const token = 'test-only-vk-service-token';
     const client = new VkSourceClient();
     const community = jest.spyOn(client, 'community').mockResolvedValue({
       id: 77,
@@ -154,15 +163,19 @@ integration('Content Center / isolated PostgreSQL', () => {
       ],
       warnings: ['180 дней'],
     });
-    const vk = new VkConnectionService(db, client);
+    const settings = new PlatformVkSettingsService(db, client);
+    const vk = new VkConnectionService(db, client, settings);
+    let actor = employee;
     const worker = new ContentCenterService(
       db,
       new PreparationAiService(),
       new PreparationCollectionService(db, vk),
     );
     const module = await Test.createTestingModule({
-      controllers: [VkConnectionController],
+      controllers: [VkConnectionController, PlatformVkSettingsController],
       providers: [
+        PlatformAdminGuard,
+        { provide: PlatformVkSettingsService, useValue: settings },
         { provide: ContentCenterService, useValue: worker },
         { provide: VkConnectionService, useValue: vk },
       ],
@@ -171,7 +184,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       .useValue({
         canActivate(context: ExecutionContext) {
           context.switchToHttp().getRequest<AuthenticatedRequest>().auth =
-            employee;
+            actor;
           return true;
         },
       })
@@ -193,33 +206,104 @@ integration('Content Center / isolated PostgreSQL', () => {
       const material = await service.saveMaterial(workspace, employee, draft);
       const path = `/api/workspaces/${workspace}/content-center/materials/${material.id}/vk`;
       const http = app.getHttpServer() as Server;
-      await request(http).get(path).expect(200, { connected: false });
-      await request(http).put(path).send({ revision: 1, token }).expect(400);
+      const globalPath = '/api/platform/settings/vk';
+      await request(http).get(path).expect(200, {
+        connected: false,
+        ready: false,
+        platformConfigured: false,
+      });
       await request(http)
         .put(path)
-        .send({ revision: 1, token, consent: false })
+        .send({ revision: 1, consent: true })
+        .expect(503);
+      await request(http).get(globalPath).expect(403);
+      await request(http)
+        .put(globalPath)
+        .send({ revision: 0, token })
+        .expect(403);
+      await request(http).delete(globalPath).send({ revision: 0 }).expect(403);
+      await request(http)
+        .post(`${globalPath}/check`)
+        .send({ sourceUrl: draft.sourceUrl })
+        .expect(403);
+      actor = admin;
+      await request(http)
+        .put(globalPath)
+        .send({ revision: 0, token: 'invalid key' })
+        .expect(400);
+      const saved = await request(http)
+        .put(globalPath)
+        .send({ revision: 0, token })
+        .expect(200);
+      expect(saved.headers['cache-control']).toBe('no-store');
+      expect(saved.body).toMatchObject({
+        configured: true,
+        revision: 1,
+        verifiedAt: null,
+      });
+      expect(JSON.stringify(saved.body)).not.toContain(token);
+      const [globalKey] = await db.query<Array<{ encrypted_key: string }>>(
+        "SELECT encrypted_key FROM platform_vk_settings WHERE id='vk'",
+      );
+      expect(globalKey.encrypted_key).toMatch(/^v1\./);
+      expect(globalKey.encrypted_key).not.toContain(token);
+      await request(http)
+        .put(globalPath)
+        .send({ revision: 0, token })
+        .expect(409);
+      await request(http).delete(globalPath).send({ revision: 0 }).expect(409);
+      await request(http)
+        .post(`${globalPath}/check`)
+        .send({ sourceUrl: 'https://127.0.0.1/private' })
+        .expect(400);
+      const checked = await request(http)
+        .post(`${globalPath}/check`)
+        .send({ sourceUrl: draft.sourceUrl })
+        .expect(201);
+      expect(typeof (checked.body as { verifiedAt: unknown }).verifiedAt).toBe(
+        'string',
+      );
+      expect(community).toHaveBeenLastCalledWith(
+        token,
+        draft.sourceUrl,
+        expect.any(AbortSignal),
+        false,
+      );
+      community.mockClear();
+      actor = employee;
+      await request(http).put(path).send({ revision: 1 }).expect(400);
+      await request(http)
+        .put(path)
+        .send({ revision: 1, consent: false })
         .expect(400);
       await request(http)
         .put(path.replace(workspace, otherWorkspace))
-        .send({ revision: 1, token, consent: true })
+        .send({ revision: 1, consent: true })
         .expect(404);
       expect(community).not.toHaveBeenCalled();
       const response = await request(http)
         .put(path)
-        .send({ revision: 1, token, consent: true })
+        .send({ revision: 1, consent: true })
         .expect(200);
       expect(response.headers['cache-control']).toBe('private, no-store');
       expect(response.body).toMatchObject({
         connected: true,
+        ready: true,
+        platformConfigured: true,
         groupName: 'Компания',
       });
       expect(JSON.stringify(response.body)).not.toContain(token);
-      const stored = await db.query<Array<{ encrypted_token: string }>>(
+      const stored = await db.query<Array<{ encrypted_token: string | null }>>(
         'SELECT encrypted_token FROM cc_vk_connections WHERE material_id=$1',
         [material.id],
       );
-      expect(stored[0].encrypted_token).not.toContain(token);
-      expect(stored[0].encrypted_token).toMatch(/^v1\./);
+      expect(stored[0].encrypted_token).toBeNull();
+      expect(community).toHaveBeenLastCalledWith(
+        token,
+        draft.sourceUrl,
+        expect.any(AbortSignal),
+        false,
+      );
       await expect(vk.status(otherWorkspace, material.id)).rejects.toThrow(
         'Материал не найден',
       );
@@ -240,7 +324,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       ).rejects.toThrow('не подключено');
       await request(http)
         .put(path)
-        .send({ revision: 1, token, consent: true })
+        .send({ revision: 1, consent: true })
         .expect(409);
       const run = await worker.refreshSource(
         workspace,
@@ -298,6 +382,48 @@ integration('Content Center / isolated PostgreSQL', () => {
         ),
       ).toBe(true);
       expect(JSON.stringify(resolved)).not.toContain(token);
+      await settings.remove(1, admin.userId);
+      expect(await vk.status(workspace, material.id)).toMatchObject({
+        connected: true,
+        ready: false,
+        platformConfigured: false,
+      });
+      await expect(
+        vk.collect(
+          workspace,
+          material.id,
+          2,
+          draft.sourceUrl,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow('общее подключение VK');
+      expect(
+        (await service.getMaterial(workspace, material.id, employee))
+          .site_pages,
+      ).not.toBeNull();
+      await settings.save({ revision: 2, token }, admin.userId);
+      expect(await vk.status(workspace, material.id)).toMatchObject({
+        connected: true,
+        ready: true,
+      });
+      jest.spyOn(client, 'posts').mockImplementationOnce(async () => {
+        await settings.save({ revision: 3, token }, admin.userId);
+        return { count: 0, items: [] };
+      });
+      await expect(vk.connect(workspace, material.id, 2)).rejects.toThrow(
+        'Общее подключение VK изменено',
+      );
+      expect(
+        (await service.getMaterial(workspace, material.id, employee)).revision,
+      ).toBe(2);
+      jest.spyOn(client, 'posts').mockImplementationOnce(async () => {
+        await settings.save({ revision: 4, token }, admin.userId);
+        return { count: 0, items: [] };
+      });
+      await expect(settings.check(draft.sourceUrl)).rejects.toThrow(
+        'Ключ изменён во время проверки',
+      );
+      expect((await settings.status()).verifiedAt).toBeNull();
       community.mockResolvedValueOnce({
         id: 99,
         name: 'Подмена адреса',
@@ -322,18 +448,21 @@ integration('Content Center / isolated PostgreSQL', () => {
       );
       expect(await vk.status(workspace, material.id)).toEqual({
         connected: false,
+        ready: false,
+        platformConfigured: true,
       });
       expect(
         await db.query('SELECT material_id FROM cc_vk_connections'),
       ).toHaveLength(0);
       await request(http)
         .put(path)
-        .send({ revision: 3, token, consent: true })
+        .send({ revision: 3, consent: true })
         .expect(200);
-      await request(http)
-        .delete(path)
-        .send({ revision: 4 })
-        .expect(200, { connected: false });
+      await request(http).delete(path).send({ revision: 4 }).expect(200, {
+        connected: false,
+        ready: false,
+        platformConfigured: true,
+      });
       const disconnected = await service.getMaterial(
         workspace,
         material.id,
@@ -343,7 +472,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       expect(disconnected.revision).toBe(5);
       await request(http)
         .put(path)
-        .send({ revision: 5, token, consent: true })
+        .send({ revision: 5, consent: true })
         .expect(200);
       await service.deleteMaterial(workspace, material.id, 6, employee);
       expect(
@@ -351,6 +480,65 @@ integration('Content Center / isolated PostgreSQL', () => {
       ).toHaveLength(0);
     } finally {
       await app.close();
+      jest.restoreAllMocks();
+      if (previousKey === undefined) delete process.env.AI_ENCRYPTION_KEY;
+      else process.env.AI_ENCRYPTION_KEY = previousKey;
+    }
+  });
+
+  it('preserves legacy VK credentials with their original workspace binding and admin check', async () => {
+    const previousKey = process.env.AI_ENCRYPTION_KEY;
+    process.env.AI_ENCRYPTION_KEY = '34'.repeat(32);
+    try {
+      const sourceUrl = 'https://vk.com/club77';
+      const material = await service.saveMaterial(workspace, employee, {
+        title: 'Legacy VK',
+        kind: 'url',
+        urlCategory: 'social',
+        sourceUrl,
+      });
+      const token = 'test-only-legacy-vk-token';
+      await db.query(
+        'INSERT INTO cc_vk_connections(workspace_id,material_id,source_url,group_id,group_name,encrypted_token) VALUES ($1,$2,$3,77,$4,$5)',
+        [
+          workspace,
+          material.id,
+          sourceUrl,
+          'Компания',
+          encryptVkToken(token, workspace, material.id),
+        ],
+      );
+      const client = new VkSourceClient();
+      const community = jest.spyOn(client, 'community').mockResolvedValue({
+        id: 77,
+        name: 'Компания',
+        description: '',
+        status: '',
+        site: '',
+      });
+      jest
+        .spyOn(client, 'collect')
+        .mockResolvedValue({ pages: [], warnings: [] });
+      const vk = new VkConnectionService(db, client);
+      expect(await vk.status(workspace, material.id)).toMatchObject({
+        connected: true,
+        ready: true,
+        platformConfigured: false,
+      });
+      await vk.collect(
+        workspace,
+        material.id,
+        1,
+        sourceUrl,
+        new AbortController().signal,
+      );
+      expect(community).toHaveBeenCalledWith(
+        token,
+        sourceUrl,
+        expect.any(AbortSignal),
+        true,
+      );
+    } finally {
       jest.restoreAllMocks();
       if (previousKey === undefined) delete process.env.AI_ENCRYPTION_KEY;
       else process.env.AI_ENCRYPTION_KEY = previousKey;

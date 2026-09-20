@@ -63,7 +63,7 @@ test("each network has its own placeholder and honest collection status", () => 
       React.createElement(SocialMaterialFields, { ...props, network }),
     );
     assert.ok(html.includes(address));
-    if (network === "vk") assert.match(html, /ключом администратора VK/);
+    if (network === "vk") assert.match(html, /ключ заказчика не нужен/);
     else assert.match(html, /пока не подключён/);
   }
 });

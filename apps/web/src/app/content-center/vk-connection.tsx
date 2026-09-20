@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./content-center-view.module.css";
 
-type Connection = { connected: boolean; groupName?: string };
+type Connection = { connected: boolean; ready: boolean; platformConfigured: boolean; groupName?: string };
 export function VkConnection({
   path,
   revision,
@@ -20,7 +20,6 @@ export function VkConnection({
   onConnectionChange: (connected: boolean) => void;
 }) {
   const [connection, setConnection] = useState<Connection | null>(null);
-  const [token, setToken] = useState("");
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -33,7 +32,7 @@ export function VkConnection({
       .then((value) => {
         if (!active) return;
         setConnection(value);
-        onConnectionChange(value.connected);
+        onConnectionChange(value.ready);
       })
       .catch(() => {
         if (active)
@@ -56,13 +55,12 @@ export function VkConnection({
       const value = await request<Connection>(
         `${path}/vk`,
         remove ? "DELETE" : "PUT",
-        remove ? { revision } : { revision, token, consent },
+        remove ? { revision } : { revision, consent },
       );
       if (!alive.current) return;
-      setToken("");
       setConsent(false);
       setConnection(value);
-      onConnectionChange(value.connected);
+      onConnectionChange(value.ready);
       await onUpdated();
     } catch (failure) {
       if (alive.current)
@@ -109,7 +107,13 @@ export function VkConnection({
           Проверяем подключение…
         </p>
       )}
-      {connection && !connection.connected && (
+      {connection && !connection.ready && !connection.platformConfigured && (
+        <p className={styles.muted} role="status">
+          Администратор CMS должен настроить общее подключение VK в настройках платформы.
+          Ключ заказчика не нужен. Сохранённые материалы остаются доступны.
+        </p>
+      )}
+      {connection && !connection.connected && connection.platformConfigured && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -117,22 +121,8 @@ export function VkConnection({
           }}
         >
           <fieldset className={styles.formFields} disabled={busy || disabled}>
-            <label className={styles.field}>
-              Пользовательский ключ VK администратора сообщества
-              <input
-                type="password"
-                autoComplete="new-password"
-                required
-                minLength={16}
-                maxLength={1024}
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-              />
-            </label>
             <p className={styles.muted}>
-              Ключ передаётся только VK для проверки и чтения. В CMS хранится
-              зашифрованным и не передаётся AI. Ключ сообщества или VK ID может
-              не поддерживать чтение стены.
+              Используем общее подключение CMS. Доступны только открытые сообщества — ключ заказчика не нужен.
             </p>
             <label className={styles.checkbox}>
               <input

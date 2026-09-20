@@ -10,14 +10,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import {
-  Equals,
-  IsInt,
-  IsString,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
+import { Equals, IsInt, Min } from 'class-validator';
 import {
   JwtAuthGuard,
   type AuthenticatedRequest,
@@ -29,7 +22,6 @@ class VkRevisionDto {
   @IsInt() @Min(1) revision!: number;
 }
 class VkConnectDto extends VkRevisionDto {
-  @IsString() @MinLength(16) @MaxLength(1024) token!: string;
   @Equals(true) consent!: boolean;
 }
 
@@ -59,7 +51,7 @@ export class VkConnectionController {
     @Body() dto: VkConnectDto,
   ) {
     await this.content.access(workspaceId, req.auth!);
-    return this.vk.connect(workspaceId, id, dto.revision, dto.token);
+    return this.vk.connect(workspaceId, id, dto.revision);
   }
   @Delete()
   @Header('Cache-Control', 'private, no-store')
