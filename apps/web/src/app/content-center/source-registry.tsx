@@ -322,7 +322,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                                     rel="noreferrer"
                                     aria-label={`${page.url} — открыть в новой вкладке`}
                                   >
-                                    {page.url}
+                                    {page.url.replace(/^https:\/\//i, "")}
                                   </a>
                                 </div>
                               )}
@@ -370,7 +370,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                           rel="noreferrer"
                           aria-label={`${page.url} — открыть в новой вкладке`}
                         >
-                          {page.url}
+                          {page.url.replace(/^https:\/\//i, "")}
                         </a>
                       </div>
                     )}

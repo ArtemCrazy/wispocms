@@ -25,7 +25,7 @@ test('social source chips show the matching brand without changing actions or lo
     else assert.doesNotMatch(html, /<img/);
     assert.match(html, /Изменить ссылку/);
     assert.match(html, /Удалить ссылку/);
-    assert.ok(html.includes(source_url));
+    assert.ok(html.includes(`>${materials.displayMaterialUrl(source_url)}</span>`));
   }
 });
 

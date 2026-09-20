@@ -27,6 +27,8 @@ import {
   SOURCE_CATEGORIES,
   isVkMaterial,
   isSocialFeedMaterial,
+  displayMaterialUrl,
+  materialSourceUrl,
   type ProjectMaterial as Material,
   type SourceCategory,
   type SourceSnapshot,
@@ -539,7 +541,7 @@ export function ContentCenterView({
                         id: row.id,
                         title: row.title,
                         kind: row.kind,
-                        sourceUrl: row.source_url ?? "",
+                        sourceUrl: displayMaterialUrl(row.source_url),
                         fileName: row.file_name ?? "",
                         content: row.content ?? "",
                         revision: row.revision,
@@ -953,12 +955,19 @@ export function ContentCenterView({
             onSubmit={(event: FormEvent) => {
               event.preventDefault();
               void act(async () => {
+                const normalizedMaterial =
+                  material.kind === "url"
+                    ? {
+                        ...material,
+                        sourceUrl: materialSourceUrl(material.sourceUrl),
+                      }
+                    : material;
                 const saved = await request<{ id: string }>(
                   `${base}/materials${material.id ? `/${material.id}` : ""}`,
                   material.id ? "PUT" : "POST",
                   siteMaterialMode
                     ? {
-                        ...material,
+                        ...normalizedMaterial,
                         kind: "url",
                         urlCategory: "site",
                         title:
@@ -967,7 +976,7 @@ export function ContentCenterView({
                       }
                     : socialMaterialMode
                       ? {
-                          ...material,
+                          ...normalizedMaterial,
                           kind: "url",
                           urlCategory: "social",
                           sourceUrl: socialSourceUrl(
@@ -978,7 +987,7 @@ export function ContentCenterView({
                             material.title ||
                             siteMaterialTitle(material.sourceUrl),
                         }
-                      : material,
+                      : normalizedMaterial,
                 );
                 await load();
                 setMaterial(null);
@@ -987,7 +996,7 @@ export function ContentCenterView({
                   isSocialFeedMaterial({
                     kind: material.kind,
                     url_category: material.urlCategory ?? "other",
-                    source_url: material.sourceUrl,
+                    source_url: normalizedMaterial.sourceUrl,
                   })
                 ) {
                   const row = await request<Material>(
@@ -1076,11 +1085,14 @@ export function ContentCenterView({
                           ? "Адрес сайта"
                           : "Адрес страницы"}
                         <input
-                          type="url"
+                          type="text"
+                          inputMode="url"
+                          autoCapitalize="none"
+                          spellCheck={false}
                           required
                           maxLength={2048}
                           value={material.sourceUrl}
-                          placeholder="https://example.ru/about"
+                          placeholder="example.ru/about"
                           onChange={(e) =>
                             setMaterial({
                               ...material,

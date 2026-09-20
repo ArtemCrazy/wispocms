@@ -7,6 +7,7 @@ import {
   fileSize,
   isSocialFeedMaterial,
   socialIconNetwork,
+  displayMaterialUrl,
   type ProjectMaterial,
   type SourceCategory,
 } from "./materials";
@@ -68,7 +69,7 @@ export function ProjectMaterials({
                       >
                         <SocialIcon network={socialIconNetwork(m)} />
                         <span className={styles.sourceUrlText}>
-                          {m.source_url}
+                          {displayMaterialUrl(m.source_url)}
                         </span>
                       </button>
                       {(m.site_checked_at ||

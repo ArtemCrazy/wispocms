@@ -5,6 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as materials from "../src/app/content-center/materials.ts";
 
 const source = await readFile(
   new URL(
@@ -27,7 +28,7 @@ const iconCompiled = ts.transpileModule(iconSource, { compilerOptions: { module:
 const iconTarget = { exports: {} };
 new Function("require", "module", "exports", iconCompiled.outputText)(id => id.endsWith(".css") ? { default: {} } : require(id), iconTarget, iconTarget.exports);
 new Function("require", "module", "exports", compiled.outputText)(
-  (id) => (id === "./social-icon" ? iconTarget.exports : id.endsWith(".css") ? { default: {} } : require(id)),
+  (id) => (id === "./materials" ? materials : id === "./social-icon" ? iconTarget.exports : id.endsWith(".css") ? { default: {} } : require(id)),
   target,
   target.exports,
 );
@@ -47,7 +48,8 @@ test("social form shows three networks and one URL field, without generic materi
   for (const label of ["ВКонтакте", "Telegram", "YouTube"])
     assert.ok(html.includes(label));
   assert.equal((html.match(/<input\b/g) ?? []).length, 1);
-  assert.match(html, /type="url"/);
+  assert.match(html, /type="text" inputMode="url"/);
+  assert.match(html, /placeholder="vk.com\/community"/);
   assert.match(html, /required=""/);
   assert.match(html, /autofocus=""/);
   assert.match(html, /aria-pressed="true"><img[^>]+>ВКонтакте/);
@@ -136,6 +138,10 @@ test("existing sources select their own platform, with a fallback for older othe
 });
 
 test("submission rejects mismatching, deceptive or credential-bearing links before saving", () => {
+  assert.equal(socialSourceUrl(" vk.com/company ", "vk"), "https://vk.com/company");
+  assert.equal(socialSourceUrl("t.me/company", "telegram"), "https://t.me/company");
+  assert.equal(socialSourceUrl("youtube.com/@company", "youtube"), "https://youtube.com/@company");
+  assert.equal(socialNetworkForUrl("t.me/company"), "telegram");
   assert.equal(
     socialSourceUrl(" https://vk.com/company ", "vk"),
     "https://vk.com/company",

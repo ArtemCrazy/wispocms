@@ -1,23 +1,24 @@
 import styles from "./content-center-view.module.css";
 import { SocialIcon } from "./social-icon";
+import { materialSourceUrl } from "./materials";
 
 export const SOCIAL_NETWORKS = [
   {
     id: "vk",
     label: "ВКонтакте",
-    placeholder: "https://vk.com/community",
+    placeholder: "vk.com/community",
     hint: "Для сбора нужно общее подключение VK в настройках CMS — ключ заказчика не нужен.",
   },
   {
     id: "telegram",
     label: "Telegram",
-    placeholder: "https://t.me/channel",
+    placeholder: "t.me/channel",
     hint: "Публичный канал заказчика: до 100 последних публикаций за 180 дней. Без бота и ключей. Собственные материалы с разрешением заказчика на AI-обработку.",
   },
   {
     id: "youtube",
     label: "YouTube",
-    placeholder: "https://www.youtube.com/@channel",
+    placeholder: "youtube.com/@channel",
     hint: "Автоматический сбор YouTube пока не подключён. Можно сохранить ссылку и добавить текст отдельно.",
   },
 ] as const;
@@ -25,7 +26,7 @@ export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number]["id"] | "other";
 
 export function socialNetworkForUrl(value: string): SocialNetwork {
   try {
-    const host = new URL(value.trim()).hostname;
+    const host = new URL(materialSourceUrl(value)).hostname;
     if (
       [
         "vk.com",
@@ -52,9 +53,10 @@ export function socialNetworkForUrl(value: string): SocialNetwork {
 }
 
 export function socialSourceUrl(value: string, network: SocialNetwork): string {
+  const address = materialSourceUrl(value);
   let url: URL;
   try {
-    url = new URL(value.trim());
+    url = new URL(address);
   } catch {
     throw new Error("Введите HTTPS-ссылку на выбранную социальную сеть.");
   }
@@ -78,7 +80,7 @@ export function socialSourceUrl(value: string, network: SocialNetwork): string {
     throw new Error(
       "Укажите ссылку на публичный Telegram-канал, не на отдельный пост или приглашение.",
     );
-  return value.trim();
+  return address;
 }
 
 export function SocialMaterialFields({
@@ -121,11 +123,14 @@ export function SocialMaterialFields({
         <input
           autoFocus
           aria-label={`Ссылка ${selected?.label ?? "на социальную сеть"}`}
-          type="url"
+          type="text"
+          inputMode="url"
+          autoCapitalize="none"
+          spellCheck={false}
           required
           maxLength={2048}
           value={sourceUrl}
-          placeholder={selected?.placeholder ?? "https://example.ru/profile"}
+          placeholder={selected?.placeholder ?? "example.ru/profile"}
           onChange={(event) => onChange(event.target.value)}
         />
       </div>

@@ -90,6 +90,38 @@ export type ProjectMaterial = {
 };
 export const FILE_ACCEPT =
   ".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv";
+
+export function displayMaterialUrl(value: string | null | undefined): string {
+  return (value ?? "").replace(/^https:\/\//i, "");
+}
+
+/** HTTPS is implicit only when no explicit scheme was supplied. */
+export function materialSourceUrl(value: string): string {
+  const input = value.trim();
+  const address = /^[a-z][a-z\d+.-]*:/i.test(input)
+    ? input
+    : `https://${input}`;
+  let url: URL;
+  try {
+    url = new URL(address);
+  } catch {
+    throw new Error("Введите адрес сайта, например example.ru.");
+  }
+  if (
+    !input ||
+    /[\s\\]/.test(input) ||
+    input.startsWith("/") ||
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.port ||
+    !url.hostname.includes(".")
+  )
+    throw new Error(
+      "Укажите публичный HTTPS-адрес без логина, пароля и номера порта.",
+    );
+  return address;
+}
 export function isVkMaterial(
   material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
 ): boolean {
