@@ -884,6 +884,25 @@
   line-height: 1.55;
   overflow-y: auto;
   box-shadow: 0 20px 80px #27223a30;
+  scrollbar-width: thin;
+  scrollbar-color: #c8c5d4 transparent;
+}
+.dialog::-webkit-scrollbar {
+  width: 8px;
+}
+.dialog::-webkit-scrollbar-track {
+  background: transparent;
+  margin-block: 12px;
+}
+.dialog::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #c8c5d4;
+  background-clip: padding-box;
+}
+.dialog::-webkit-scrollbar-thumb:hover {
+  background: #aaa5bd;
+  background-clip: padding-box;
 }
 .dialog::backdrop {
   background: #17132955;
