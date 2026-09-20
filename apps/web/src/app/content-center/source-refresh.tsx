@@ -97,15 +97,8 @@ export function SourceRefresh({
       {vk && (
         <VkConnection
           path={path}
-          revision={material.revision}
-          disabled={submitting || running}
           request={request}
           onConnectionChange={setVkConnected}
-          onUpdated={async () => {
-            const updated = await request<ProjectMaterial>(path);
-            if (alive.current) setMaterial(updated);
-            await onUpdated();
-          }}
         />
       )}
       {(material.url_category === "site" || vk) && (

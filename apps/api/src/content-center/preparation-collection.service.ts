@@ -94,7 +94,7 @@ export class PreparationCollectionService {
               error:
                 error instanceof VkSourceError
                   ? error.message
-                  : 'Не удалось прочитать VK. Проверьте подключение источника.',
+                  : 'Не удалось прочитать VK. Проверьте общее подключение VK в настройках CMS.',
             },
           ];
         }

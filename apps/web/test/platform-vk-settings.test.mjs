@@ -7,11 +7,11 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 const require = createRequire(import.meta.url);
-async function render(file, exportName, states, props = {}) {
+async function render(file, exportName, states, props = {}, effects = []) {
   const source = await readFile(new URL(`../src/app/${file}.tsx`, import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
   let index = 0;
-  const react = { ...React, useState: initial => [index < states.length ? states[index++] : initial, () => {}], useEffect: () => {}, useRef: initial => ({ current: initial }) };
+  const react = { ...React, useState: initial => [index < states.length ? states[index++] : initial, () => {}], useEffect: effect => effects.push(effect), useRef: initial => ({ current: initial }) };
   const target = { exports: {} };
   new Function('require', 'module', 'exports', compiled.outputText)(id => id === 'react' ? react : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
   return renderToStaticMarkup(React.createElement(target.exports[exportName], props));
@@ -27,16 +27,30 @@ test('platform VK setup has a single password field and a read-only API check, w
   assert.match(html, /без AI и сохранения материалов/);
 });
 
-test('customer VK setup never asks for a secret, and only enables consent when the platform is configured', async () => {
+test('customer VK source has no consent, connection or secret controls', async () => {
   const props = { path: '/api/source', revision: 1, disabled: false, request() { throw new Error('No requests during render'); }, onUpdated: async () => {}, onConnectionChange() {} };
   for (const configured of [false, true]) {
     const html = await render('content-center/vk-connection', 'VkConnection', [{ connected: false, ready: false, platformConfigured: configured }], props);
-    assert.doesNotMatch(html, /type="password"|Пользовательский ключ/);
-    assert.match(html, /[Кк]люч заказчика не нужен/);
-    if (configured) assert.match(html, /type="checkbox" required=""/);
-    else { assert.match(html, /Администратор CMS должен настроить/); assert.doesNotMatch(html, /type="submit"/); }
+    assert.doesNotMatch(html, /type="password"|Пользовательский ключ|type="checkbox"|<form|Подключить сообщество|Отключить VK/);
+    if (!configured) assert.match(html, /Администратор CMS должен настроить/);
   }
   const html = await render('content-center/vk-connection', 'VkConnection', [{ connected: true, ready: false, platformConfigured: false, groupName: 'Компания' }], props);
   assert.match(html, /VK · Компания/);
   assert.match(html, /Сохранённые материалы остаются доступны/);
+});
+
+test('saved platform key enables first collection via read-only status, with no implicit consent request', async () => {
+  const effects = [];
+  const requests = [];
+  const ready = [];
+  await render('content-center/vk-connection', 'VkConnection', [], {
+    path: '/api/source',
+    request: async (...args) => { requests.push(args); return { connected: false, ready: true, platformConfigured: true }; },
+    onConnectionChange: value => ready.push(value),
+  }, effects);
+  const cleanup = effects[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(requests, [['/api/source/vk']]);
+  assert.deepEqual(ready, [false, true]);
+  cleanup();
 });

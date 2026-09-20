@@ -321,7 +321,7 @@ integration('Content Center / isolated PostgreSQL', () => {
           draft.sourceUrl,
           new AbortController().signal,
         ),
-      ).rejects.toThrow('не подключено');
+      ).rejects.toThrow('изменён или удалён');
       await request(http)
         .put(path)
         .send({ revision: 1, consent: true })
@@ -448,7 +448,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       );
       expect(await vk.status(workspace, material.id)).toEqual({
         connected: false,
-        ready: false,
+        ready: true,
         platformConfigured: true,
       });
       expect(
@@ -460,7 +460,7 @@ integration('Content Center / isolated PostgreSQL', () => {
         .expect(200);
       await request(http).delete(path).send({ revision: 4 }).expect(200, {
         connected: false,
-        ready: false,
+        ready: true,
         platformConfigured: true,
       });
       const disconnected = await service.getMaterial(
@@ -480,6 +480,123 @@ integration('Content Center / isolated PostgreSQL', () => {
       ).toHaveLength(0);
     } finally {
       await app.close();
+      jest.restoreAllMocks();
+      if (previousKey === undefined) delete process.env.AI_ENCRYPTION_KEY;
+      else process.env.AI_ENCRYPTION_KEY = previousKey;
+    }
+  });
+
+  it('collects a new VK source with the shared key without connection or consent requests', async () => {
+    const previousKey = process.env.AI_ENCRYPTION_KEY;
+    process.env.AI_ENCRYPTION_KEY = '34'.repeat(32);
+    try {
+      const sourceUrl = 'https://vk.com/club77';
+      const material = await service.saveMaterial(workspace, employee, {
+        title: 'VK without setup',
+        kind: 'url',
+        urlCategory: 'social',
+        sourceUrl,
+      });
+      const client = new VkSourceClient();
+      const community = jest.spyOn(client, 'community').mockResolvedValue({
+        id: 77,
+        name: 'Компания',
+        description: '',
+        status: '',
+        site: '',
+      });
+      jest.spyOn(client, 'collect').mockResolvedValue({
+        pages: [
+          {
+            url: 'https://vk.com/wall-77_1',
+            title: 'Публикация',
+            content: 'Факты компании',
+            group: 'Публикации VK',
+            status: 'loaded',
+            recommended: true,
+          },
+        ],
+        warnings: [],
+      });
+      const settings = new PlatformVkSettingsService(db, client);
+      const vk = new VkConnectionService(db, client, settings);
+      expect(await vk.status(workspace, material.id)).toMatchObject({
+        ready: false,
+      });
+      const token = 'test-only-auto-vk-service-token';
+      await settings.save({ revision: 0, token }, admin.userId);
+      expect(await vk.status(workspace, material.id)).toMatchObject({
+        connected: false,
+        ready: true,
+      });
+      for (const [scope, revision, url] of [
+        [otherWorkspace, 1, sourceUrl],
+        [workspace, 2, sourceUrl],
+        [workspace, 1, 'https://vk.com/club88'],
+      ] as const) {
+        await expect(
+          vk.collect(
+            scope,
+            material.id,
+            revision,
+            url,
+            new AbortController().signal,
+          ),
+        ).rejects.toThrow('изменён или удалён');
+      }
+      expect(community).not.toHaveBeenCalled();
+      const worker = new ContentCenterService(
+        db,
+        new PreparationAiService(),
+        new PreparationCollectionService(db, vk),
+      );
+      await expect(
+        worker.refreshSource(otherWorkspace, material.id, employee, 1),
+      ).rejects.toThrow('недоступно');
+      await worker.refreshSource(workspace, material.id, employee, 1);
+      await worker.processNext();
+      const collected = await worker.getMaterial(
+        workspace,
+        material.id,
+        employee,
+      );
+      expect(collected.collection_run?.status).toBe('succeeded');
+      expect(collected.revision).toBe(1);
+      expect(collected.site_pages).toMatchObject({
+        mode: 'social-feed',
+        pages: [{ content: 'Факты компании' }],
+      });
+      expect(community).toHaveBeenCalledWith(
+        token,
+        sourceUrl,
+        expect.any(AbortSignal),
+        false,
+      );
+      expect(
+        await db.query('SELECT material_id FROM cc_vk_connections'),
+      ).toHaveLength(0);
+      expect(generate).not.toHaveBeenCalled();
+      expect(
+        (await worker.overview(workspace, employee)).versions,
+      ).toHaveLength(0);
+      expect(JSON.stringify(collected)).not.toContain(token);
+      await settings.remove(1, admin.userId);
+      expect(await vk.status(workspace, material.id)).toMatchObject({
+        ready: false,
+      });
+      await expect(
+        vk.collect(
+          workspace,
+          material.id,
+          1,
+          sourceUrl,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow('общее подключение VK');
+      expect(
+        (await worker.getMaterial(workspace, material.id, employee)).site_pages,
+      ).not.toBeNull();
+    } finally {
       jest.restoreAllMocks();
       if (previousKey === undefined) delete process.env.AI_ENCRYPTION_KEY;
       else process.env.AI_ENCRYPTION_KEY = previousKey;

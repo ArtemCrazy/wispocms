@@ -69,7 +69,7 @@ export class VkConnectionService {
         }
       : {
           connected: false,
-          ready: false,
+          ready: platform.configured,
           platformConfigured: platform.configured,
         };
   }
@@ -169,15 +169,16 @@ export class VkConnectionService {
     signal: AbortSignal,
   ) {
     const [connection] = await this.db.query<
-      Array<{ encrypted_token: string | null; group_id: string }>
+      Array<{ encrypted_token: string | null; group_id: string | null }>
     >(
-      `SELECT c.encrypted_token,c.group_id FROM cc_vk_connections c JOIN cc_materials m ON m.workspace_id=c.workspace_id AND m.id=c.material_id
-      WHERE c.workspace_id=$1 AND c.material_id=$2 AND c.source_url=$3 AND m.source_url=c.source_url AND m.revision=$4 AND m.kind='url' AND m.url_category='social'`,
+      `SELECT c.encrypted_token,c.group_id FROM cc_materials m
+      LEFT JOIN cc_vk_connections c ON c.workspace_id=m.workspace_id AND c.material_id=m.id AND c.source_url=m.source_url
+      WHERE m.workspace_id=$1 AND m.id=$2 AND m.source_url=$3 AND m.revision=$4 AND m.kind='url' AND m.url_category='social'`,
       [workspaceId, id, sourceUrl, revision],
     );
     if (!connection)
       throw new VkSourceError(
-        'Сообщество VK не подключено или ссылка изменилась. Откройте информацию об источнике и подключите VK.',
+        'Источник VK изменён или удалён. Откройте его заново и повторите сбор.',
       );
     const token = connection.encrypted_token
       ? decryptVkToken(connection.encrypted_token, workspaceId, id!)
@@ -188,9 +189,9 @@ export class VkConnectionService {
       signal,
       Boolean(connection.encrypted_token),
     );
-    if (community.id !== Number(connection.group_id))
+    if (connection.group_id && community.id !== Number(connection.group_id))
       throw new VkSourceError(
-        'Адрес VK теперь указывает на другое сообщество. Подключите источник заново.',
+        'Адрес VK теперь указывает на другое сообщество. Проверьте адрес и добавьте актуальную ссылку.',
       );
     return this.client.collect(token, community, signal);
   }

@@ -47,10 +47,22 @@ test('non-site source has no refresh action', () => {
   assert.doesNotMatch(render({ url_category: 'social' }), /Обновить сбор|Сбор выполняется/);
 });
 
-test('VK exposes secure connection and disables collection until the connection is checked', () => {
+test('VK waits only for common-key readiness and has no manual connection step', () => {
   const html = render({ kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null });
-  assert.match(html, /Подключить VK/);
+  assert.match(html, /ВКонтакте/);
+  assert.doesNotMatch(html, /Подключить сообщество|type="checkbox"/);
   assert.match(html, /180 дней/);
   assert.match(html, /disabled="">Обновить сбор/);
-  assert.match(html, /Проверяем подключение/);
+  assert.match(html, /Проверяем настройки VK/);
+});
+
+test('VK refresh is enabled once the shared key is ready, even without a previous collection', async () => {
+  let state = 0;
+  const readyReact = { ...React, useState: initial => [++state === 4 ? true : initial, () => {}] };
+  const readyComponent = await compile('source-refresh', { react: readyReact, './source-registry': () => null, './materials': materials, './vk-connection': { VkConnection: () => null } });
+  const html = renderToStaticMarkup(React.createElement(readyComponent.SourceRefresh, {
+    initial: { ...initial, kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null },
+    base: '/api/workspaces/one/content-center', request: async () => {}, onUpdated: async () => {},
+  }));
+  assert.match(html, /<button type="button">Обновить сбор<\/button>/);
 });
