@@ -1043,7 +1043,15 @@
 .sourceBody {
   padding: 0 18px 18px;
 }
-.sourceHeading .sourceInfo {
+.sourceListHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.sourceListHeader .sourceInfo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1057,16 +1065,17 @@
   color: #6c7282;
   cursor: pointer;
 }
-.sourceHeading .sourceInfo:hover,
-.sourceHeading .sourceInfo[aria-expanded="true"] {
+.sourceListHeader .sourceInfo:hover,
+.sourceListHeader .sourceInfo[aria-expanded="true"] {
   background: #eee9ff;
   color: #674ad3;
 }
-.sourceHeading .sourceInfo:focus-visible {
+.sourceListHeader .sourceInfo:focus-visible {
   outline: 2px solid #7054ec;
   outline-offset: 2px;
 }
 .sourceNote {
+  margin-bottom: 12px;
   padding: 12px 14px;
   border: 1px solid #e3e2ed;
   border-radius: 10px;
@@ -1080,7 +1089,7 @@
   margin-top: 6px;
 }
 .sourceListHeading {
-  margin: 20px 0 10px;
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
   color: #454354;

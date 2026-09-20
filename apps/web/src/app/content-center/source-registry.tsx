@@ -67,38 +67,36 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                   Снимок от {new Date(source.checkedAt).toLocaleString("ru-RU")}
                 </span>
               </span>
-              <span className={styles.sourceCoverage}>
-                Включено{" "}
-                {source.pages.filter((p) => p.status === "loaded").length} из{" "}
-                {source.pages.length}
-              </span>
-              <button
-                type="button"
-                className={styles.sourceInfo}
-                aria-label={`Пояснение об охвате: ${source.title}`}
-                aria-expanded={hintOpen}
-                aria-controls={panelId}
-                title="Что означают эти числа"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const card = event.currentTarget.closest("details");
-                  if (card) card.open = true;
-                  setOpenHints((current) => ({
-                    ...current,
-                    [source.sourceId]: !current[source.sourceId],
-                  }));
-                }}
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M12 11v6" />
-                  <circle cx="12" cy="7.5" r=".75" fill="currentColor" stroke="none" />
-                </svg>
-              </button>
               <span className={styles.sourceChevron} aria-hidden="true" />
             </summary>
             <div className={styles.sourceBody}>
+              <div className={styles.sourceListHeader}>
+                <h3 className={styles.sourceListHeading}>Страницы источника</h3>
+                <button
+                  type="button"
+                  className={styles.sourceInfo}
+                  aria-label={`Пояснение об охвате: ${source.title}`}
+                  aria-expanded={hintOpen}
+                  aria-controls={panelId}
+                  title="Что означают эти числа"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const card = event.currentTarget.closest("details");
+                    if (card) card.open = true;
+                    setOpenHints((current) => ({
+                      ...current,
+                      [source.sourceId]: !current[source.sourceId],
+                    }));
+                  }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 11v6" />
+                    <circle cx="12" cy="7.5" r=".75" fill="currentColor" stroke="none" />
+                  </svg>
+                </button>
+              </div>
               <div id={panelId} className={styles.sourceNote} hidden={!hintOpen}>
                 <p>
                   Найдено адресов: {source.pages.length}. «Включено» — страницы,
@@ -136,7 +134,6 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                   <p key={warning}>{warning}</p>
                 ))}
               </div>
-              <h3 className={styles.sourceListHeading}>Страницы источника</h3>
               <div
                 className={styles.sourceFilters}
                 role="group"

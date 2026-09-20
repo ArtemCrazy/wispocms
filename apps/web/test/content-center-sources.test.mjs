@@ -19,7 +19,8 @@ test('registry is optional, read-only and renders saved text as escaped data', (
     { title: 'Закрытая', url: 'https://example.com/private', status: 'failed', error: 'robots.txt' },
     { title: 'Архив', url: 'javascript:bad()', status: 'found' },
   ] }] }));
-  assert.match(html, /Включено 1 из 3/);
+  assert.doesNotMatch(html, /Включено 1 из 3/);
+  assert.match(html, /Включено <span>1<\/span>/);
   assert.match(html, /<details open="">/);
   assert.match(html, /<details>/);
   assert.match(html, /Недоступна/);
@@ -57,7 +58,7 @@ test('an unread source stays visible and several sources can be expanded indepen
     { ...source, sourceId: 'S1' }, { ...source, sourceId: 'S2' },
   ] }));
   assert.equal((html.match(/<details>/g) ?? []).length, 2);
-  assert.match(html, /Включено 0 из 0/);
+  assert.doesNotMatch(html, /Включено 0 из 0/);
   assert.match(html, /Включено <span>0<\/span>/);
   assert.doesNotMatch(html, /<details open|Дубликаты/);
 });
@@ -129,7 +130,8 @@ test('110 found addresses are partitioned once, with coverage details collapsed 
   const pages = ['loaded', 'found', 'failed'].flatMap((status, group) =>
     Array.from({ length: [81, 25, 4][group] }, (_, index) => ({ title: `${status}-${index}`, url: `https://example.com/${status}/${index}`, status })));
   const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{ sourceId: 'S1', title: 'Сайт', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages }] }));
-  assert.match(html, /Включено 81 из 110/);
+  assert.doesNotMatch(html, /Включено 81 из 110/);
+  assert.match(html, /<h3>Страницы источника<\/h3><button type="button" aria-label="Пояснение об охвате: Сайт"/);
   for (const [label, count] of [['Все', 110], ['Включено', 81], ['Не включено', 25], ['Недоступно', 4]])
     assert.ok(html.includes(`${label} <span>${count}</span>`));
   assert.doesNotMatch(html, /<dl|Охват неполный|Прочитано 110/);
