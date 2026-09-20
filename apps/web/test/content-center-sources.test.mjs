@@ -132,7 +132,9 @@ test('110 found addresses are partitioned once, with coverage details collapsed 
     Array.from({ length: [81, 25, 4][group] }, (_, index) => ({ title: `${status}-${index}`, url: `https://example.com/${status}/${index}`, status })));
   const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{ sourceId: 'S1', title: 'Сайт', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages }] }));
   assert.doesNotMatch(html, /Включено 81 из 110/);
-  assert.match(html, /<h3>Страницы источника<\/h3><button type="button" aria-label="Пояснение об охвате: Сайт"/);
+  assert.doesNotMatch(html, /Страницы источника|<h3/);
+  assert.match(html, /<div><div role="group" aria-label="Фильтр страниц: Сайт">/);
+  assert.match(html, /<\/button><\/div><button type="button" aria-label="Пояснение об охвате: Сайт"/);
   for (const [label, count] of [['Все', 110], ['Включено', 81], ['Не включено', 25], ['Недоступно', 4]])
     assert.ok(html.includes(`${label} <span>${count}</span>`));
   assert.doesNotMatch(html, /<dl|Охват неполный|Прочитано 110/);

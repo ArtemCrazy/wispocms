@@ -65,8 +65,36 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
               </span>
             </header>
             <div className={styles.sourceBody}>
-              <div className={styles.sourceListHeader}>
-                <h3 className={styles.sourceListHeading}>Страницы источника</h3>
+              <div className={styles.sourceToolbar}>
+                <div
+                  className={styles.sourceFilters}
+                  role="group"
+                  aria-label={`Фильтр страниц: ${source.title}`}
+                >
+                  {filters.map(([filter, label]) => {
+                    const count = filterSourcePages(source.pages, filter).length;
+                    if (
+                      (filter === "duplicate" || filter === "pending") &&
+                      count === 0
+                    )
+                      return null;
+                    return (
+                      <button
+                        key={filter}
+                        type="button"
+                        aria-pressed={selectedFilter === filter}
+                        onClick={() =>
+                          setSelectedFilters((current) => ({
+                            ...current,
+                            [source.sourceId]: filter,
+                          }))
+                        }
+                      >
+                        {label} <span>{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <button
                   type="button"
                   className={styles.sourceInfo}
@@ -124,35 +152,6 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 {source.warnings.map((warning) => (
                   <p key={warning}>{warning}</p>
                 ))}
-              </div>
-              <div
-                className={styles.sourceFilters}
-                role="group"
-                aria-label={`Фильтр страниц: ${source.title}`}
-              >
-                {filters.map(([filter, label]) => {
-                  const count = filterSourcePages(source.pages, filter).length;
-                  if (
-                    (filter === "duplicate" || filter === "pending") &&
-                    count === 0
-                  )
-                    return null;
-                  return (
-                    <button
-                      key={filter}
-                      type="button"
-                      aria-pressed={selectedFilter === filter}
-                      onClick={() =>
-                        setSelectedFilters((current) => ({
-                          ...current,
-                          [source.sourceId]: filter,
-                        }))
-                      }
-                    >
-                      {label} <span>{count}</span>
-                    </button>
-                  );
-                })}
               </div>
               <p className={styles.sourceFilterCount} role="status">
                 {visiblePages.length
