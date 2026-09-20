@@ -11,6 +11,7 @@ import { encryptVkToken } from './vk-secret';
 import { VkConnectionService } from './vk-connection.service';
 import { VkConnectionController } from './vk-connection.controller';
 import { VkSourceClient } from './vk-source';
+import { TelegramSourceClient, TelegramSourceError } from './telegram-source';
 import { PreparationCollectionService } from './preparation-collection.service';
 import { PreparationRequestLabels1790659200000 } from '../database/migrations/1790659200000-PreparationRequestLabels';
 import { PreparationReadablePrompts1790745600000 } from '../database/migrations/1790745600000-PreparationReadablePrompts';
@@ -135,6 +136,117 @@ integration('Content Center / isolated PostgreSQL', () => {
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
+  });
+
+  it('collects a Telegram channel through the queue without keys or AI and preserves the snapshot on failure', async () => {
+    const read = jest
+      .spyOn(publicMaterial, 'readPublicResource')
+      .mockResolvedValue({
+        status: 200,
+        html: true,
+        url: 'https://t.me/s/customer',
+        body: `<div class="tgme_channel_info_description">Описание компании</div><div class="tgme_widget_message" data-post="customer/10"><time datetime="${new Date().toISOString()}"></time><div class="tgme_widget_message_text">Собственная публикация<br>Новые услуги</div></div>`,
+      });
+    try {
+      const material = await service.saveMaterial(workspace, employee, {
+        kind: 'url',
+        title: 'Telegram',
+        urlCategory: 'social',
+        sourceUrl: 'https://t.me/customer',
+      });
+      expect(read).not.toHaveBeenCalled();
+      await expect(
+        service.refreshSource(otherWorkspace, material.id, employee, 1),
+      ).rejects.toThrow();
+      await expect(
+        service.refreshSource(workspace, material.id, employee, 2),
+      ).rejects.toThrow('изменилась');
+      await service.refreshSource(workspace, material.id, employee, 1);
+      await service.processNext();
+      const collected = await service.getMaterial(
+        workspace,
+        material.id,
+        employee,
+      );
+      expect(collected.collection_run?.status).toBe('succeeded');
+      expect(collected.revision).toBe(1);
+      expect(collected.site_pages).toMatchObject({
+        mode: 'social-feed',
+        pages: [
+          { content: 'Описание компании' },
+          { url: 'https://t.me/customer/10', status: 'loaded' },
+        ],
+      });
+      expect(collected.site_pages?.pages[1].content).toContain(
+        'Собственная публикация\nНовые услуги',
+      );
+      expect(generate).not.toHaveBeenCalled();
+      expect(
+        (await service.overview(workspace, employee)).versions,
+      ).toHaveLength(0);
+      read.mockRejectedValue(new Error('transport-error'));
+      await service.refreshSource(workspace, material.id, employee, 1);
+      await service.processNext();
+      const failed = await service.getMaterial(
+        workspace,
+        material.id,
+        employee,
+      );
+      expect(failed.collection_run?.status).toBe('failed');
+      expect(failed.site_pages).toEqual(collected.site_pages);
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('does not apply Telegram collection if its source was edited or deleted', async () => {
+    const collect = jest.spyOn(TelegramSourceClient.prototype, 'collect');
+    try {
+      const material = await service.saveMaterial(workspace, employee, {
+        kind: 'url',
+        title: 'Telegram',
+        urlCategory: 'social',
+        sourceUrl: 'https://t.me/customer',
+      });
+      await service.refreshSource(workspace, material.id, employee, 1);
+      collect.mockImplementation(async () => {
+        await db.query(
+          'UPDATE cc_materials SET revision=revision+1,source_url=$2 WHERE id=$1',
+          [material.id, 'https://t.me/changed'],
+        );
+        return {
+          pages: [
+            {
+              url: 'https://t.me/customer/1',
+              title: 'Old',
+              group: 'Telegram',
+              status: 'loaded',
+              recommended: true,
+              content: 'Stale',
+            },
+          ],
+          warnings: [],
+        };
+      });
+      await service.processNext();
+      const updated = await service.getMaterial(
+        workspace,
+        material.id,
+        employee,
+      );
+      expect(updated.collection_run?.status).toBe('failed');
+      expect(updated.site_pages).toBeNull();
+      collect.mockRejectedValue(new TelegramSourceError('Must not be called'));
+      await service.refreshSource(workspace, material.id, employee, 2);
+      await db.query('DELETE FROM cc_materials WHERE id=$1', [material.id]);
+      collect.mockClear();
+      await service.processNext();
+      expect(collect).not.toHaveBeenCalled();
+      expect(generate).not.toHaveBeenCalled();
+    } finally {
+      collect.mockRestore();
+    }
   });
 
   it('uses an admin-only global VK key, connects an authorized source without customer secrets and collects without AI', async () => {

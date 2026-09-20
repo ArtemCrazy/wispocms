@@ -38,6 +38,7 @@ import {
 import { validateMaterialFile } from './material-file';
 import type { MaterialUpload } from './material-file';
 import { isVkUrl, vkCommunityAddress } from './vk-source';
+import { isTelegramUrl, telegramChannel } from './telegram-source';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -225,12 +226,14 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         material.kind !== 'url' ||
         !(
           material.url_category === 'site' ||
-          (material.url_category === 'social' && isVkUrl(material.source_url))
+          (material.url_category === 'social' &&
+            (isVkUrl(material.source_url) ||
+              isTelegramUrl(material.source_url)))
         ) ||
         !material.source_url
       )
         throw new BadRequestException(
-          'Обновить сбор можно для сайта или сообщества VK',
+          'Обновить сбор можно для сайта, сообщества VK или Telegram-канала',
         );
       if (material.revision !== revision)
         throw new ConflictException(
@@ -344,8 +347,11 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     if (dto.kind === 'url') {
       publicMaterialUrl(dto.sourceUrl ?? '');
       const vkSource = dto.urlCategory === 'social' && isVkUrl(dto.sourceUrl);
+      const telegramSource =
+        dto.urlCategory === 'social' && isTelegramUrl(dto.sourceUrl);
       if (vkSource) vkCommunityAddress(dto.sourceUrl!);
-      if (dto.urlCategory === 'site' || vkSource) {
+      if (telegramSource) telegramChannel(dto.sourceUrl!);
+      if (dto.urlCategory === 'site' || vkSource || telegramSource) {
         // Collection belongs to the explicit run, not to saving a link.
         content = '';
       } else

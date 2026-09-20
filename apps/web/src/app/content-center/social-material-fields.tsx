@@ -5,13 +5,13 @@ export const SOCIAL_NETWORKS = [
     id: "vk",
     label: "ВКонтакте",
     placeholder: "https://vk.com/community",
-    hint: "После сохранения подтвердите использование публикаций заказчика. Для сбора нужно общее подключение VK в настройках CMS — ключ заказчика не нужен.",
+    hint: "Для сбора нужно общее подключение VK в настройках CMS — ключ заказчика не нужен.",
   },
   {
     id: "telegram",
     label: "Telegram",
     placeholder: "https://t.me/channel",
-    hint: "Автоматический сбор Telegram пока не подключён. Можно сохранить ссылку и добавить текст отдельно.",
+    hint: "Публичный канал заказчика: до 100 последних публикаций за 180 дней. Без бота и ключей. Собственные материалы с разрешением заказчика на AI-обработку.",
   },
   {
     id: "youtube",
@@ -65,6 +65,18 @@ export function socialSourceUrl(value: string, network: SocialNetwork): string {
       `Укажите ссылку ${label} или выберите другую социальную сеть.`,
     );
   }
+  if (
+    network === "telegram" &&
+    (!/^\/(?:s\/)?[a-zA-Z][a-zA-Z0-9_]{3,31}\/?$/.test(url.pathname) ||
+      url.search ||
+      url.hash ||
+      /^\/(?:s\/)?(joinchat|share|proxy|socks|addstickers|addemoji|login|iv|boost|contact)\/?$/i.test(
+        url.pathname,
+      ))
+  )
+    throw new Error(
+      "Укажите ссылку на публичный Telegram-канал, не на отдельный пост или приглашение.",
+    );
   return value.trim();
 }
 

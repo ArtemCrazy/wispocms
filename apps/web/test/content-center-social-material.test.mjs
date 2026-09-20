@@ -64,8 +64,15 @@ test("each network has its own placeholder and honest collection status", () => 
     );
     assert.ok(html.includes(address));
     if (network === "vk") assert.match(html, /ключ заказчика не нужен/);
+    else if (network === "telegram") assert.match(html, /100 последних публикаций за 180 дней/);
     else assert.match(html, /пока не подключён/);
   }
+});
+
+test("Telegram only accepts a public channel address", () => {
+  assert.equal(socialSourceUrl("https://t.me/s/company", "telegram"), "https://t.me/s/company");
+  for (const path of ["/+private", "/c/123/1", "/company/12", "/company?before=1", "/share", "/proxy", "/joinchat/secret"])
+    assert.throws(() => socialSourceUrl(`https://t.me${path}`, "telegram"));
 });
 
 test("network and URL interactions update their separate draft fields", () => {

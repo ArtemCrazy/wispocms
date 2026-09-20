@@ -113,3 +113,23 @@ export function fileSize(bytes: number | null) {
   if (bytes < 1024) return `${bytes} Б`;
   return `${(bytes / (bytes < 1048576 ? 1024 : 1048576)).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} ${bytes < 1048576 ? "КБ" : "МБ"}`;
 }
+
+export function isTelegramMaterial(
+  material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
+): boolean {
+  if (material.kind !== "url" || material.url_category !== "social")
+    return false;
+  try {
+    return ["t.me", "www.t.me", "telegram.me", "www.telegram.me"].includes(
+      new URL(material.source_url ?? "").hostname,
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isSocialFeedMaterial(
+  material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
+): boolean {
+  return isVkMaterial(material) || isTelegramMaterial(material);
+}

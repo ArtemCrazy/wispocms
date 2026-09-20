@@ -47,6 +47,14 @@ test('non-site source has no refresh action', () => {
   assert.doesNotMatch(render({ url_category: 'social' }), /Обновить сбор|Сбор выполняется/);
 });
 
+test('Telegram has an immediately available refresh without key, bot or connection step', () => {
+  const html = render({ kind: 'url', url_category: 'social', source_url: 'https://t.me/customer_channel', site_pages: null });
+  assert.match(html, /<button type="button">Обновить сбор<\/button>/);
+  assert.match(html, /100 последних публикаций за 180 дней/);
+  assert.doesNotMatch(html, /type="checkbox"|Подключить сообщество|Проверяем настройки VK/);
+  assert.match(html, /без AI и изменения версий/);
+});
+
 test('VK waits only for common-key readiness and has no manual connection step', () => {
   const html = render({ kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null });
   assert.match(html, /ВКонтакте/);

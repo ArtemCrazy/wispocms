@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { isVkMaterial, type ProjectMaterial } from "./materials";
+import {
+  isVkMaterial,
+  isTelegramMaterial,
+  type ProjectMaterial,
+} from "./materials";
 import { VkConnection } from "./vk-connection";
 import { SourceRegistry } from "./source-registry";
 import styles from "./content-center-view.module.css";
@@ -22,6 +26,7 @@ export function SourceRefresh({
   const [error, setError] = useState("");
   const [vkConnected, setVkConnected] = useState(false);
   const vk = isVkMaterial(material);
+  const telegram = isTelegramMaterial(material);
   const alive = useRef(true);
   const submittingRef = useRef(false);
   const running =
@@ -101,12 +106,18 @@ export function SourceRefresh({
           onConnectionChange={setVkConnected}
         />
       )}
-      {(material.url_category === "site" || vk) && (
+      {telegram && (
+        <p className={styles.muted}>
+          Публичный Telegram-канал: до 100 последних публикаций за 180 дней. Без
+          репостов, комментариев и чтения вложений.
+        </p>
+      )}
+      {(material.url_category === "site" || vk || telegram) && (
         <>
           <div className={styles.cardHead}>
             <span className={styles.muted}>
-              Только сбор {vk ? "публикаций" : "страниц"} — без AI и изменения
-              версий.
+              Только сбор {vk || telegram ? "публикаций" : "страниц"} — без AI и
+              изменения версий.
             </span>
             <button
               type="button"

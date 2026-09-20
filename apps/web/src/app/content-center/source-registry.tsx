@@ -224,7 +224,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                   <div className={styles.sourceHelpContent}>
                     {social ? (
                       <p>
-                        Здесь описание сообщества и полученные публикации VK.
+                        Здесь описание источника и полученные публикации.
                         «Включено» — собственный текст для обработки; «Не
                         включено» — репосты и записи без текста. Вложения не
                         прочитаны.

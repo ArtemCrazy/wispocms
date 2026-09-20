@@ -26,6 +26,7 @@ import { CreationView } from "./creation-view";
 import {
   SOURCE_CATEGORIES,
   isVkMaterial,
+  isSocialFeedMaterial,
   type ProjectMaterial as Material,
   type SourceCategory,
   type SourceSnapshot,
@@ -983,7 +984,7 @@ export function ContentCenterView({
                 setMaterial(null);
                 setWithoutMaterials(false);
                 if (
-                  isVkMaterial({
+                  isSocialFeedMaterial({
                     kind: material.kind,
                     url_category: material.urlCategory ?? "other",
                     source_url: material.sourceUrl,
@@ -1094,7 +1095,7 @@ export function ContentCenterView({
                           url_category: material.urlCategory ?? "other",
                           source_url: material.sourceUrl,
                         }) ? (
-                          "После сохранения подтвердите использование публикаций заказчика. Для сбора нужно общее подключение VK в настройках CMS — ключ заказчика не нужен."
+                          "Для сбора нужно общее подключение VK в настройках CMS — ключ заказчика не нужен."
                         ) : material.urlCategory === "site" ? (
                           "При запуске обработки автоматически соберём основные страницы о компании и продукте. Блог и новости прочитаем выборочно. Выбирать страницы вручную не нужно."
                         ) : (

@@ -12,6 +12,11 @@ import {
 import { preparationTopic } from './preparation-topics';
 import { isVkUrl, VkSourceError } from './vk-source';
 import { VkConnectionService } from './vk-connection.service';
+import {
+  isTelegramUrl,
+  TelegramSourceClient,
+  TelegramSourceError,
+} from './telegram-source';
 import type {
   PreparationInput,
   PreparationProgress,
@@ -70,6 +75,8 @@ export class PreparationCollectionService {
       });
       const vkSource =
         material.urlCategory === 'social' && isVkUrl(material.sourceUrl);
+      const telegramSource =
+        material.urlCategory === 'social' && isTelegramUrl(material.sourceUrl);
       if (material.sourceUrl && vkSource) {
         snapshot.mode = 'social-feed';
         try {
@@ -95,6 +102,38 @@ export class PreparationCollectionService {
                 error instanceof VkSourceError
                   ? error.message
                   : 'Не удалось прочитать VK. Проверьте общее подключение VK в настройках CMS.',
+            },
+          ];
+        }
+      } else if (material.sourceUrl && telegramSource) {
+        snapshot.mode = 'social-feed';
+        try {
+          const collected = await new TelegramSourceClient().collect(
+            material.sourceUrl,
+            signal,
+          );
+          snapshot.pages = collected.pages;
+          snapshot.warnings = collected.warnings;
+        } catch (error) {
+          signal.throwIfAborted();
+          // A failed refresh must leave the previous Telegram snapshot intact.
+          if (options.allowUnread)
+            throw new AiProviderError(
+              error instanceof TelegramSourceError
+                ? error.message
+                : 'Не удалось прочитать публичный Telegram-канал. Предыдущий сбор сохранён.',
+            );
+          snapshot.pages = [
+            {
+              url: material.sourceUrl,
+              title: material.title,
+              group: 'Telegram',
+              status: 'failed',
+              recommended: true,
+              error:
+                error instanceof TelegramSourceError
+                  ? error.message
+                  : 'Не удалось прочитать публичный Telegram-канал. Проверьте ссылку или добавьте текст вручную.',
             },
           ];
         }
@@ -259,7 +298,7 @@ export class PreparationCollectionService {
         options.persistSnapshots !== false &&
         material.id &&
         material.sourceUrl &&
-        (material.urlCategory === 'site' || vkSource)
+        (material.urlCategory === 'site' || vkSource || telegramSource)
       ) {
         // An edit/deletion during collection cannot be overwritten or resurrected.
         await this.db.query(
