@@ -55,20 +55,15 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
         const hintOpen = Boolean(openHints[source.sourceId]);
         const panelId = `${hintId}-${source.sourceId}`;
         return (
-          <details
-            className={styles.sourceCard}
-            key={source.sourceId}
-            open={sources.length === 1}
-          >
-            <summary className={styles.sourceHeading}>
+          <section className={styles.sourceCard} key={source.sourceId}>
+            <header className={styles.sourceHeading}>
               <span className={styles.sourceHeadingText}>
                 <span className={styles.sourceTitle}>{source.title}</span>
                 <span className={styles.sourceDate}>
                   Снимок от {new Date(source.checkedAt).toLocaleString("ru-RU")}
                 </span>
               </span>
-              <span className={styles.sourceChevron} aria-hidden="true" />
-            </summary>
+            </header>
             <div className={styles.sourceBody}>
               <div className={styles.sourceListHeader}>
                 <h3 className={styles.sourceListHeading}>Страницы источника</h3>
@@ -79,11 +74,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                   aria-expanded={hintOpen}
                   aria-controls={panelId}
                   title="Что означают эти числа"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const card = event.currentTarget.closest("details");
-                    if (card) card.open = true;
+                  onClick={() => {
                     setOpenHints((current) => ({
                       ...current,
                       [source.sourceId]: !current[source.sourceId],
@@ -214,7 +205,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 ))}
               </ul>
             </div>
-          </details>
+          </section>
         );
       })}
     </div>

@@ -21,7 +21,8 @@ test('registry is optional, read-only and renders saved text as escaped data', (
   ] }] }));
   assert.doesNotMatch(html, /Включено 1 из 3/);
   assert.match(html, /Включено <span>1<\/span>/);
-  assert.match(html, /<details open="">/);
+  assert.match(html, /<section><header>/);
+  assert.doesNotMatch(html, /<details open="">|<summary><span>/);
   assert.match(html, /<details>/);
   assert.match(html, /Недоступна/);
   assert.match(html, /Не включена/);
@@ -52,15 +53,15 @@ test('coverage distinguishes page statuses without exposing internal source iden
   assert.equal((html.match(/<pre>/g) ?? []).length, 1);
 });
 
-test('an unread source stays visible and several sources can be expanded independently', () => {
+test('source cards always remain open, including when a generation contains several sources', () => {
   const source = { title: 'Источник', checkedAt: '2026-09-19T12:00:00Z', warnings: [], pages: [] };
   const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [
     { ...source, sourceId: 'S1' }, { ...source, sourceId: 'S2' },
   ] }));
-  assert.equal((html.match(/<details>/g) ?? []).length, 2);
+  assert.equal((html.match(/<section><header>/g) ?? []).length, 2);
   assert.doesNotMatch(html, /Включено 0 из 0/);
   assert.match(html, /Включено <span>0<\/span>/);
-  assert.doesNotMatch(html, /<details open|Дубликаты/);
+  assert.doesNotMatch(html, /<details|<summary|Дубликаты/);
 });
 
 test('filters show all, read, unread and exact statuses without changing source references', () => {
@@ -140,7 +141,7 @@ test('110 found addresses are partitioned once, with coverage details collapsed 
   assert.match(html, /Даже если включены все найденные страницы/);
 });
 
-test('information button opens and closes only its source explanation without collapsing the source card', () => {
+test('information button toggles only its explanation while source cards remain non-collapsible', () => {
   const state = [];
   let cursor = 0;
   const hooks = { ...React, useId: () => 'hint-test', useState(initial) {
@@ -158,16 +159,15 @@ test('information button opens and closes only its source explanation without co
     const children = Array.isArray(node) ? node : React.Children.toArray(node.props?.children);
     for (const child of children) { const match = find(child, predicate); if (match) return match; }
   }
-  const card = { open: false };
-  let prevented = 0;
-  const click = tree => find(tree, node => node.type === 'button' && node.props['aria-controls'] === 'hint-test-S1').props.onClick({ preventDefault() { prevented++; }, stopPropagation() {}, currentTarget: { closest: () => card } });
+  const click = tree => find(tree, node => node.type === 'button' && node.props['aria-controls'] === 'hint-test-S1').props.onClick();
   click(render());
-  assert.equal(card.open, true);
   let tree = render();
+  assert.equal(find(tree, node => node.type === 'details'), undefined);
+  assert.equal(find(tree, node => node.type === 'section').props.open, undefined);
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S1').props.hidden, false);
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S2').props.hidden, true);
   click(tree);
   tree = render();
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S1').props.hidden, true);
-  assert.equal(prevented, 2);
+  assert.equal(find(tree, node => node.type === 'details'), undefined);
 });
