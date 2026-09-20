@@ -50,7 +50,8 @@ test('coverage distinguishes page statuses without exposing internal source iden
   assert.match(html, /Совпадает с https:\/\/example.com\/about/);
   assert.match(html, /Статьи отобраны выборочно/);
   assert.match(html, /не подтверждение, что найдены все страницы сайта/);
-  assert.equal((html.match(/<pre>/g) ?? []).length, 1);
+  assert.equal((html.match(/aria-label="Сохранённый текст для чтения"/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /<pre/);
 });
 
 test('source cards always remain open, including when a generation contains several sources', () => {
@@ -172,4 +173,38 @@ test('information button toggles only its explanation while source cards remain 
   tree = render();
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S1').props.hidden, true);
   assert.equal(find(tree, node => node.type === 'details'), undefined);
+});
+
+test('reading layout removes empty space without summarizing, reordering or dropping source text', () => {
+  const content = '  Цены\r\n\r\n \t\r\nАкции\r\n\r\n\r\nОтзывы\r\n\r\nСанкт-Петербург, Казанская 43\r\n\r\n10:00 - 20:00\r\n\r\nПриём врача — 3 500 ₽.\nДополнительные условия сохраняются.\n\n<script>bad()</script>  ';
+  assert.deepEqual(target.exports.sourceTextParagraphs(content), [
+    'Цены', 'Акции', 'Отзывы', 'Санкт-Петербург, Казанская 43', '10:00 - 20:00',
+    'Приём врача — 3 500 ₽.\nДополнительные условия сохраняются.', '<script>bad()</script>',
+  ]);
+  assert.deepEqual(target.exports.sourceTextParagraphs(' \r\n\t\r\n '), []);
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceTextPreview, { content }));
+  assert.match(html, /aria-pressed="true">Для чтения/);
+  assert.match(html, /tabindex="0" aria-label="Сохранённый текст для чтения"/);
+  assert.match(html, /<p>Цены<\/p><p>Акции<\/p><p>Отзывы<\/p>/);
+  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script|<pre/);
+});
+
+test('original text remains byte-for-byte available and switching modes never changes the input', () => {
+  let original = false;
+  const hooks = { ...React, useState: () => [original, value => { original = value; }] };
+  const module = { exports: {} };
+  new Function('require', 'module', 'exports', compiled.outputText)(id => id === 'react' ? hooks : id.endsWith('.css') ? { default: {} } : require(id), module, module.exports);
+  const content = '  Цены\r\n\r\n\r\nУслуга\t3500 ₽\n\n<script>bad()</script> ';
+  const render = () => module.exports.SourceTextPreview({ content });
+  let tree = render();
+  tree.props.children[0].props.children[1].props.onClick();
+  tree = render();
+  assert.equal(tree.props.children[1].type, 'pre');
+  assert.equal(tree.props.children[1].props.children, content);
+  assert.equal(tree.props.children[0].props.children[1].props['aria-pressed'], true);
+  tree.props.children[0].props.children[0].props.onClick();
+  tree = render();
+  assert.equal(tree.props.children[1].type, 'div');
+  assert.equal(tree.props.children[0].props.children[0].props['aria-pressed'], true);
 });

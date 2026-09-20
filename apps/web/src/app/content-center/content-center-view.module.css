@@ -1185,17 +1185,40 @@
   outline-offset: 3px;
   border-radius: 6px;
 }
-.sourceText pre {
+.sourceTextPreview {
+  margin-top: 12px;
+}
+.sourceReadableText,
+.sourceText .sourceOriginalText {
   margin: 10px 0 0;
-  padding: 14px;
+  padding: 16px 18px;
+  border: 1px solid #ecebf2;
   border-radius: 8px;
   background: #f7f7fa;
   color: #454354;
   white-space: pre-wrap;
   font: inherit;
-  line-height: 1.6;
-  max-height: 360px;
+  font-size: 14px;
+  line-height: 1.55;
+  max-height: min(520px, 60vh);
   overflow: auto;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+.sourceReadableText {
+  background: #fff;
+}
+.sourceReadableText p {
+  max-width: 78ch;
+  margin: 0;
+}
+.sourceReadableText p + p {
+  margin-top: 6px;
+}
+.sourceReadableText:focus-visible,
+.sourceOriginalText:focus-visible {
+  outline: 2px solid #7256ee;
+  outline-offset: 2px;
 }
 @media (max-width: 600px) {
   .sourceHeading {

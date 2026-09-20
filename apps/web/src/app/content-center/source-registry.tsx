@@ -39,6 +39,62 @@ export function filterSourcePages(
     );
 }
 
+/** Reading layout only: the archived text and its order remain unchanged. */
+export function sourceTextParagraphs(content: string) {
+  return content
+    .replace(/\r\n?/g, "\n")
+    .split(/\n[\t \u00a0]*\n(?:[\t \u00a0]*\n)*/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+}
+
+export function SourceTextPreview({ content }: { content: string }) {
+  const [original, setOriginal] = useState(false);
+  return (
+    <div className={styles.sourceTextPreview}>
+      <div
+        className={styles.sourceFilters}
+        role="group"
+        aria-label="Вид сохранённого текста"
+      >
+        <button
+          type="button"
+          aria-pressed={!original}
+          onClick={() => setOriginal(false)}
+        >
+          Для чтения
+        </button>
+        <button
+          type="button"
+          aria-pressed={original}
+          onClick={() => setOriginal(true)}
+        >
+          Оригинал
+        </button>
+      </div>
+      {original ? (
+        <pre
+          className={styles.sourceOriginalText}
+          tabIndex={0}
+          aria-label="Исходный сохранённый текст"
+        >
+          {content}
+        </pre>
+      ) : (
+        <div
+          className={styles.sourceReadableText}
+          tabIndex={0}
+          aria-label="Сохранённый текст для чтения"
+        >
+          {sourceTextParagraphs(content).map((paragraph, index) => (
+            <p key={index}>{paragraph}</p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Archived plain text, never rendered as source-provided HTML. */
 export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
   const hintId = useId();
@@ -197,7 +253,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                     {page.status === "loaded" && page.content && (
                       <details className={styles.sourceText}>
                         <summary>Сохранённый текст страницы</summary>
-                        <pre>{page.content}</pre>
+                        <SourceTextPreview content={page.content} />
                       </details>
                     )}
                   </li>
