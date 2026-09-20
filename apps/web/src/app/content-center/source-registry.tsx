@@ -39,6 +39,24 @@ export function filterSourcePages(
     );
 }
 
+/** Explain saved decisions, without generating or reconstructing model reasoning. */
+export function sourceSelectionEntries(pages: SourceSnapshot["pages"]) {
+  const order = { found: 0, failed: 1, pending: 2, duplicate: 3, loaded: 4 };
+  return pages
+    .map((page, index) => ({
+      page,
+      index,
+      byAi: /^AI\s*[—-]\s/.test(page.reason ?? ""),
+      explanation:
+        page.error ||
+        (page.duplicateOf ? `Совпадает с ${page.duplicateOf}` : page.reason) ||
+        "Причина отбора для этой страницы не сохранена.",
+    }))
+    .sort(
+      (a, b) => order[a.page.status] - order[b.page.status] || a.index - b.index,
+    );
+}
+
 /** Reading layout only: the archived text and its order remain unchanged. */
 export function sourceTextParagraphs(content: string) {
   return content
@@ -110,6 +128,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
         const visiblePages = filterSourcePages(source.pages, selectedFilter);
         const hintOpen = Boolean(openHints[source.sourceId]);
         const panelId = `${hintId}-${source.sourceId}`;
+        const selectionEntries = sourceSelectionEntries(source.pages);
         return (
           <section className={styles.sourceCard} key={source.sourceId}>
             <header className={styles.sourceHeading}>
@@ -175,35 +194,98 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 </div>
               </div>
               <div id={panelId} className={styles.sourceNote} hidden={!hintOpen}>
-                <p>
-                  Найдено адресов: {source.pages.length}. «Включено» — страницы,
-                  полный доступный текст которых вошёл в выбранный набор для
-                  обработки. «Не включено» — страницы вне выбранного набора;
-                  «Недоступно» — страницы, текст которых получить не удалось.
-                </p>
-                {source.coverage && (
-                  <>
-                    {source.coverage.reasons.map((reason) => (
-                      <p key={reason}>{reason}</p>
+                <details className={styles.sourceText} open>
+                  <summary>Как читать результаты</summary>
+                  <div className={styles.sourceHelpContent}>
+                    <p>
+                      Найдено адресов: {source.pages.length}. «Включено» — страницы,
+                      полный доступный текст которых вошёл в выбранный набор для
+                      обработки. «Не включено» — страницы вне выбранного набора;
+                      «Недоступно» — страницы, текст которых получить не удалось.
+                    </p>
+                  </div>
+                </details>
+                <details className={styles.sourceText}>
+                  <summary>Охват разделов</summary>
+                  <div className={styles.sourceHelpContent}>
+                    {source.coverage ? (
+                      <>
+                        {source.coverage.reasons.map((reason) => (
+                          <p key={reason}>{reason}</p>
+                        ))}
+                        <ul className={styles.sourceCoverageList}>
+                          {source.coverage.sections.map((section) => (
+                            <li key={section.title}>
+                              <strong>{section.title}</strong>:{" "}
+                              {section.found
+                                ? `собрано ${section.read} из ${section.found}${section.unread ? `, не удалось собрать ${section.unread}` : ""}`
+                                : "не найдено в обходе"}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <p>Для этого снимка охват разделов не сохранён.</p>
+                    )}
+                    {source.warnings.map((warning) => (
+                      <p key={warning}>{warning}</p>
                     ))}
-                    <details className={styles.sourceText}>
-                      <summary>Охват разделов</summary>
-                      <ul>
-                        {source.coverage.sections.map((section) => (
-                          <li key={section.title}>
-                            <strong>{section.title}</strong>:{" "}
-                            {section.found
-                              ? `собрано ${section.read} из ${section.found}${section.unread ? `, не удалось собрать ${section.unread}` : ""}`
-                              : "не найдено в обходе"}
+                  </div>
+                </details>
+                <details className={styles.sourceText}>
+                  <summary>Как агент отбирал страницы</summary>
+                  <div className={styles.sourceHelpContent}>
+                    <p>
+                      Сохранённые решения и их причины. Сначала страницы вне
+                      итогового набора, затем включённые.
+                    </p>
+                    {!selectionEntries.some((entry) => entry.byAi) && (
+                      <p>
+                        В этом снимке нет сохранённых решений AI. Ниже — данные
+                        сбора сайта.
+                      </p>
+                    )}
+                    {selectionEntries.length ? (
+                      <ol
+                        className={styles.sourceDecisionList}
+                        tabIndex={0}
+                        aria-label={`Причины отбора страниц: ${source.title}`}
+                      >
+                        {selectionEntries.map(({ page, index, byAi, explanation }) => (
+                          <li key={`${page.url}-${index}`}>
+                            <div className={styles.sourcePageHeading}>
+                              <strong>{page.title}</strong>
+                              <span
+                                className={styles.sourceStatus}
+                                data-status={page.status}
+                              >
+                                {statusLabel[page.status]}
+                              </span>
+                            </div>
+                            <span className={styles.sourceDecisionOrigin}>
+                              {byAi ? "Решение AI" : "Сбор сайта"}
+                            </span>
+                            <p>{explanation}</p>
+                            {/^https:\/\//i.test(page.url) && (
+                              <div className={styles.sourceUrl}>
+                                <a
+                                  href={page.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  aria-label={`${page.url} — открыть в новой вкладке`}
+                                >
+                                  {page.url}
+                                </a>
+                              </div>
+                            )}
                           </li>
                         ))}
-                      </ul>
-                    </details>
-                  </>
-                )}
-                {source.warnings.map((warning) => (
-                  <p key={warning}>{warning}</p>
-                ))}
+                      </ol>
+                    ) : (
+                      <p>В снимке пока нет страниц.</p>
+                    )}
+                  </div>
+                </details>
               </div>
               <p className={styles.sourceFilterCount} role="status">
                 {visiblePages.length

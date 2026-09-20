@@ -22,7 +22,8 @@ test('registry is optional, read-only and renders saved text as escaped data', (
   assert.doesNotMatch(html, /Включено 1 из 3/);
   assert.match(html, /Включено <span>1<\/span>/);
   assert.match(html, /<section><header>/);
-  assert.doesNotMatch(html, /<details open="">|<summary><span>/);
+  assert.doesNotMatch(html, /<summary><span>/);
+  assert.match(html, /<details open=""><summary>Как читать результаты<\/summary>/);
   assert.match(html, /<details>/);
   assert.match(html, /Недоступна/);
   assert.match(html, /Не включена/);
@@ -62,7 +63,8 @@ test('source cards always remain open, including when a generation contains seve
   assert.equal((html.match(/<section><header>/g) ?? []).length, 2);
   assert.doesNotMatch(html, /Включено 0 из 0/);
   assert.match(html, /Включено <span>0<\/span>/);
-  assert.doesNotMatch(html, /<details|<summary|Дубликаты/);
+  assert.equal((html.match(/<details open="">/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /Дубликаты/);
 });
 
 test('filters show all, read, unread and exact statuses without changing source references', () => {
@@ -168,14 +170,14 @@ test('information button toggles only its explanation while source cards remain 
   const click = tree => find(tree, node => node.type === 'button' && node.props['aria-controls'] === 'hint-test-S1').props.onClick();
   click(render());
   let tree = render();
-  assert.equal(find(tree, node => node.type === 'details'), undefined);
+  assert.equal(find(tree, node => node.type === 'details').props.open, true);
   assert.equal(find(tree, node => node.type === 'section').props.open, undefined);
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S1').props.hidden, false);
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S2').props.hidden, true);
   click(tree);
   tree = render();
   assert.equal(find(tree, node => node.props?.id === 'hint-test-S1').props.hidden, true);
-  assert.equal(find(tree, node => node.type === 'details'), undefined);
+  assert.equal(find(tree, node => node.type === 'details').props.open, true);
 });
 
 test('reading layout removes empty space without summarizing, reordering or dropping source text', () => {
@@ -210,4 +212,49 @@ test('original text remains byte-for-byte available and switching modes never ch
   tree = render();
   assert.equal(tree.props.children[1].type, 'div');
   assert.equal(tree.props.children[0].props.children[0].props['aria-pressed'], true);
+});
+
+test('source help contains three accordions with only the instructions initially expanded', () => {
+  const source = { sourceId: 'S1', title: 'Сайт', checkedAt: '2026-09-20T00:00:00Z', warnings: ['Ограничение обхода'], pages: [] };
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [source] }));
+  const sections = [...html.matchAll(/<details( open="")?><summary>([^<]+)<\/summary>/g)];
+  assert.deepEqual(sections.map(match => [match[2], Boolean(match[1])]), [
+    ['Как читать результаты', true], ['Охват разделов', false], ['Как агент отбирал страницы', false],
+  ]);
+  assert.match(html, /Для этого снимка охват разделов не сохранён/);
+  assert.match(html, /Ограничение обхода/);
+  assert.match(html, /В этом снимке нет сохранённых решений AI/);
+  assert.match(html, /В снимке пока нет страниц/);
+});
+
+test('selection explanations preserve recorded reasons and put omissions before included pages', () => {
+  const pages = [
+    { title: 'Основная', url: 'https://example.com/main', status: 'loaded', reason: 'Включена программно' },
+    { title: 'Сомнение', url: 'https://example.com/uncertain', status: 'loaded', reason: 'AI — недостаточно данных для исключения, включён полный текст: Нужно учесть методику' },
+    { title: 'Новость', url: 'https://example.com/news', status: 'found', reason: 'AI — не включена: Общая новость без сведений о компании' },
+    { title: 'Ошибка', url: 'https://example.com/error', status: 'failed', error: 'Нет доступа', reason: 'Ранее найдена' },
+    { title: 'Не проверена', url: 'https://example.com/pending', status: 'pending', reason: 'Лимит времени обхода' },
+    { title: 'Копия', url: 'https://example.com/copy', status: 'duplicate', duplicateOf: 'https://example.com/main' },
+    { title: 'Архивная', url: 'https://example.com/old', status: 'found' },
+    { title: 'Включена AI', url: 'javascript:bad()', status: 'loaded', reason: 'AI — включена: <script>bad()</script>' },
+  ];
+  const original = structuredClone(pages);
+  const entries = target.exports.sourceSelectionEntries(pages);
+  assert.deepEqual(entries.map(entry => entry.index), [2, 6, 3, 4, 5, 0, 1, 7]);
+  assert.equal(entries[0].explanation, pages[2].reason);
+  assert.equal(entries[0].byAi, true);
+  assert.equal(entries[1].explanation, 'Причина отбора для этой страницы не сохранена.');
+  assert.equal(entries[2].explanation, 'Нет доступа');
+  assert.equal(entries[2].byAi, false);
+  assert.equal(entries[4].explanation, 'Совпадает с https://example.com/main');
+  assert.equal(entries[6].byAi, true);
+  assert.deepEqual(pages, original);
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{ sourceId: 'S1', title: 'Сайт', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages }] }));
+  assert.match(html, /tabindex="0" aria-label="Причины отбора страниц: Сайт"/);
+  assert.match(html, /Решение AI/);
+  assert.match(html, /Сбор сайта/);
+  assert.match(html, /Общая новость без сведений о компании/);
+  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script|href="javascript:|В этом снимке нет сохранённых решений AI/);
+  assert.ok(html.indexOf('<strong>Новость</strong>') < html.indexOf('<strong>Основная</strong>'));
 });
