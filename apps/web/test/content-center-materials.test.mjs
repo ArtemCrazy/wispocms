@@ -25,8 +25,17 @@ test('social source chips show the matching brand without changing actions or lo
     else assert.doesNotMatch(html, /<img/);
     assert.match(html, /Изменить ссылку/);
     assert.match(html, /Удалить ссылку/);
-    assert.ok(html.includes(`>${materials.displayMaterialUrl(source_url)}</span>`));
+    assert.ok(html.includes(`>${materials.displaySourceChipUrl(source_url)}</span>`));
   }
+});
+
+test('YouTube handle chips omit the long host while retaining the full address in actions', () => {
+  const source_url = 'https://www.youtube.com/@soundyogaschool';
+  const html = render([{ id: 'youtube', title: 'Sound Yoga', kind: 'url', url_category: 'social', source_url }], { showSources() {} });
+  assert.equal(materials.displaySourceChipUrl(source_url), '@soundyogaschool');
+  assert.match(html, />@soundyogaschool<\/span>/);
+  assert.match(html, /title="https:\/\/www\.youtube\.com\/@soundyogaschool"/);
+  assert.doesNotMatch(html, />www\.youtube\.com\/@soundyogaschool<\/span>/);
 });
 
 test('checked website groups URL, source information icon and remove action in that order', () => {

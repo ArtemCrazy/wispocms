@@ -95,6 +95,25 @@ export function displayMaterialUrl(value: string | null | undefined): string {
   return (value ?? "").replace(/^https:\/\//i, "");
 }
 
+export function displaySourceChipUrl(
+  value: string | null | undefined,
+): string {
+  try {
+    const url = new URL(value ?? "");
+    const path = decodeURIComponent(url.pathname).replace(/\/$/, "");
+    if (
+      ["youtube.com", "www.youtube.com", "m.youtube.com"].includes(
+        url.hostname,
+      ) &&
+      /^\/@[^/]+$/.test(path)
+    )
+      return path.slice(1);
+  } catch {
+    // Older or malformed values keep the regular compact representation.
+  }
+  return displayMaterialUrl(value);
+}
+
 /** HTTPS is implicit only when no explicit scheme was supplied. */
 export function materialSourceUrl(value: string): string {
   const input = value.trim();
