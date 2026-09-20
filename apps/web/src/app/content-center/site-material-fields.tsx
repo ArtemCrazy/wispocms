@@ -14,7 +14,7 @@ export function SiteMaterialFields({
   onChange: (value: string) => void;
 }) {
   return (
-    <div className={styles.field}>
+    <div className={`${styles.field} ${styles.firstField}`}>
       <input
         autoFocus
         aria-label="Адрес сайта"
