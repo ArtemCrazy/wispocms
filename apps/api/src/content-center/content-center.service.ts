@@ -37,6 +37,7 @@ import {
 } from './public-material';
 import { validateMaterialFile } from './material-file';
 import type { MaterialUpload } from './material-file';
+import { isVkUrl, vkCommunityAddress } from './vk-source';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -222,10 +223,15 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       if (!material) throw new NotFoundException('Материал не найден');
       if (
         material.kind !== 'url' ||
-        material.url_category !== 'site' ||
+        !(
+          material.url_category === 'site' ||
+          (material.url_category === 'social' && isVkUrl(material.source_url))
+        ) ||
         !material.source_url
       )
-        throw new BadRequestException('Обновить сбор можно только для сайта');
+        throw new BadRequestException(
+          'Обновить сбор можно для сайта или сообщества VK',
+        );
       if (material.revision !== revision)
         throw new ConflictException(
           'Ссылка изменилась. Откройте источник заново.',
@@ -239,7 +245,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             revision: material.revision,
             title: material.title,
             sourceUrl: material.source_url,
-            urlCategory: 'site',
+            urlCategory: material.url_category,
             content: '',
           },
         ],
@@ -259,12 +265,13 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
   ) {
     const source = run.input_context.materials[0];
     const rows = await manager.query<Array<{ id: string }>>(
-      `SELECT id FROM cc_materials WHERE workspace_id=$1 AND id=$2 AND revision=$3 AND source_url=$4 AND kind='url' AND url_category='site'`,
+      `SELECT id FROM cc_materials WHERE workspace_id=$1 AND id=$2 AND revision=$3 AND source_url=$4 AND kind='url' AND url_category=$5`,
       [
         run.workspace_id,
         run.source_material_id,
         source.revision,
         source.sourceUrl,
+        source.urlCategory,
       ],
     );
     if (!rows.length)
@@ -336,7 +343,9 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     let sourceError: string | null = null;
     if (dto.kind === 'url') {
       publicMaterialUrl(dto.sourceUrl ?? '');
-      if (dto.urlCategory === 'site') {
+      const vkSource = dto.urlCategory === 'social' && isVkUrl(dto.sourceUrl);
+      if (vkSource) vkCommunityAddress(dto.sourceUrl!);
+      if (dto.urlCategory === 'site' || vkSource) {
         // Collection belongs to the explicit run, not to saving a link.
         content = '';
       } else
@@ -386,6 +395,16 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       if (!rows.length)
         throw new ConflictException(
           'Материал изменён другим сотрудником. Откройте его заново.',
+        );
+      if (id)
+        await manager.query(
+          `DELETE FROM cc_vk_connections WHERE workspace_id=$1 AND material_id=$2 AND (source_url IS DISTINCT FROM $3 OR $4::boolean)`,
+          [
+            workspaceId,
+            id,
+            dto.sourceUrl ?? null,
+            dto.kind !== 'url' || dto.urlCategory !== 'social',
+          ],
         );
       return rows[0];
     });

@@ -19,11 +19,15 @@ import { DeepseekService } from '../ai/deepseek.service';
 import { CreationRunsService } from './creation-runs.service';
 import { CreationPublicationService } from './creation-publication.service';
 import { PreparationCollectionService } from './preparation-collection.service';
+import { VkConnectionController } from './vk-connection.controller';
+import { VkConnectionService } from './vk-connection.service';
+import { VkSourceClient } from './vk-source';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
   controllers: [
     ContentCenterController,
+    VkConnectionController,
     ResearchController,
     CreationController,
   ],
@@ -33,6 +37,8 @@ import { PreparationCollectionService } from './preparation-collection.service';
     ContentCenterService,
     PreparationAiService,
     PreparationCollectionService,
+    VkConnectionService,
+    VkSourceClient,
     MaterialUploadGuard,
     ResearchService,
     ResearchSearchService,

@@ -32,6 +32,7 @@ export const SOURCE_CATEGORIES = [
 ] as const;
 export type SourceCategory = (typeof SOURCE_CATEGORIES)[number]["id"];
 export type SourceSnapshot = {
+  mode?: "main-pages" | "single-page" | "provided" | "social-feed";
   sourceId: string;
   title: string;
   checkedAt: string;
@@ -89,6 +90,24 @@ export type ProjectMaterial = {
 };
 export const FILE_ACCEPT =
   ".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv";
+export function isVkMaterial(
+  material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
+): boolean {
+  if (material.kind !== "url" || material.url_category !== "social")
+    return false;
+  try {
+    return [
+      "vk.com",
+      "www.vk.com",
+      "m.vk.com",
+      "vk.ru",
+      "www.vk.ru",
+      "m.vk.ru",
+    ].includes(new URL(material.source_url ?? "").hostname);
+  } catch {
+    return false;
+  }
+}
 export function fileSize(bytes: number | null) {
   if (bytes === null) return "—";
   if (bytes < 1024) return `${bytes} Б`;

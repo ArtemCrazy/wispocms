@@ -12,6 +12,17 @@ const target = { exports: {} };
 const require = createRequire(import.meta.url);
 new Function('require', 'module', 'exports', compiled.outputText)(id => id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
 
+test('VK explains publication coverage without claiming website or AI page selection', () => {
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{
+    mode: 'social-feed', sourceId: 'S2', title: 'VK', checkedAt: '2026-09-20T00:00:00Z', warnings: ['180 дней'],
+    pages: [{ title: 'Пост', url: 'https://vk.com/wall-77_1', status: 'loaded', content: 'Текст' }],
+  }] }));
+  assert.match(html, /Период и ограничения/);
+  assert.match(html, /Правила отбора публикаций/);
+  assert.match(html, /Сбор VK/);
+  assert.doesNotMatch(html, /Охват разделов|Сбор сайта|Как агент отбирал страницы|Найдено адресов/);
+});
+
 test('registry is optional, read-only and renders saved text as escaped data', () => {
   assert.equal(renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [] })), '');
   const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{ sourceId: 'S1', title: 'Компания', checkedAt: '2026-09-19T12:00:00Z', warnings: ['Не полный аудит'], pages: [

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { ProjectMaterial } from "./materials";
+import { isVkMaterial, type ProjectMaterial } from "./materials";
+import { VkConnection } from "./vk-connection";
 import { SourceRegistry } from "./source-registry";
 import styles from "./content-center-view.module.css";
 
@@ -19,6 +20,8 @@ export function SourceRefresh({
   const [material, setMaterial] = useState(initial);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [vkConnected, setVkConnected] = useState(false);
+  const vk = isVkMaterial(material);
   const alive = useRef(true);
   const submittingRef = useRef(false);
   const running =
@@ -91,15 +94,30 @@ export function SourceRefresh({
 
   return (
     <>
-      {material.url_category === "site" && (
+      {vk && (
+        <VkConnection
+          path={path}
+          revision={material.revision}
+          disabled={submitting || running}
+          request={request}
+          onConnectionChange={setVkConnected}
+          onUpdated={async () => {
+            const updated = await request<ProjectMaterial>(path);
+            if (alive.current) setMaterial(updated);
+            await onUpdated();
+          }}
+        />
+      )}
+      {(material.url_category === "site" || vk) && (
         <>
           <div className={styles.cardHead}>
             <span className={styles.muted}>
-              Только сбор страниц — без AI и изменения версий.
+              Только сбор {vk ? "публикаций" : "страниц"} — без AI и изменения
+              версий.
             </span>
             <button
               type="button"
-              disabled={submitting || running}
+              disabled={submitting || running || (vk && !vkConnected)}
               onClick={() => void refresh()}
             >
               {submitting

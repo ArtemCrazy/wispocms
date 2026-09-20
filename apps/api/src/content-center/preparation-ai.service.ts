@@ -38,7 +38,7 @@ export type SourceSnapshot = {
   title: string;
   sourceUrl: string | null;
   checkedAt: string;
-  mode: 'main-pages' | 'single-page' | 'provided';
+  mode: 'main-pages' | 'single-page' | 'provided' | 'social-feed';
   warnings: string[];
   pages: SitePage[];
   coverage?: SiteCoverage;

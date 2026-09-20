@@ -5,6 +5,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import * as materials from '../src/app/content-center/materials.ts';
 
 const require = createRequire(import.meta.url);
 const compile = async (name, imports = {}) => {
@@ -14,7 +15,7 @@ const compile = async (name, imports = {}) => {
   new Function('require', 'module', 'exports', compiled.outputText)(id => imports[id] ?? (id.endsWith('.css') ? { default: {} } : require(id)), target, target.exports);
   return target.exports;
 };
-const component = await compile('source-refresh', { './source-registry': await compile('source-registry') });
+const component = await compile('source-refresh', { './source-registry': await compile('source-registry'), './materials': materials, './vk-connection': await compile('vk-connection') });
 const initial = { id: 'site', title: 'Сайт', url_category: 'site', revision: 1,
   site_pages: { sourceId: 'S1', title: 'Сохранённый снимок', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages: [] } };
 const render = changes => renderToStaticMarkup(React.createElement(component.SourceRefresh, {
@@ -44,4 +45,12 @@ test('failed refresh can be retried without hiding the saved sources', () => {
 });
 test('non-site source has no refresh action', () => {
   assert.doesNotMatch(render({ url_category: 'social' }), /Обновить сбор|Сбор выполняется/);
+});
+
+test('VK exposes secure connection and disables collection until the connection is checked', () => {
+  const html = render({ kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null });
+  assert.match(html, /Подключить VK/);
+  assert.match(html, /180 дней/);
+  assert.match(html, /disabled="">Обновить сбор/);
+  assert.match(html, /Проверяем подключение/);
 });

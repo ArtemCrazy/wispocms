@@ -53,7 +53,8 @@ export function sourceSelectionEntries(pages: SourceSnapshot["pages"]) {
         "Причина отбора для этой страницы не сохранена.",
     }))
     .sort(
-      (a, b) => order[a.page.status] - order[b.page.status] || a.index - b.index,
+      (a, b) =>
+        order[a.page.status] - order[b.page.status] || a.index - b.index,
     );
 }
 
@@ -124,6 +125,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
   return (
     <div className={styles.sourceRegistry}>
       {sources.map((source) => {
+        const social = source.mode === "social-feed";
         const selectedFilter = selectedFilters[source.sourceId] ?? "all";
         const visiblePages = filterSourcePages(source.pages, selectedFilter);
         const hintOpen = Boolean(openHints[source.sourceId]);
@@ -136,7 +138,8 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 <span className={styles.sourceTitle}>{source.title}</span>
                 <span className={styles.sourceDate}>
                   <span>
-                    Снимок от {new Date(source.checkedAt).toLocaleString("ru-RU")}
+                    Снимок от{" "}
+                    {new Date(source.checkedAt).toLocaleString("ru-RU")}
                   </span>
                   <button
                     type="button"
@@ -152,10 +155,25 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                       }));
                     }}
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
                       <circle cx="12" cy="12" r="9" />
                       <path d="M12 11v6" />
-                      <circle cx="12" cy="7.5" r=".75" fill="currentColor" stroke="none" />
+                      <circle
+                        cx="12"
+                        cy="7.5"
+                        r=".75"
+                        fill="currentColor"
+                        stroke="none"
+                      />
                     </svg>
                   </button>
                 </span>
@@ -166,10 +184,13 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 <div
                   className={styles.sourceFilters}
                   role="group"
-                  aria-label={`Фильтр страниц: ${source.title}`}
+                  aria-label={`Фильтр ${social ? "материалов" : "страниц"}: ${source.title}`}
                 >
                   {filters.map(([filter, label]) => {
-                    const count = filterSourcePages(source.pages, filter).length;
+                    const count = filterSourcePages(
+                      source.pages,
+                      filter,
+                    ).length;
                     if (
                       (filter === "duplicate" || filter === "pending") &&
                       count === 0
@@ -193,20 +214,36 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                   })}
                 </div>
               </div>
-              <div id={panelId} className={styles.sourceNote} hidden={!hintOpen}>
+              <div
+                id={panelId}
+                className={styles.sourceNote}
+                hidden={!hintOpen}
+              >
                 <details className={styles.sourceText} open>
                   <summary>Как читать результаты</summary>
                   <div className={styles.sourceHelpContent}>
-                    <p>
-                      Найдено адресов: {source.pages.length}. «Включено» — страницы,
-                      полный доступный текст которых вошёл в выбранный набор для
-                      обработки. «Не включено» — страницы вне выбранного набора;
-                      «Недоступно» — страницы, текст которых получить не удалось.
-                    </p>
+                    {social ? (
+                      <p>
+                        Здесь описание сообщества и полученные публикации VK.
+                        «Включено» — собственный текст для обработки; «Не
+                        включено» — репосты и записи без текста. Вложения не
+                        прочитаны.
+                      </p>
+                    ) : (
+                      <p>
+                        Найдено адресов: {source.pages.length}. «Включено» —
+                        страницы, полный доступный текст которых вошёл в
+                        выбранный набор для обработки. «Не включено» — страницы
+                        вне выбранного набора; «Недоступно» — страницы, текст
+                        которых получить не удалось.
+                      </p>
+                    )}
                   </div>
                 </details>
                 <details className={styles.sourceText}>
-                  <summary>Охват разделов</summary>
+                  <summary>
+                    {social ? "Период и ограничения" : "Охват разделов"}
+                  </summary>
                   <div className={styles.sourceHelpContent}>
                     {source.coverage ? (
                       <>
@@ -224,7 +261,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                           ))}
                         </ul>
                       </>
-                    ) : (
+                    ) : social ? null : (
                       <p>Для этого снимка охват разделов не сохранён.</p>
                     )}
                     {source.warnings.map((warning) => (
@@ -233,56 +270,72 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                   </div>
                 </details>
                 <details className={styles.sourceText}>
-                  <summary>Как агент отбирал страницы</summary>
+                  <summary>
+                    {social
+                      ? "Правила отбора публикаций"
+                      : "Как агент отбирал страницы"}
+                  </summary>
                   <div className={styles.sourceHelpContent}>
                     <p>
-                      Сохранённые решения и их причины. Сначала страницы вне
+                      Сохранённые решения и их причины. Сначала материалы вне
                       итогового набора, затем включённые.
                     </p>
                     {!selectionEntries.some((entry) => entry.byAi) && (
                       <p>
                         В этом снимке нет сохранённых решений AI. Ниже — данные
-                        сбора сайта.
+                        {social
+                          ? "сбора VK по правилам периода, авторства и наличия текста."
+                          : "сбора сайта."}
                       </p>
                     )}
                     {selectionEntries.length ? (
                       <ol
                         className={styles.sourceDecisionList}
                         tabIndex={0}
-                        aria-label={`Причины отбора страниц: ${source.title}`}
+                        aria-label={`Причины отбора ${social ? "материалов" : "страниц"}: ${source.title}`}
                       >
-                        {selectionEntries.map(({ page, index, byAi, explanation }) => (
-                          <li key={`${page.url}-${index}`}>
-                            <div className={styles.sourcePageHeading}>
-                              <strong>{page.title}</strong>
-                              <span
-                                className={styles.sourceStatus}
-                                data-status={page.status}
-                              >
-                                {statusLabel[page.status]}
-                              </span>
-                            </div>
-                            <span className={styles.sourceDecisionOrigin}>
-                              {byAi ? "Решение AI" : "Сбор сайта"}
-                            </span>
-                            <p>{explanation}</p>
-                            {/^https:\/\//i.test(page.url) && (
-                              <div className={styles.sourceUrl}>
-                                <a
-                                  href={page.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  aria-label={`${page.url} — открыть в новой вкладке`}
+                        {selectionEntries.map(
+                          ({ page, index, byAi, explanation }) => (
+                            <li key={`${page.url}-${index}`}>
+                              <div className={styles.sourcePageHeading}>
+                                <strong>{page.title}</strong>
+                                <span
+                                  className={styles.sourceStatus}
+                                  data-status={page.status}
                                 >
-                                  {page.url}
-                                </a>
+                                  {statusLabel[page.status]}
+                                </span>
                               </div>
-                            )}
-                          </li>
-                        ))}
+                              <span className={styles.sourceDecisionOrigin}>
+                                {byAi
+                                  ? "Решение AI"
+                                  : social
+                                    ? "Сбор VK"
+                                    : "Сбор сайта"}
+                              </span>
+                              <p>{explanation}</p>
+                              {/^https:\/\//i.test(page.url) && (
+                                <div className={styles.sourceUrl}>
+                                  <a
+                                    href={page.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    aria-label={`${page.url} — открыть в новой вкладке`}
+                                  >
+                                    {page.url}
+                                  </a>
+                                </div>
+                              )}
+                            </li>
+                          ),
+                        )}
                       </ol>
                     ) : (
-                      <p>В снимке пока нет страниц.</p>
+                      <p>
+                        {social
+                          ? "В снимке пока нет материалов."
+                          : "В снимке пока нет страниц."}
+                      </p>
                     )}
                   </div>
                 </details>
@@ -290,7 +343,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
               <p className={styles.sourceFilterCount} role="status">
                 {visiblePages.length
                   ? `Показано ${visiblePages.length} из ${source.pages.length}`
-                  : "Нет страниц с таким статусом"}
+                  : social
+                    ? "Нет материалов с таким статусом"
+                    : "Нет страниц с таким статусом"}
               </p>
               <ul className={styles.sourcePages}>
                 {visiblePages.map(({ page, index }) => (
@@ -330,7 +385,11 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                     </p>
                     {page.status === "loaded" && page.content && (
                       <details className={styles.sourceText}>
-                        <summary>Сохранённый текст страницы</summary>
+                        <summary>
+                          {social
+                            ? "Сохранённый текст"
+                            : "Сохранённый текст страницы"}
+                        </summary>
                         <SourceTextPreview content={page.content} />
                       </details>
                     )}

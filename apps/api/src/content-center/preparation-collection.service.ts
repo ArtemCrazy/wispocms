@@ -10,6 +10,8 @@ import {
   type SiteDiscovery,
 } from './site-crawler';
 import { preparationTopic } from './preparation-topics';
+import { isVkUrl, VkSourceError } from './vk-source';
+import { VkConnectionService } from './vk-connection.service';
 import type {
   PreparationInput,
   PreparationProgress,
@@ -20,7 +22,10 @@ export const PREPARATION_CONTEXT_LIMIT = 2_200_000;
 
 @Injectable()
 export class PreparationCollectionService {
-  constructor(private readonly db: DataSource) {}
+  constructor(
+    private readonly db: DataSource,
+    private readonly vk: VkConnectionService = new VkConnectionService(db),
+  ) {}
 
   async collect(
     workspaceId: string,
@@ -63,7 +68,37 @@ export class PreparationCollectionService {
         completed: index,
         total: input.materials.length,
       });
-      if (material.sourceUrl && material.urlCategory === 'site') {
+      const vkSource =
+        material.urlCategory === 'social' && isVkUrl(material.sourceUrl);
+      if (material.sourceUrl && vkSource) {
+        snapshot.mode = 'social-feed';
+        try {
+          const collected = await this.vk.collect(
+            workspaceId,
+            material.id,
+            material.revision,
+            material.sourceUrl,
+            signal,
+          );
+          snapshot.pages = collected.pages;
+          snapshot.warnings = collected.warnings;
+        } catch (error) {
+          signal.throwIfAborted();
+          snapshot.pages = [
+            {
+              url: material.sourceUrl,
+              title: material.title,
+              group: 'VK',
+              status: 'failed',
+              recommended: true,
+              error:
+                error instanceof VkSourceError
+                  ? error.message
+                  : 'Не удалось прочитать VK. Проверьте подключение источника.',
+            },
+          ];
+        }
+      } else if (material.sourceUrl && material.urlCategory === 'site') {
         let discovered: SitePage[] = [];
         let loaded: SitePage[] = [];
         let discoveryStatus: SiteDiscovery = {
@@ -224,7 +259,7 @@ export class PreparationCollectionService {
         options.persistSnapshots !== false &&
         material.id &&
         material.sourceUrl &&
-        material.urlCategory === 'site'
+        (material.urlCategory === 'site' || vkSource)
       ) {
         // An edit/deletion during collection cannot be overwritten or resurrected.
         await this.db.query(

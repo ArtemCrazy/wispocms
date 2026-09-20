@@ -34,6 +34,7 @@ import { ContentCenterSiteImports1790572800000 } from './migrations/179057280000
 import { PreparationRequestLabels1790659200000 } from './migrations/1790659200000-PreparationRequestLabels';
 import { PreparationReadablePrompts1790745600000 } from './migrations/1790745600000-PreparationReadablePrompts';
 import { SourceRefreshJobs1790832000000 } from './migrations/1790832000000-SourceRefreshJobs';
+import { ContentCenterVkSources1790918400000 } from './migrations/1790918400000-ContentCenterVkSources';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -74,6 +75,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       PreparationRequestLabels1790659200000,
       PreparationReadablePrompts1790745600000,
       SourceRefreshJobs1790832000000,
+      ContentCenterVkSources1790918400000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

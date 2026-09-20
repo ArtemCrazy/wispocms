@@ -19,6 +19,7 @@ import { ResearchView } from "./research-view";
 import { CreationView } from "./creation-view";
 import {
   SOURCE_CATEGORIES,
+  isVkMaterial,
   type ProjectMaterial as Material,
   type SourceCategory,
   type SourceSnapshot,
@@ -929,7 +930,7 @@ export function ContentCenterView({
             onSubmit={(event: FormEvent) => {
               event.preventDefault();
               void act(async () => {
-                await request(
+                const saved = await request<{ id: string }>(
                   `${base}/materials${material.id ? `/${material.id}` : ""}`,
                   material.id ? "PUT" : "POST",
                   siteMaterialMode
@@ -946,6 +947,18 @@ export function ContentCenterView({
                 await load();
                 setMaterial(null);
                 setWithoutMaterials(false);
+                if (
+                  isVkMaterial({
+                    kind: material.kind,
+                    url_category: material.urlCategory ?? "other",
+                    source_url: material.sourceUrl,
+                  })
+                ) {
+                  const row = await request<Material>(
+                    `${base}/materials/${saved.id}`,
+                  );
+                  setSourceDetails({ ...row, sourceBase: base });
+                }
               }, true);
             }}
           >

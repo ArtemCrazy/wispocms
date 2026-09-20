@@ -5,6 +5,7 @@ import {
   FILE_ACCEPT,
   SOURCE_CATEGORIES,
   fileSize,
+  isVkMaterial,
   type ProjectMaterial,
   type SourceCategory,
 } from "./materials";
@@ -65,7 +66,9 @@ export function ProjectMaterials({
                       >
                         {m.source_url}
                       </button>
-                      {(m.site_checked_at || m.url_category === "site") &&
+                      {(m.site_checked_at ||
+                        m.url_category === "site" ||
+                        isVkMaterial(m)) &&
                         showSources && (
                           <button
                             type="button"
