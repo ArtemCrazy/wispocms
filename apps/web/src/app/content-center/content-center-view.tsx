@@ -197,7 +197,6 @@ export function ContentCenterView({
   const [promptTitle, setPromptTitle] = useState("");
   const instructionRef = useRef("");
   const [voiceActive, setVoiceActive] = useState(false);
-  const [withoutMaterials, setWithoutMaterials] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [researchDirty, setResearchDirty] = useState(false);
@@ -239,9 +238,6 @@ export function ContentCenterView({
         setInstruction(payload.draft.instruction);
         setPromptTitle(preparationDraftTitle(payload.draft, payload.prompts));
         instructionRef.current = payload.draft.instruction;
-        setWithoutMaterials(
-          payload.materials.length ? false : payload.draft.without_materials,
-        );
         setDraftRevision(payload.draft.revision);
       })
       .catch((e) => {
@@ -339,7 +335,7 @@ export function ContentCenterView({
     const result = await request<{ revision: number }>(`${base}/draft`, "PUT", {
       instruction,
       promptTitle,
-      withoutMaterials: data?.materials.length ? false : withoutMaterials,
+      withoutMaterials: !data?.materials.length,
       revision: draftRevision,
     });
     setDraftRevision(result.revision);
@@ -390,23 +386,6 @@ export function ContentCenterView({
                       )?.description}
           </p>
         </div>
-        {screen === "preparation" && (
-          <button
-            disabled={busy || !data || Boolean(data.materials.length)}
-            aria-pressed={withoutMaterials}
-            title={
-              data?.materials.length
-                ? "Добавленные материалы автоматически участвуют в обработке"
-                : undefined
-            }
-            onClick={() => {
-              setWithoutMaterials(!withoutMaterials);
-              setDirty(true);
-            }}
-          >
-            {withoutMaterials ? "✓ " : ""}У меня нет материалов
-          </button>
-        )}
       </div>
       {error && (
         <div className={styles.error} role="alert">
@@ -428,7 +407,6 @@ export function ContentCenterView({
                   setInstruction(result.draft.instruction);
                   instructionRef.current = result.draft.instruction;
                   setDraftRevision(result.draft.revision);
-                  setWithoutMaterials(result.draft.without_materials);
                 })
               }
             >
@@ -561,18 +539,10 @@ export function ContentCenterView({
                       body.append("file", file);
                       await request(`${base}/files`, "POST", body);
                       await load();
-                      setWithoutMaterials(false);
                       setNotice(`Файл «${file.name}» загружен`);
                     })
                   }
                 />
-                {withoutMaterials && !data.materials.length && (
-                  <div className={styles.notice}>
-                    Выбран режим без материалов: AI получит только вашу
-                    инструкцию, без предыдущего результата. Вымышленные факты не
-                    добавляются.
-                  </div>
-                )}
                 <article className={styles.card}>
                   <div className={styles.cardHead}>
                     <h2>Сформировать обработанную информацию</h2>
@@ -643,8 +613,7 @@ export function ContentCenterView({
                         voiceActive ||
                         running ||
                         !data.ai.connected ||
-                        !instruction.trim() ||
-                        (!data.materials.length && !withoutMaterials)
+                        !instruction.trim()
                       }
                       onClick={() =>
                         void act(async () => {
@@ -652,9 +621,7 @@ export function ContentCenterView({
                           await request(`${base}/runs`, "POST", {
                             instruction,
                             promptTitle,
-                            withoutMaterials: data.materials.length
-                              ? false
-                              : withoutMaterials,
+                            withoutMaterials: !data.materials.length,
                           });
                           await load();
                         })
@@ -682,7 +649,6 @@ export function ContentCenterView({
                       : ""}
                     .
                     {!data.materials.length &&
-                      withoutMaterials &&
                       " Будет передана только инструкция, без прежних результатов."}
                   </p>
                 </article>
@@ -991,7 +957,6 @@ export function ContentCenterView({
                 );
                 await load();
                 setMaterial(null);
-                setWithoutMaterials(false);
                 if (
                   isSocialFeedMaterial({
                     kind: material.kind,

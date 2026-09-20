@@ -17,6 +17,20 @@ test("manual material input does not impose the old 40k character cap", () => {
   assert.doesNotMatch(view, /maxLength=\{40000\}|40 000 символов/);
 });
 
+test("an empty material list is accepted without a separate confirmation", () => {
+  const view = readFileSync(
+    new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(view, /У меня нет материалов|aria-pressed=\{withoutMaterials\}/);
+  assert.doesNotMatch(
+    view,
+    /!data\.materials\.length && !withoutMaterials/,
+  );
+  assert.match(view, /withoutMaterials: !data\.materials\.length/);
+  assert.match(view, /withoutMaterials: !data\?\.materials\.length/);
+});
+
 test("preparation opens saved results from history without a duplicate result card", () => {
   const view = readFileSync(
     new URL(
