@@ -22,3 +22,7 @@ Accessible names remain on the textual buttons; decorative images have empty
 alt text and are hidden from assistive technology. Unknown/social lookalike
 domains receive no brand icon. Icon assets alone do not imply collection support;
 actual integration status is shown separately in the source controls.
+
+Website sources use the existing local `/globe.svg` decorative icon. It is a
+neutral interface symbol rather than a brand mark, so it is intentionally not
+attributed to Trace Logo’s and does not imply a specific browser or provider.

@@ -46,6 +46,7 @@ test('checked website groups URL, source information icon and remove action in t
   const add = html.indexOf('aria-label="Добавить ссылку', remove);
   assert.ok(edit >= 0 && info > edit && remove > info && add > remove);
   assert.match(html, /title="Информация об источнике"/);
+  assert.match(html, /src="\/globe\.svg"/);
   assert.match(html, /<svg[^>]+aria-hidden="true"/);
   assert.doesNotMatch(html, />Страницы</);
   assert.match(html.slice(info, remove), /<\/button><button type="button"/);
@@ -53,6 +54,7 @@ test('checked website groups URL, source information icon and remove action in t
 
 test('unchecked website exposes the source dialog to start collection without AI', () => {
   const html = render([{ id: 'site', kind: 'url', url_category: materials.SOURCE_CATEGORIES[0].id, title: 'Сайт', source_url: 'https://example.com/' }], { showSources() {} });
+  assert.match(html, /src="\/globe\.svg"/);
   assert.match(html, /Изменить ссылку/);
   assert.match(html, /Удалить ссылку/);
   assert.match(html, /Информация об источнике/);

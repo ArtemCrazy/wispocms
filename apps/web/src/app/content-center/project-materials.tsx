@@ -12,7 +12,7 @@ import {
   type SourceCategory,
 } from "./materials";
 import styles from "./content-center-view.module.css";
-import { SocialIcon } from "./social-icon";
+import { SocialIcon, WebsiteIcon } from "./social-icon";
 
 export function ProjectMaterials({
   materials,
@@ -67,7 +67,11 @@ export function ProjectMaterials({
                         title={m.source_url ?? m.title}
                         aria-label={`Изменить ссылку «${m.title}»`}
                       >
-                        <SocialIcon network={socialIconNetwork(m)} />
+                        {m.url_category === "site" ? (
+                          <WebsiteIcon />
+                        ) : (
+                          <SocialIcon network={socialIconNetwork(m)} />
+                        )}
                         <span className={styles.sourceUrlText}>
                           {displaySourceChipUrl(m.source_url)}
                         </span>
