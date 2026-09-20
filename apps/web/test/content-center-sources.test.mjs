@@ -49,7 +49,7 @@ test('coverage distinguishes page statuses without exposing internal source iden
   assert.doesNotMatch(html, /\[S\d+(?:\.\d+)?\]/);
   assert.match(html, /Совпадает с https:\/\/example.com\/about/);
   assert.match(html, /Статьи отобраны выборочно/);
-  assert.match(html, /не подтверждение, что найдены все страницы сайта/);
+  assert.doesNotMatch(html, /Это результат конкретного обхода|найдены все страницы сайта|Обновление сбора само/);
   assert.equal((html.match(/aria-label="Сохранённый текст для чтения"/g) ?? []).length, 1);
   assert.doesNotMatch(html, /<pre/);
 });
@@ -141,7 +141,8 @@ test('110 found addresses are partitioned once, with coverage details collapsed 
   assert.doesNotMatch(html, /<dl|Охват неполный|Прочитано 110/);
   const panel = html.match(/aria-controls="([^"]+)"/)[1];
   assert.ok(html.includes(`id="${panel}" hidden=""`));
-  assert.match(html, /Даже если включены все найденные страницы/);
+  assert.doesNotMatch(html, /Даже если включены все найденные страницы/);
+  assert.match(html, /«Недоступно» — страницы, текст которых получить не удалось/);
 });
 
 test('information button toggles only its explanation while source cards remain non-collapsible', () => {
