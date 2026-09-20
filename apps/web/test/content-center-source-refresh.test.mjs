@@ -15,7 +15,7 @@ const compile = async (name, imports = {}) => {
   new Function('require', 'module', 'exports', compiled.outputText)(id => imports[id] ?? (id.endsWith('.css') ? { default: {} } : require(id)), target, target.exports);
   return target.exports;
 };
-const component = await compile('source-refresh', { './source-registry': await compile('source-registry'), './materials': materials, './vk-connection': await compile('vk-connection') });
+const component = await compile('source-refresh', { './source-registry': await compile('source-registry'), './materials': materials, './vk-connection': await compile('vk-connection'), './social-connection': await compile('social-connection') });
 const initial = { id: 'site', title: 'Сайт', url_category: 'site', revision: 1,
   site_pages: { sourceId: 'S1', title: 'Сохранённый снимок', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages: [] } };
 const render = changes => renderToStaticMarkup(React.createElement(component.SourceRefresh, {
@@ -64,10 +64,20 @@ test('VK waits only for common-key readiness and has no manual connection step',
   assert.match(html, /Проверяем настройки VK/);
 });
 
+test('Instagram and YouTube expose collection but wait for verified configuration readiness', () => {
+  for (const [network, source_url] of [['Instagram', 'https://www.instagram.com/company/'], ['YouTube', 'https://www.youtube.com/@company']]) {
+    const html = render({ kind: 'url', url_category: 'social', source_url, site_pages: null });
+    assert.ok(html.includes(network));
+    assert.match(html, /disabled="">Обновить сбор/);
+    assert.match(html, /Проверяем подключение/);
+    assert.match(html, /без AI и изменения версий/);
+  }
+});
+
 test('VK refresh is enabled once the shared key is ready, even without a previous collection', async () => {
   let state = 0;
   const readyReact = { ...React, useState: initial => [++state === 4 ? true : initial, () => {}] };
-  const readyComponent = await compile('source-refresh', { react: readyReact, './source-registry': () => null, './materials': materials, './vk-connection': { VkConnection: () => null } });
+  const readyComponent = await compile('source-refresh', { react: readyReact, './source-registry': () => null, './materials': materials, './vk-connection': { VkConnection: () => null }, './social-connection': { SocialConnection: () => null } });
   const html = renderToStaticMarkup(React.createElement(readyComponent.SourceRefresh, {
     initial: { ...initial, kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null },
     base: '/api/workspaces/one/content-center', request: async () => {}, onUpdated: async () => {},

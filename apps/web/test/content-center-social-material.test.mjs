@@ -41,11 +41,11 @@ const props = {
   onNetworkChange() {},
 };
 
-test("social form shows three networks and one URL field, without generic material fields", () => {
+test("social form shows four networks and one URL field, without generic material fields", () => {
   const html = renderToStaticMarkup(
     React.createElement(SocialMaterialFields, props),
   );
-  for (const label of ["ВКонтакте", "Telegram", "YouTube"])
+  for (const label of ["ВКонтакте", "Telegram", "YouTube", "Instagram"])
     assert.ok(html.includes(label));
   assert.equal((html.match(/<input\b/g) ?? []).length, 1);
   assert.match(html, /type="text" inputMode="url"/);
@@ -71,7 +71,7 @@ test("each network has its own placeholder and honest collection status", () => 
     assert.ok(html.includes(address));
     if (network === "vk") assert.match(html, /ключ заказчика не нужен/);
     else if (network === "telegram") assert.match(html, /100 последних публикаций за 180 дней/);
-    else assert.match(html, /пока не подключён/);
+    else assert.match(html, /100 последних видео/);
   }
 });
 
@@ -107,14 +107,14 @@ test("network and URL interactions update their separate draft fields", () => {
 
 test("network buttons retain labels and show local decorative brand icons", async () => {
   const html = renderToStaticMarkup(React.createElement(SocialMaterialFields, props));
-  for (const brand of ["vk", "telegram", "youtube"]) {
+  for (const brand of ["vk", "telegram", "youtube", "instagram"]) {
     assert.ok(html.includes(`src="/icons/social/${brand}.svg"`));
     const svg = await readFile(new URL(`../public/icons/social/${brand}.svg`, import.meta.url), "utf8");
     assert.match(svg, /<svg[^>]+viewBox=/);
     assert.doesNotMatch(svg, /<script|<foreignObject|<image|\bon\w+=|(?:href|src)=|data:/i);
   }
-  assert.equal((html.match(/alt="" aria-hidden="true"/g) ?? []).length, 3);
-  assert.equal((html.match(/width="20" height="20"/g) ?? []).length, 3);
+  assert.equal((html.match(/alt="" aria-hidden="true"/g) ?? []).length, 4);
+  assert.equal((html.match(/width="20" height="20"/g) ?? []).length, 4);
 });
 
 test("existing sources select their own platform, with a fallback for older other networks", () => {
@@ -123,6 +123,7 @@ test("existing sources select their own platform, with a fallback for older othe
     ["https://telegram.me/company", "telegram"],
     ["https://youtu.be/video", "youtube"],
     ["https://www.youtube.com/@company", "youtube"],
+    ["https://www.instagram.com/company", "instagram"],
     ["https://example.org/profile", "other"],
   ])
     assert.equal(socialNetworkForUrl(address), network);

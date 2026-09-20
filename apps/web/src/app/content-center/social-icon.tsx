@@ -4,7 +4,7 @@ import styles from "./content-center-view.module.css";
 export function SocialIcon({
   network,
 }: {
-  network: "vk" | "telegram" | "youtube" | null;
+  network: "vk" | "telegram" | "youtube" | "instagram" | null;
 }) {
   if (!network) return null;
   return (

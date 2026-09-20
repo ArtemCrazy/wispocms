@@ -4,6 +4,14 @@ import { ContentCenterSiteImports1790572800000 } from '../database/migrations/17
 import { SourceRefreshJobs1790832000000 } from '../database/migrations/1790832000000-SourceRefreshJobs';
 import { ContentCenterVkSources1790918400000 } from '../database/migrations/1790918400000-ContentCenterVkSources';
 import { PlatformVkIntegration1791004800000 } from '../database/migrations/1791004800000-PlatformVkIntegration';
+import { InstagramYoutubeSources1791091200000 } from '../database/migrations/1791091200000-InstagramYoutubeSources';
+import { PlatformSocialSettingsService } from './platform-social-settings.service';
+import { PlatformSocialSettingsController } from './platform-social-settings.controller';
+import { InstagramConnectionService } from './instagram-connection.service';
+import { InstagramSourceClient } from './instagram-source';
+import { YoutubeSourceClient } from './youtube-source';
+import { SocialConnectionController } from './social-connection.controller';
+import { SocialSourceError } from './social-api';
 import { PlatformVkSettingsService } from './platform-vk-settings.service';
 import { PlatformVkSettingsController } from './platform-vk-settings.controller';
 import { PlatformAdminGuard } from '../platform/platform-admin.guard';
@@ -93,6 +101,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       await new SourceRefreshJobs1790832000000().up(runner);
       await new ContentCenterVkSources1790918400000().up(runner);
       await new PlatformVkIntegration1791004800000().up(runner);
+      await new InstagramYoutubeSources1791091200000().up(runner);
     } finally {
       await runner.release();
     }
@@ -128,14 +137,401 @@ integration('Content Center / isolated PostgreSQL', () => {
 
   beforeEach(async () => {
     await db.query(
-      `TRUNCATE cc_vk_connections,cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts,platform_prompts`,
+      `TRUNCATE cc_instagram_oauth_states,cc_instagram_connections,cc_vk_connections,cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts,platform_prompts`,
     );
     await db.query(
       'UPDATE platform_vk_settings SET encrypted_key=NULL,revision=0,verified_at=NULL,updated_at=NULL,updated_by=NULL',
     );
+    await db.query(
+      'UPDATE platform_social_settings SET encrypted_secret=NULL,app_id=NULL,redirect_uri=NULL,revision=0,updated_at=NULL,updated_by=NULL',
+    );
     generate.mockReset().mockResolvedValue({
       content: '# Компания\nФакты из тестового источника.',
     });
+  });
+
+  it('connects Instagram with single-use user-bound state and rejects foreign workspace, wrong profile and stale material', async () => {
+    const previousKey = process.env.AI_ENCRYPTION_KEY;
+    const previousOrigin = process.env.WEB_ORIGIN;
+    process.env.AI_ENCRYPTION_KEY = '35'.repeat(32);
+    process.env.WEB_ORIGIN = 'https://cms.example.test';
+    const settings = new PlatformSocialSettingsService(db);
+    const client = new InstagramSourceClient();
+    const exchange = jest.spyOn(client, 'exchange').mockResolvedValue({
+      token: 'test-instagram-token-not-real',
+      expiresAt: new Date(Date.now() + 50 * 86400_000),
+    });
+    const profile = jest
+      .spyOn(client, 'profile')
+      .mockResolvedValue({ id: '17841400000000', username: 'company' });
+    const instagram = new InstagramConnectionService(db, settings, client);
+    let actor = employee;
+    const module = await Test.createTestingModule({
+      controllers: [
+        PlatformSocialSettingsController,
+        SocialConnectionController,
+      ],
+      providers: [
+        PlatformAdminGuard,
+        { provide: PlatformSocialSettingsService, useValue: settings },
+        { provide: InstagramConnectionService, useValue: instagram },
+        { provide: ContentCenterService, useValue: service },
+      ],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate(context: ExecutionContext) {
+          context.switchToHttp().getRequest<AuthenticatedRequest>().auth =
+            actor;
+          return true;
+        },
+      })
+      .compile();
+    const app = module.createNestApplication();
+    app.setGlobalPrefix('api');
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
+    await app.init();
+    service.onModuleDestroy();
+    const http = app.getHttpServer() as Server;
+    try {
+      const endpoint = '/api/platform/settings/social/instagram';
+      await request(http).get(endpoint).expect(403);
+      await request(http)
+        .put(endpoint)
+        .send({
+          revision: 0,
+          secret: 'test-app-secret-not-real',
+          appId: '1234567',
+          redirectUri: 'https://cms.example.test/api/social/instagram/callback',
+        })
+        .expect(403);
+      actor = admin;
+      const configured = await request(http)
+        .put(endpoint)
+        .send({
+          revision: 0,
+          secret: 'test-app-secret-not-real',
+          appId: '1234567',
+          redirectUri: 'https://cms.example.test/api/social/instagram/callback',
+        })
+        .expect(200);
+      expect(configured.text).not.toContain('test-app-secret');
+      expect(configured.body).toMatchObject({ configured: true, revision: 1 });
+      await expect(
+        settings.remove('instagram', 0, admin.userId),
+      ).rejects.toThrow('Настройки изменились');
+      actor = employee;
+      const material = await service.saveMaterial(workspace, employee, {
+        kind: 'url',
+        title: 'Instagram',
+        urlCategory: 'social',
+        sourceUrl: 'https://www.instagram.com/company/',
+      });
+      const path = `/api/workspaces/${workspace}/content-center/materials/${material.id}/social`;
+      await request(http)
+        .get(
+          `/api/workspaces/${otherWorkspace}/content-center/materials/${material.id}/social`,
+        )
+        .expect(404);
+      await request(http)
+        .post(`${path}/connect`)
+        .set('Origin', 'https://wrong.example.test')
+        .send({ revision: 1 })
+        .expect(400);
+      const start = await request(http)
+        .post(`${path}/connect`)
+        .set('Origin', 'https://cms.example.test')
+        .send({ revision: 1 })
+        .expect(201);
+      const startUrl = (start.body as { url: string }).url;
+      const state = new URL(startUrl).searchParams.get('state')!;
+      expect(new URL(startUrl).searchParams.get('scope')).toBe(
+        'instagram_business_basic',
+      );
+      const [stored] = await db.query<Array<{ state_hash: string }>>(
+        'SELECT state_hash FROM cc_instagram_oauth_states',
+      );
+      expect(stored.state_hash).not.toBe(state);
+      await expect(
+        instagram.complete(state, 'code', admin.userId, (id) =>
+          service.access(id, admin),
+        ),
+      ).rejects.toThrow();
+      expect(exchange).not.toHaveBeenCalled();
+      await instagram.complete(state, 'code', employee.userId, (id) =>
+        service.access(id, employee),
+      );
+      await expect(
+        instagram.complete(state, 'code', employee.userId, (id) =>
+          service.access(id, employee),
+        ),
+      ).rejects.toThrow();
+      expect((await request(http).get(path).expect(200)).body).toMatchObject({
+        connected: true,
+        ready: true,
+        username: 'company',
+      });
+      const [connection] = await db.query<Array<{ encrypted_token: string }>>(
+        'SELECT encrypted_token FROM cc_instagram_connections',
+      );
+      expect(connection.encrypted_token).not.toContain('test-instagram');
+      const expired = await instagram.start(
+        workspace,
+        material.id,
+        2,
+        employee.userId,
+        'https://cms.example.test',
+      );
+      await db.query(
+        "UPDATE cc_instagram_oauth_states SET expires_at=now()-interval '1 minute' WHERE material_id=$1",
+        [material.id],
+      );
+      await expect(
+        instagram.complete(
+          new URL(expired.url).searchParams.get('state')!,
+          'code',
+          employee.userId,
+          (id) => service.access(id, employee),
+        ),
+      ).rejects.toThrow();
+      const rotating = await instagram.start(
+        workspace,
+        material.id,
+        2,
+        employee.userId,
+        'https://cms.example.test',
+      );
+      await settings.save(
+        'instagram',
+        {
+          revision: 1,
+          secret: 'new-app-secret-not-real',
+          appId: '1234567',
+          redirectUri: 'https://cms.example.test/api/social/instagram/callback',
+        },
+        admin.userId,
+      );
+      await expect(
+        instagram.complete(
+          new URL(rotating.url).searchParams.get('state')!,
+          'code',
+          employee.userId,
+          (id) => service.access(id, employee),
+        ),
+      ).rejects.toThrow('Приложение изменилось');
+      expect((await instagram.status(workspace, material.id)).ready).toBe(
+        false,
+      );
+      const wrong = await instagram.start(
+        workspace,
+        material.id,
+        2,
+        employee.userId,
+        'https://cms.example.test',
+      );
+      profile.mockResolvedValueOnce({
+        id: '17841400000001',
+        username: 'another',
+      });
+      await expect(
+        instagram.complete(
+          new URL(wrong.url).searchParams.get('state')!,
+          'code',
+          employee.userId,
+          (id) => service.access(id, employee),
+        ),
+      ).rejects.toThrow('другой Instagram');
+      expect((await instagram.status(workspace, material.id)).username).toBe(
+        'company',
+      );
+      const stale = await instagram.start(
+        workspace,
+        material.id,
+        2,
+        employee.userId,
+        'https://cms.example.test',
+      );
+      await service.saveMaterial(
+        workspace,
+        employee,
+        {
+          kind: 'url',
+          title: 'Changed',
+          urlCategory: 'social',
+          sourceUrl: 'https://www.instagram.com/changed/',
+          revision: 2,
+        },
+        material.id,
+      );
+      await expect(
+        instagram.complete(
+          new URL(stale.url).searchParams.get('state')!,
+          'code',
+          employee.userId,
+          (id) => service.access(id, employee),
+        ),
+      ).rejects.toThrow();
+      expect((await instagram.status(workspace, material.id)).connected).toBe(
+        false,
+      );
+      expect(exchange).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+      exchange.mockRestore();
+      profile.mockRestore();
+      if (previousKey === undefined) delete process.env.AI_ENCRYPTION_KEY;
+      else process.env.AI_ENCRYPTION_KEY = previousKey;
+      if (previousOrigin === undefined) delete process.env.WEB_ORIGIN;
+      else process.env.WEB_ORIGIN = previousOrigin;
+    }
+  });
+
+  it('collects YouTube and Instagram without AI, preserves failed snapshots, and never resurrects edited sources', async () => {
+    const previousKey = process.env.AI_ENCRYPTION_KEY;
+    const previousOrigin = process.env.WEB_ORIGIN;
+    process.env.AI_ENCRYPTION_KEY = '35'.repeat(32);
+    process.env.WEB_ORIGIN = 'https://cms.example.test';
+    const settings = new PlatformSocialSettingsService(db);
+    const igClient = new InstagramSourceClient();
+    const instagram = new InstagramConnectionService(db, settings, igClient);
+    const youtube = new YoutubeSourceClient();
+    const sample = {
+      pages: [
+        {
+          url: 'https://www.youtube.com/watch?v=abcdefghijk',
+          title: 'Offer',
+          group: 'Social',
+          status: 'loaded' as const,
+          recommended: true,
+          content: 'Original text',
+        },
+      ],
+      warnings: [],
+    };
+    const ytCollect = jest.spyOn(youtube, 'collect').mockResolvedValue(sample);
+    const igCollect = jest.spyOn(igClient, 'collect').mockResolvedValue(sample);
+    const exchange = jest.spyOn(igClient, 'exchange').mockResolvedValue({
+      token: 'test-instagram-token-not-real',
+      expiresAt: new Date(Date.now() + 50 * 86400_000),
+    });
+    const profile = jest
+      .spyOn(igClient, 'profile')
+      .mockResolvedValue({ id: '17841400000000', username: 'company' });
+    const worker = new ContentCenterService(
+      db,
+      new PreparationAiService({ name: 'test', generate }),
+      new PreparationCollectionService(
+        db,
+        new VkConnectionService(db),
+        instagram,
+        settings,
+        youtube,
+      ),
+    );
+    try {
+      await settings.save(
+        'youtube',
+        { secret: 'test-youtube-key-not-real', revision: 0 },
+        admin.userId,
+      );
+      await settings.save(
+        'instagram',
+        {
+          secret: 'test-app-secret-not-real',
+          appId: '1234567',
+          redirectUri: 'https://cms.example.test/api/social/instagram/callback',
+          revision: 0,
+        },
+        admin.userId,
+      );
+      for (const network of ['youtube', 'instagram'] as const) {
+        const sourceUrl =
+          network === 'youtube'
+            ? 'https://youtube.com/@company'
+            : 'https://www.instagram.com/company/';
+        const material = await worker.saveMaterial(workspace, employee, {
+          kind: 'url',
+          title: network,
+          urlCategory: 'social',
+          sourceUrl,
+        });
+        let revision = 1;
+        if (network === 'instagram') {
+          const start = await instagram.start(
+            workspace,
+            material.id,
+            1,
+            employee.userId,
+            'https://cms.example.test',
+          );
+          await instagram.complete(
+            new URL(start.url).searchParams.get('state')!,
+            'code',
+            employee.userId,
+            (id) => worker.access(id, employee),
+          );
+          revision = 2;
+        }
+        expect(generate).not.toHaveBeenCalled();
+        await worker.refreshSource(workspace, material.id, employee, revision);
+        if (network === 'instagram')
+          await expect(
+            instagram.disconnect(workspace, material.id, revision),
+          ).rejects.toThrow('завершения');
+        await worker.processNext();
+        const before = await worker.getMaterial(
+          workspace,
+          material.id,
+          employee,
+        );
+        expect(before.collection_run?.status).toBe('succeeded');
+        expect(before.site_pages?.mode).toBe('social-feed');
+        const collect = network === 'youtube' ? ytCollect : igCollect;
+        collect.mockRejectedValueOnce(
+          new SocialSourceError(
+            'Provider unavailable; previous snapshot preserved',
+          ),
+        );
+        await worker.refreshSource(workspace, material.id, employee, revision);
+        await worker.processNext();
+        const after = await worker.getMaterial(
+          workspace,
+          material.id,
+          employee,
+        );
+        expect(after.collection_run?.status).toBe('failed');
+        expect(after.site_pages).toEqual(before.site_pages);
+        collect.mockImplementationOnce(async () => {
+          await db.query(
+            'UPDATE cc_materials SET revision=revision+1,site_pages=NULL WHERE id=$1',
+            [material.id],
+          );
+          return sample;
+        });
+        await worker.refreshSource(workspace, material.id, employee, revision);
+        await worker.processNext();
+        expect(
+          (await worker.getMaterial(workspace, material.id, employee))
+            .site_pages,
+        ).toBeNull();
+      }
+      expect(generate).not.toHaveBeenCalled();
+      expect(
+        (await worker.overview(workspace, employee)).versions,
+      ).toHaveLength(0);
+    } finally {
+      worker.onModuleDestroy();
+      ytCollect.mockRestore();
+      igCollect.mockRestore();
+      exchange.mockRestore();
+      profile.mockRestore();
+      if (previousKey === undefined) delete process.env.AI_ENCRYPTION_KEY;
+      else process.env.AI_ENCRYPTION_KEY = previousKey;
+      if (previousOrigin === undefined) delete process.env.WEB_ORIGIN;
+      else process.env.WEB_ORIGIN = previousOrigin;
+    }
   });
 
   it('collects a Telegram channel through the queue without keys or AI and preserves the snapshot on failure', async () => {

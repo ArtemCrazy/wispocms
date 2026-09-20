@@ -19,7 +19,13 @@ export const SOCIAL_NETWORKS = [
     id: "youtube",
     label: "YouTube",
     placeholder: "youtube.com/@channel",
-    hint: "Автоматический сбор YouTube пока не подключён. Можно сохранить ссылку и добавить текст отдельно.",
+    hint: "До 100 последних видео: названия, описания и даты. Без просмотра видео и субтитров. Используется общий ключ CMS.",
+  },
+  {
+    id: "instagram",
+    label: "Instagram",
+    placeholder: "instagram.com/profile",
+    hint: "Подписи к 100 последним публикациям. После сохранения подключите профессиональный аккаунт владельца через Instagram.",
   },
 ] as const;
 export type SocialNetwork = (typeof SOCIAL_NETWORKS)[number]["id"] | "other";
@@ -40,6 +46,8 @@ export function socialNetworkForUrl(value: string): SocialNetwork {
       return "vk";
     if (["t.me", "www.t.me", "telegram.me", "www.telegram.me"].includes(host))
       return "telegram";
+    if (["instagram.com", "www.instagram.com"].includes(host))
+      return "instagram";
     if (
       ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"].includes(
         host,
@@ -79,6 +87,28 @@ export function socialSourceUrl(value: string, network: SocialNetwork): string {
   )
     throw new Error(
       "Укажите ссылку на публичный Telegram-канал, не на отдельный пост или приглашение.",
+    );
+  if (
+    network === "instagram" &&
+    (url.search ||
+      url.hash ||
+      !/^\/[a-zA-Z0-9_.]{1,30}\/?$/.test(url.pathname) ||
+      /^\/(p|reel|reels|stories|explore|accounts|direct|about|developer|developers|legal|web)\/?$/i.test(
+        url.pathname,
+      ))
+  )
+    throw new Error("Укажите профиль Instagram, а не отдельную публикацию.");
+  if (
+    network === "youtube" &&
+    (url.hostname === "youtu.be" ||
+      url.search ||
+      url.hash ||
+      !/^\/(?:@[^/\s?#]{3,100}|channel\/UC[\w-]{22}|user\/[a-zA-Z0-9_.-]{1,100})\/?$/u.test(
+        decodeURIComponent(url.pathname),
+      ))
+  )
+    throw new Error(
+      "Укажите канал YouTube: youtube.com/@имя или youtube.com/channel/UC….",
     );
   return address;
 }

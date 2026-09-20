@@ -25,6 +25,15 @@ import { VkSourceClient } from './vk-source';
 import { PlatformVkSettingsService } from './platform-vk-settings.service';
 import { PlatformVkSettingsController } from './platform-vk-settings.controller';
 import { PlatformAdminGuard } from '../platform/platform-admin.guard';
+import { PlatformSocialSettingsService } from './platform-social-settings.service';
+import { PlatformSocialSettingsController } from './platform-social-settings.controller';
+import { InstagramConnectionService } from './instagram-connection.service';
+import { InstagramSourceClient } from './instagram-source';
+import { YoutubeSourceClient } from './youtube-source';
+import {
+  SocialConnectionController,
+  InstagramCallbackController,
+} from './social-connection.controller';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
@@ -32,6 +41,9 @@ import { PlatformAdminGuard } from '../platform/platform-admin.guard';
     ContentCenterController,
     VkConnectionController,
     PlatformVkSettingsController,
+    PlatformSocialSettingsController,
+    SocialConnectionController,
+    InstagramCallbackController,
     ResearchController,
     CreationController,
   ],
@@ -44,6 +56,10 @@ import { PlatformAdminGuard } from '../platform/platform-admin.guard';
     VkConnectionService,
     VkSourceClient,
     PlatformVkSettingsService,
+    PlatformSocialSettingsService,
+    InstagramConnectionService,
+    InstagramSourceClient,
+    YoutubeSourceClient,
     PlatformAdminGuard,
     MaterialUploadGuard,
     ResearchService,

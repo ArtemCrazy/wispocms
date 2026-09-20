@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import {
   isVkMaterial,
   isTelegramMaterial,
+  isApiSocialMaterial,
   type ProjectMaterial,
 } from "./materials";
 import { VkConnection } from "./vk-connection";
+import { SocialConnection } from "./social-connection";
 import { SourceRegistry } from "./source-registry";
 import styles from "./content-center-view.module.css";
 
@@ -25,8 +27,11 @@ export function SourceRefresh({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [vkConnected, setVkConnected] = useState(false);
+  const [socialReady, setSocialReady] = useState(false);
   const vk = isVkMaterial(material);
   const telegram = isTelegramMaterial(material);
+  const instagram = isApiSocialMaterial(material, "instagram");
+  const youtube = isApiSocialMaterial(material, "youtube");
   const alive = useRef(true);
   const submittingRef = useRef(false);
   const running =
@@ -112,16 +117,42 @@ export function SourceRefresh({
           репостов, комментариев и чтения вложений.
         </p>
       )}
-      {(material.url_category === "site" || vk || telegram) && (
+      {(instagram || youtube) && (
+        <SocialConnection
+          network={instagram ? "instagram" : "youtube"}
+          path={path}
+          revision={material.revision}
+          running={running}
+          request={request}
+          onReady={setSocialReady}
+          onChanged={async () => {
+            setMaterial(await request<ProjectMaterial>(path));
+            await onUpdated();
+          }}
+        />
+      )}
+      {(material.url_category === "site" ||
+        vk ||
+        telegram ||
+        instagram ||
+        youtube) && (
         <>
           <div className={styles.cardHead}>
             <span className={styles.muted}>
-              Только сбор {vk || telegram ? "публикаций" : "страниц"} — без AI и
-              изменения версий.
+              Только сбор{" "}
+              {vk || telegram || instagram || youtube
+                ? "публикаций"
+                : "страниц"}{" "}
+              — без AI и изменения версий.
             </span>
             <button
               type="button"
-              disabled={submitting || running || (vk && !vkConnected)}
+              disabled={
+                submitting ||
+                running ||
+                (vk && !vkConnected) ||
+                ((instagram || youtube) && !socialReady)
+              }
               onClick={() => void refresh()}
             >
               {submitting

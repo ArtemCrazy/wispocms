@@ -7,7 +7,7 @@ export const SOURCE_CATEGORIES = [
   {
     id: "social",
     label: "Социальные сети",
-    hint: "ВКонтакте, Telegram, YouTube и другие",
+    hint: "ВКонтакте, Telegram, YouTube, Instagram",
   },
   {
     id: "maps",
@@ -163,14 +163,38 @@ export function isTelegramMaterial(
 export function isSocialFeedMaterial(
   material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
 ): boolean {
-  return isVkMaterial(material) || isTelegramMaterial(material);
+  return (
+    isVkMaterial(material) ||
+    isTelegramMaterial(material) ||
+    isApiSocialMaterial(material, "youtube") ||
+    isApiSocialMaterial(material, "instagram")
+  );
+}
+
+export function isApiSocialMaterial(
+  material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
+  network: "youtube" | "instagram",
+): boolean {
+  if (material.kind !== "url" || material.url_category !== "social")
+    return false;
+  try {
+    const host = new URL(material.source_url ?? "").hostname;
+    return (
+      network === "instagram"
+        ? ["instagram.com", "www.instagram.com"]
+        : ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"]
+    ).includes(host);
+  } catch {
+    return false;
+  }
 }
 
 export function socialIconNetwork(
   material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
-): "vk" | "telegram" | "youtube" | null {
+): "vk" | "telegram" | "youtube" | "instagram" | null {
   if (isVkMaterial(material)) return "vk";
   if (isTelegramMaterial(material)) return "telegram";
+  if (isApiSocialMaterial(material, "instagram")) return "instagram";
   if (material.kind !== "url" || material.url_category !== "social")
     return null;
   try {

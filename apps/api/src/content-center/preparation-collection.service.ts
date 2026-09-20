@@ -12,6 +12,11 @@ import {
 import { preparationTopic } from './preparation-topics';
 import { isVkUrl, VkSourceError } from './vk-source';
 import { VkConnectionService } from './vk-connection.service';
+import { isSocialUrl } from './social-address';
+import { InstagramConnectionService } from './instagram-connection.service';
+import { YoutubeSourceClient } from './youtube-source';
+import { PlatformSocialSettingsService } from './platform-social-settings.service';
+import { SocialSourceError } from './social-api';
 import {
   isTelegramUrl,
   TelegramSourceClient,
@@ -30,6 +35,13 @@ export class PreparationCollectionService {
   constructor(
     private readonly db: DataSource,
     private readonly vk: VkConnectionService = new VkConnectionService(db),
+    private readonly instagram: InstagramConnectionService = new InstagramConnectionService(
+      db,
+    ),
+    private readonly socialSettings: PlatformSocialSettingsService = new PlatformSocialSettingsService(
+      db,
+    ),
+    private readonly youtube: YoutubeSourceClient = new YoutubeSourceClient(),
   ) {}
 
   async collect(
@@ -77,6 +89,12 @@ export class PreparationCollectionService {
         material.urlCategory === 'social' && isVkUrl(material.sourceUrl);
       const telegramSource =
         material.urlCategory === 'social' && isTelegramUrl(material.sourceUrl);
+      const instagramSource =
+        material.urlCategory === 'social' &&
+        isSocialUrl(material.sourceUrl, 'instagram');
+      const youtubeSource =
+        material.urlCategory === 'social' &&
+        isSocialUrl(material.sourceUrl, 'youtube');
       if (material.sourceUrl && vkSource) {
         snapshot.mode = 'social-feed';
         try {
@@ -134,6 +152,42 @@ export class PreparationCollectionService {
                 error instanceof TelegramSourceError
                   ? error.message
                   : 'Не удалось прочитать публичный Telegram-канал. Проверьте ссылку или добавьте текст вручную.',
+            },
+          ];
+        }
+      } else if (material.sourceUrl && (instagramSource || youtubeSource)) {
+        snapshot.mode = 'social-feed';
+        try {
+          const collected = instagramSource
+            ? await this.instagram.collect(
+                workspaceId,
+                material.id,
+                material.revision,
+                material.sourceUrl,
+                signal,
+              )
+            : await this.youtube.collect(
+                (await this.socialSettings.credentials('youtube')).secret,
+                material.sourceUrl,
+                signal,
+              );
+          snapshot.pages = collected.pages;
+          snapshot.warnings = collected.warnings;
+        } catch (error) {
+          signal.throwIfAborted();
+          const message =
+            error instanceof SocialSourceError
+              ? error.message
+              : `Проверьте подключение ${instagramSource ? 'Instagram' : 'YouTube'} в настройках CMS и информации об источнике. Предыдущий сбор сохранён.`;
+          if (options.allowUnread) throw new AiProviderError(message);
+          snapshot.pages = [
+            {
+              url: material.sourceUrl,
+              title: material.title,
+              group: instagramSource ? 'Instagram' : 'YouTube',
+              status: 'failed',
+              recommended: true,
+              error: message,
             },
           ];
         }
@@ -298,7 +352,11 @@ export class PreparationCollectionService {
         options.persistSnapshots !== false &&
         material.id &&
         material.sourceUrl &&
-        (material.urlCategory === 'site' || vkSource || telegramSource)
+        (material.urlCategory === 'site' ||
+          vkSource ||
+          telegramSource ||
+          instagramSource ||
+          youtubeSource)
       ) {
         // An edit/deletion during collection cannot be overwritten or resurrected.
         await this.db.query(

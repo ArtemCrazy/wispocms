@@ -39,6 +39,11 @@ import { validateMaterialFile } from './material-file';
 import type { MaterialUpload } from './material-file';
 import { isVkUrl, vkCommunityAddress } from './vk-source';
 import { isTelegramUrl, telegramChannel } from './telegram-source';
+import {
+  isSocialUrl,
+  instagramUsername,
+  youtubeChannel,
+} from './social-address';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -228,12 +233,14 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           material.url_category === 'site' ||
           (material.url_category === 'social' &&
             (isVkUrl(material.source_url) ||
-              isTelegramUrl(material.source_url)))
+              isTelegramUrl(material.source_url) ||
+              isSocialUrl(material.source_url, 'instagram') ||
+              isSocialUrl(material.source_url, 'youtube')))
         ) ||
         !material.source_url
       )
         throw new BadRequestException(
-          'Обновить сбор можно для сайта, сообщества VK или Telegram-канала',
+          'Обновить сбор можно для сайта, VK, Telegram, Instagram или YouTube',
         );
       if (material.revision !== revision)
         throw new ConflictException(
@@ -349,9 +356,21 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       const vkSource = dto.urlCategory === 'social' && isVkUrl(dto.sourceUrl);
       const telegramSource =
         dto.urlCategory === 'social' && isTelegramUrl(dto.sourceUrl);
+      const instagramSource =
+        dto.urlCategory === 'social' && isSocialUrl(dto.sourceUrl, 'instagram');
+      const youtubeSource =
+        dto.urlCategory === 'social' && isSocialUrl(dto.sourceUrl, 'youtube');
       if (vkSource) vkCommunityAddress(dto.sourceUrl!);
       if (telegramSource) telegramChannel(dto.sourceUrl!);
-      if (dto.urlCategory === 'site' || vkSource || telegramSource) {
+      if (instagramSource) instagramUsername(dto.sourceUrl!);
+      if (youtubeSource) youtubeChannel(dto.sourceUrl!);
+      if (
+        dto.urlCategory === 'site' ||
+        vkSource ||
+        telegramSource ||
+        instagramSource ||
+        youtubeSource
+      ) {
         // Collection belongs to the explicit run, not to saving a link.
         content = '';
       } else
@@ -402,7 +421,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         throw new ConflictException(
           'Материал изменён другим сотрудником. Откройте его заново.',
         );
-      if (id)
+      if (id) {
         await manager.query(
           `DELETE FROM cc_vk_connections WHERE workspace_id=$1 AND material_id=$2 AND (source_url IS DISTINCT FROM $3 OR $4::boolean)`,
           [
@@ -412,6 +431,20 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             dto.kind !== 'url' || dto.urlCategory !== 'social',
           ],
         );
+        await manager.query(
+          `DELETE FROM cc_instagram_connections WHERE workspace_id=$1 AND material_id=$2 AND (source_url IS DISTINCT FROM $3 OR $4::boolean)`,
+          [
+            workspaceId,
+            id,
+            dto.sourceUrl ?? null,
+            dto.kind !== 'url' || dto.urlCategory !== 'social',
+          ],
+        );
+        await manager.query(
+          'DELETE FROM cc_instagram_oauth_states WHERE workspace_id=$1 AND material_id=$2',
+          [workspaceId, id],
+        );
+      }
       return rows[0];
     });
   }
