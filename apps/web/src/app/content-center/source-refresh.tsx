@@ -137,7 +137,7 @@ export function SourceRefresh({
         instagram ||
         youtube) && (
         <>
-          <div className={styles.cardHead}>
+          <div className={styles.sourceRefreshBar}>
             <span className={styles.muted}>
               Только сбор{" "}
               {vk || telegram || instagram || youtube

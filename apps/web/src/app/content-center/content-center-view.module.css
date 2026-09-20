@@ -872,6 +872,7 @@
   padding-left: 24px;
 }
 .dialog {
+  position: relative;
   width: min(760px, calc(100vw - 32px));
   max-height: 88vh;
   margin: auto;
@@ -915,6 +916,14 @@
   background: #eee9ff;
   border-color: #aa96f5;
   color: #674ad3;
+}
+.sourceRefreshBar {
+  margin: 12px 0;
+}
+.sourceRefreshBar > button {
+  position: absolute;
+  top: 24px;
+  right: 72px;
 }
 .promptGrid {
   display: grid;
@@ -1311,6 +1320,16 @@
   outline-offset: 2px;
 }
 @media (max-width: 600px) {
+  .sourceRefreshBar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .sourceRefreshBar > button {
+    position: static;
+    flex-shrink: 0;
+  }
   .sourceHeading {
     flex-wrap: wrap;
     gap: 10px;
