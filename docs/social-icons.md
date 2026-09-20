@@ -23,6 +23,9 @@ alt text and are hidden from assistive technology. Unknown/social lookalike
 domains receive no brand icon. Icon assets alone do not imply collection support;
 actual integration status is shown separately in the source controls.
 
-Website sources use the existing local `/globe.svg` decorative icon. It is a
-neutral interface symbol rather than a brand mark, so it is intentionally not
-attributed to Trace Logo’s and does not imply a specific browser or provider.
+Website sources use the HTML icon from Trace Logo’s. It is stored locally as
+`apps/web/public/icons/source/website.svg` and remains decorative in the UI.
+Source page: https://trace-logos.ru/logos/dev/html/
+Original SVG: https://trace-logos.ru/assets/logos/svgs/html.svg
+The artwork is copied without modification; trademark rights remain with their
+rightsholder.

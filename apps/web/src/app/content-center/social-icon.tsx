@@ -16,9 +16,9 @@ function DecorativeSourceIcon({ src }: { src: string }) {
   );
 }
 
-/** A neutral globe identifies a website without suggesting a specific brand. */
+/** The HTML shield visually identifies a website alongside the social brands. */
 export function WebsiteIcon() {
-  return <DecorativeSourceIcon src="/globe.svg" />;
+  return <DecorativeSourceIcon src="/icons/source/website.svg" />;
 }
 
 /** Local, unmodified SVG assets: see docs/social-icons.md for provenance. */
