@@ -6,7 +6,6 @@ import type { SitePage } from './site-crawler';
 
 const HOSTS = new Set(['t.me', 'www.t.me', 'telegram.me', 'www.telegram.me']);
 export const TELEGRAM_POST_LIMIT = 100;
-export const TELEGRAM_PERIOD_DAYS = 180;
 
 export function isTelegramUrl(value: string | null | undefined): boolean {
   try {
@@ -119,12 +118,11 @@ export class TelegramSourceClient {
     const url = `https://t.me/${channel}`;
     const pages: SitePage[] = [];
     const warnings = [
-      `Последние ${TELEGRAM_POST_LIMIT} публикаций за ${TELEGRAM_PERIOD_DAYS} дней из публичной веб-ленты. Репосты, комментарии и содержимое вложений не включаются. Это не полный архив канала.`,
+      `До ${TELEGRAM_POST_LIMIT} последних доступных публикаций из публичной веб-ленты без ограничения по давности. Репосты, комментарии и содержимое вложений не включаются. Это не полный архив канала.`,
     ];
     const seen = new Set<number>();
     const dates: Date[] = [];
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
-    const cutoff = now.getTime() - TELEGRAM_PERIOD_DAYS * 86400000;
     let before: number | null = null;
     let complete = false;
     let characters = 0;
@@ -175,10 +173,6 @@ export class TelegramSourceClient {
             throw new TelegramSourceError(
               'Telegram вернул некорректную дату публикации.',
             );
-          if (post.date.getTime() < cutoff) {
-            complete = true;
-            continue;
-          }
           if (seen.size >= TELEGRAM_POST_LIMIT) {
             limited = true;
             break;
@@ -206,7 +200,7 @@ export class TelegramSourceClient {
               ? 'Репост — не включён'
               : !post.content
                 ? 'Текст отсутствует; вложения не прочитаны'
-                : 'Текст собственной публикации в выбранном периоде',
+                : 'Текст собственной публикации; актуальность условий нужно проверять по дате',
           });
         }
         if (limited) {

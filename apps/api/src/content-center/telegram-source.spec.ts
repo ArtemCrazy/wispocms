@@ -69,7 +69,7 @@ describe('Telegram public channel collection', () => {
     ).toThrow('дату');
   });
 
-  it('paginates, deduplicates IDs, excludes reposts/media-only and stops at the period', async () => {
+  it('paginates, deduplicates IDs, excludes reposts/media-only and keeps old posts', async () => {
     const read = jest
       .spyOn(publicMaterial, 'readPublicResource')
       .mockResolvedValueOnce(
@@ -88,7 +88,6 @@ describe('Telegram public channel collection', () => {
             post(8, '') +
               post(7, 'Свой текст') +
               post(6, 'Старое', { date: '2025-01-01' }),
-            6,
           ),
         ),
       );
@@ -105,14 +104,18 @@ describe('Telegram public channel collection', () => {
       'found',
       'found',
       'loaded',
+      'loaded',
     ]);
     expect(
       collected.pages
         .filter((p) => p.recommended)
         .map((p) => p.content)
         .join(' '),
-    ).not.toMatch(/Чужой|Старое/);
-    expect(collected.warnings.join(' ')).toContain('Проверено публикаций: 4');
+    ).not.toMatch(/Чужой/);
+    expect(
+      collected.pages.find((page) => page.url.endsWith('/6'))?.content,
+    ).toContain('Старое');
+    expect(collected.warnings.join(' ')).toContain('Проверено публикаций: 5');
     expect(collected.pages[1].url).toBe('https://t.me/customer/10');
   });
 

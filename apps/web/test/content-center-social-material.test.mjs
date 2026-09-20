@@ -70,7 +70,7 @@ test("each network has its own placeholder and honest collection status", () => 
     );
     assert.ok(html.includes(address));
     if (network === "vk") assert.match(html, /ключ заказчика не нужен/);
-    else if (network === "telegram") assert.match(html, /100 последних публикаций за 180 дней/);
+    else if (network === "telegram") assert.match(html, /без ограничения по давности/);
     else assert.match(html, /100 последних видео/);
   }
 });

@@ -50,7 +50,7 @@ test('non-site source has no refresh action', () => {
 test('Telegram has an immediately available refresh without key, bot or connection step', () => {
   const html = render({ kind: 'url', url_category: 'social', source_url: 'https://t.me/customer_channel', site_pages: null });
   assert.match(html, /<button type="button">Обновить сбор<\/button>/);
-  assert.match(html, /100 последних публикаций за 180 дней/);
+  assert.match(html, /без ограничения по давности/);
   assert.doesNotMatch(html, /type="checkbox"|Подключить сообщество|Проверяем настройки VK/);
   assert.match(html, /без AI и изменения версий/);
 });
