@@ -38,9 +38,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       AI_ENCRYPTION_KEY: ${AI_ENCRYPTION_KEY:-}
       COOKIE_SECURE: "true"
-      WEB_ORIGIN: https://wispo-cms.45.12.74.66.nip.io
+      WEB_ORIGIN: https://wispo-cms.45.12.74.66.nip.io,https://cms.kpbox.ru
       PUBLIC_DOMAIN_TARGETS: ${PUBLIC_DOMAIN_TARGETS:-45.12.74.66}
-      WISPO_RESERVED_HOSTS: ${WISPO_RESERVED_HOSTS:-wispo-cms.45.12.74.66.nip.io}
+      WISPO_RESERVED_HOSTS: ${WISPO_RESERVED_HOSTS:-wispo-cms.45.12.74.66.nip.io},cms.kpbox.ru
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME}
@@ -84,7 +84,7 @@ services:
     environment:
       API_PROXY_URL: http://api:4000
       PUBLIC_APP_URL: https://wispo-cms.45.12.74.66.nip.io
-      WISPO_RESERVED_HOSTS: ${WISPO_RESERVED_HOSTS:-wispo-cms.45.12.74.66.nip.io}
+      WISPO_RESERVED_HOSTS: ${WISPO_RESERVED_HOSTS:-wispo-cms.45.12.74.66.nip.io},cms.kpbox.ru
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
       - /app/apps/web/.next/cache:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
