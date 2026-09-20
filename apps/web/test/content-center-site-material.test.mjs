@@ -36,7 +36,8 @@ test("website form asks only for its address and focuses the required URL field"
       onChange() {},
     }),
   );
-  assert.match(html, /Адрес сайта/);
+  assert.match(html, /aria-label="Адрес сайта"/);
+  assert.doesNotMatch(html, />\s*Адрес сайта\s*</);
   assert.equal((html.match(/<input\b/g) ?? []).length, 1);
   assert.match(html, /autofocus=""/);
   assert.match(html, /type="url"/);

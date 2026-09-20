@@ -13,10 +13,10 @@ export function SiteMaterialFields({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className={styles.field}>
-      Адрес сайта
+    <div className={styles.field}>
       <input
         autoFocus
+        aria-label="Адрес сайта"
         type="url"
         required
         maxLength={2048}
@@ -24,6 +24,6 @@ export function SiteMaterialFields({
         placeholder="https://example.ru"
         onChange={(event) => onChange(event.target.value)}
       />
-    </label>
+    </div>
   );
 }
