@@ -68,48 +68,17 @@ export function sourceTextParagraphs(content: string) {
 }
 
 export function SourceTextPreview({ content }: { content: string }) {
-  const [original, setOriginal] = useState(false);
   return (
     <div className={styles.sourceTextPreview}>
       <div
-        className={styles.sourceFilters}
-        role="group"
-        aria-label="Вид сохранённого текста"
+        className={styles.sourceReadableText}
+        tabIndex={0}
+        aria-label="Сохранённый исходный текст"
       >
-        <button
-          type="button"
-          aria-pressed={!original}
-          onClick={() => setOriginal(false)}
-        >
-          Для чтения
-        </button>
-        <button
-          type="button"
-          aria-pressed={original}
-          onClick={() => setOriginal(true)}
-        >
-          Оригинал
-        </button>
+        {sourceTextParagraphs(content).map((paragraph, index) => (
+          <p key={index}>{paragraph}</p>
+        ))}
       </div>
-      {original ? (
-        <pre
-          className={styles.sourceOriginalText}
-          tabIndex={0}
-          aria-label="Исходный сохранённый текст"
-        >
-          {content}
-        </pre>
-      ) : (
-        <div
-          className={styles.sourceReadableText}
-          tabIndex={0}
-          aria-label="Сохранённый текст для чтения"
-        >
-          {sourceTextParagraphs(content).map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

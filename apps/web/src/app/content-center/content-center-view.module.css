@@ -1280,8 +1280,7 @@
 .sourceTextPreview {
   margin-top: 12px;
 }
-.sourceReadableText,
-.sourceText .sourceOriginalText {
+.sourceReadableText {
   margin: 10px 0 0;
   padding: 16px 18px;
   border: 1px solid #ecebf2;
@@ -1307,8 +1306,7 @@
 .sourceReadableText p + p {
   margin-top: 6px;
 }
-.sourceReadableText:focus-visible,
-.sourceOriginalText:focus-visible {
+.sourceReadableText:focus-visible {
   outline: 2px solid #7256ee;
   outline-offset: 2px;
 }
