@@ -22,8 +22,12 @@ const compiled = ts.transpileModule(source, {
 });
 const target = { exports: {} };
 const require = createRequire(import.meta.url);
+const iconSource = await readFile(new URL("../src/app/content-center/social-icon.tsx", import.meta.url), "utf8");
+const iconCompiled = ts.transpileModule(iconSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+const iconTarget = { exports: {} };
+new Function("require", "module", "exports", iconCompiled.outputText)(id => id.endsWith(".css") ? { default: {} } : require(id), iconTarget, iconTarget.exports);
 new Function("require", "module", "exports", compiled.outputText)(
-  (id) => (id.endsWith(".css") ? { default: {} } : require(id)),
+  (id) => (id === "./social-icon" ? iconTarget.exports : id.endsWith(".css") ? { default: {} } : require(id)),
   target,
   target.exports,
 );
@@ -46,7 +50,7 @@ test("social form shows three networks and one URL field, without generic materi
   assert.match(html, /type="url"/);
   assert.match(html, /required=""/);
   assert.match(html, /autofocus=""/);
-  assert.match(html, /aria-pressed="true">ВКонтакте/);
+  assert.match(html, /aria-pressed="true"><img[^>]+>ВКонтакте/);
   assert.doesNotMatch(
     html,
     /Название|Категория источника|<select|<textarea|>Текст<|>Ссылка</,
@@ -89,7 +93,7 @@ test("network and URL interactions update their separate draft fields", () => {
   });
   const [networks, field] = React.Children.toArray(tree.props.children);
   const youtube = React.Children.toArray(networks.props.children).find(
-    (child) => child.props.children === "YouTube",
+    (child) => React.Children.toArray(child.props.children).includes("YouTube"),
   );
   youtube.props.onClick();
   assert.equal(selected, "youtube");
@@ -97,6 +101,18 @@ test("network and URL interactions update their separate draft fields", () => {
     target: { value: "https://www.youtube.com/@company" },
   });
   assert.equal(entered, "https://www.youtube.com/@company");
+});
+
+test("network buttons retain labels and show local decorative brand icons", async () => {
+  const html = renderToStaticMarkup(React.createElement(SocialMaterialFields, props));
+  for (const brand of ["vk", "telegram", "youtube"]) {
+    assert.ok(html.includes(`src="/icons/social/${brand}.svg"`));
+    const svg = await readFile(new URL(`../public/icons/social/${brand}.svg`, import.meta.url), "utf8");
+    assert.match(svg, /<svg[^>]+viewBox=/);
+    assert.doesNotMatch(svg, /<script|<foreignObject|<image|\bon\w+=|(?:href|src)=|data:/i);
+  }
+  assert.equal((html.match(/alt="" aria-hidden="true"/g) ?? []).length, 3);
+  assert.equal((html.match(/width="20" height="20"/g) ?? []).length, 3);
 });
 
 test("existing sources select their own platform, with a fallback for older other networks", () => {

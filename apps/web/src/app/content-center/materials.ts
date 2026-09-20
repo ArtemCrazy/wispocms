@@ -133,3 +133,24 @@ export function isSocialFeedMaterial(
 ): boolean {
   return isVkMaterial(material) || isTelegramMaterial(material);
 }
+
+export function socialIconNetwork(
+  material: Pick<ProjectMaterial, "kind" | "url_category" | "source_url">,
+): "vk" | "telegram" | "youtube" | null {
+  if (isVkMaterial(material)) return "vk";
+  if (isTelegramMaterial(material)) return "telegram";
+  if (material.kind !== "url" || material.url_category !== "social")
+    return null;
+  try {
+    return [
+      "youtube.com",
+      "www.youtube.com",
+      "m.youtube.com",
+      "youtu.be",
+    ].includes(new URL(material.source_url ?? "").hostname)
+      ? "youtube"
+      : null;
+  } catch {
+    return null;
+  }
+}

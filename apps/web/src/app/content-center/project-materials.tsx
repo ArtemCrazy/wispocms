@@ -6,10 +6,12 @@ import {
   SOURCE_CATEGORIES,
   fileSize,
   isSocialFeedMaterial,
+  socialIconNetwork,
   type ProjectMaterial,
   type SourceCategory,
 } from "./materials";
 import styles from "./content-center-view.module.css";
+import { SocialIcon } from "./social-icon";
 
 export function ProjectMaterials({
   materials,
@@ -64,7 +66,10 @@ export function ProjectMaterials({
                         title={m.source_url ?? m.title}
                         aria-label={`Изменить ссылку «${m.title}»`}
                       >
-                        {m.source_url}
+                        <SocialIcon network={socialIconNetwork(m)} />
+                        <span className={styles.sourceUrlText}>
+                          {m.source_url}
+                        </span>
                       </button>
                       {(m.site_checked_at ||
                         m.url_category === "site" ||

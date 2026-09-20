@@ -1,4 +1,5 @@
 import styles from "./content-center-view.module.css";
+import { SocialIcon } from "./social-icon";
 
 export const SOCIAL_NETWORKS = [
   {
@@ -106,6 +107,7 @@ export function SocialMaterialFields({
             aria-pressed={network === item.id}
             onClick={() => onNetworkChange(item.id)}
           >
+            <SocialIcon network={item.id} />
             {item.label}
           </button>
         ))}

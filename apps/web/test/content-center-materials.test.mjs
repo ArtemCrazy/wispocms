@@ -11,8 +11,23 @@ const source = await readFile(new URL('../src/app/content-center/project-materia
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 } });
 const target = { exports: {} };
 const require = createRequire(import.meta.url);
-new Function('require', 'module', 'exports', compiled.outputText)(id => id === './materials' ? materials : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
+const iconSource = await readFile(new URL('../src/app/content-center/social-icon.tsx', import.meta.url), 'utf8');
+const iconCompiled = ts.transpileModule(iconSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
+const iconTarget = { exports: {} };
+new Function('require', 'module', 'exports', iconCompiled.outputText)(id => id.endsWith('.css') ? { default: {} } : require(id), iconTarget, iconTarget.exports);
+new Function('require', 'module', 'exports', compiled.outputText)(id => id === './social-icon' ? iconTarget.exports : id === './materials' ? materials : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
 const render = (items, props = {}) => renderToStaticMarkup(React.createElement(target.exports.ProjectMaterials, { materials: items, busy: false, base: '/api/workspaces/one/content-center', add() {}, edit() {}, remove() {}, upload() {}, ...props }));
+
+test('social source chips show the matching brand without changing actions or lookalike domains', () => {
+  for (const [source_url, brand] of [['https://vk.ru/company', 'vk'], ['https://t.me/company', 'telegram'], ['https://www.youtube.com/@company', 'youtube'], ['https://t.me.evil.org/company', null]]) {
+    const html = render([{ id: 'social', title: 'Компания', kind: 'url', url_category: 'social', source_url }], { showSources() {} });
+    if (brand) assert.ok(html.includes(`src="/icons/social/${brand}.svg"`));
+    else assert.doesNotMatch(html, /<img/);
+    assert.match(html, /Изменить ссылку/);
+    assert.match(html, /Удалить ссылку/);
+    assert.ok(html.includes(source_url));
+  }
+});
 
 test('checked website groups URL, source information icon and remove action in that order', () => {
   const html = render([{ id: 'site', kind: 'url', url_category: materials.SOURCE_CATEGORIES[0].id, title: 'Сайт компании', source_url: 'https://example.com/', site_checked_at: '2026-09-19T00:00:00Z' }], { showSources() {} });
