@@ -157,12 +157,15 @@ function Dialog({
       ref={ref}
       className={styles.dialog}
       aria-label={title}
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !busy) close();
+      }}
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) close();
       }}
     >
-      <div className={styles.cardHead}>
+      <div className={styles.dialogHeader}>
         <h2>{title}</h2>
         <button
           type="button"
@@ -173,7 +176,7 @@ function Dialog({
           ×
         </button>
       </div>
-      {children}
+      <div className={styles.dialogBody}>{children}</div>
     </dialog>
   );
 }

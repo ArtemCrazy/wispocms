@@ -87,6 +87,17 @@ test("content center uses the breadcrumb bar instead of an empty help toolbar", 
   assert.match(css, /\.view \{[^}]*padding: 0;/);
 });
 
+test("content center dialogs keep the header visible and close from the backdrop", () => {
+  const root = new URL("../src/app/content-center/", import.meta.url);
+  const view = readFileSync(new URL("content-center-view.tsx", root), "utf8");
+  const css = readFileSync(new URL("content-center-view.module.css", root), "utf8");
+  assert.match(view, /event\.target === event\.currentTarget && !busy/);
+  assert.match(view, /className=\{styles\.dialogHeader\}/);
+  assert.match(view, /className=\{styles\.dialogBody\}/);
+  assert.match(css, /\.dialog \{[^}]*overflow: hidden;/);
+  assert.match(css, /\.dialogBody \{[^}]*overflow-y: auto;/);
+});
+
 test("draft prefill preserves a snapshot and only matches unambiguous exact copied prompts", () => {
   const prompts = [{ title: "Анализ компании", content: "Task" }];
   assert.equal(
