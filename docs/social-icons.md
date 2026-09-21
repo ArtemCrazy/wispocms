@@ -11,6 +11,19 @@ added); the UI uses a 20 × 20 CSS box with a 4px corner radius.
 | `apps/web/public/icons/social/youtube.svg` | https://trace-logos.ru/logos/media/youtube/ | https://trace-logos.ru/assets/logos/svgs/youtube.svg |
 | `apps/web/public/icons/social/instagram.svg` | https://trace-logos.ru/logos/social/instagram/ | https://trace-logos.ru/assets/logos/svgs/instagram.svg |
 
+Map source controls use the same local decorative SVG treatment:
+
+| Local asset | Source page | Original SVG |
+| --- | --- | --- |
+| `apps/web/public/icons/maps/yandex.svg` | https://trace-logos.ru/logos/map/yandexmaps/ | https://trace-logos.ru/assets/logos/svgs/yandex-maps.svg |
+| `apps/web/public/icons/maps/2gis.svg` | https://trace-logos.ru/logos/map/2gis/ | https://trace-logos.ru/assets/logos/svgs/2gis.svg |
+| `apps/web/public/icons/maps/google.svg` | https://trace-logos.ru/logos/map/google/ | https://trace-logos.ru/assets/logos/svgs/google-maps(2025).svg |
+
+The Google Maps 2025 variant is the lightweight pure-vector mark from the
+catalogue; the default catalogue asset contains embedded raster variants and
+is not suitable for a small source-control icon. These SVGs are kept locally,
+unmodified, and remain decorative; the buttons provide the accessible names.
+
 Brand marks identify supported source types; they do not indicate endorsement.
 Trademark rights remain with their respective owners. The catalogue is not a
 blanket commercial licence: see https://trace-logos.ru/terms/ and the respective

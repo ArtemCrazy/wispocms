@@ -15,6 +15,11 @@ import styles from "./content-center-view.module.css";
 import { MapIcon, SocialIcon, WebsiteIcon } from "./social-icon";
 import { mapProviderForUrl } from "./map-material-fields";
 
+function MapSourceIcon({ sourceUrl }: { sourceUrl: string | null }) {
+  const provider = mapProviderForUrl(sourceUrl ?? "");
+  return provider === "other" ? null : <MapIcon provider={provider} />;
+}
+
 export function ProjectMaterials({
   materials,
   busy,
@@ -71,13 +76,7 @@ export function ProjectMaterials({
                         {m.url_category === "site" ? (
                           <WebsiteIcon />
                         ) : m.url_category === "maps" ? (
-                          <MapIcon
-                            provider={
-                              mapProviderForUrl(m.source_url ?? "") === "2gis"
-                                ? "2gis"
-                                : "yandex"
-                            }
-                          />
+                          <MapSourceIcon sourceUrl={m.source_url} />
                         ) : (
                           <SocialIcon network={socialIconNetwork(m)} />
                         )}

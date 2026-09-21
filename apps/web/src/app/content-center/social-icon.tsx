@@ -31,13 +31,10 @@ export function SocialIcon({
   return <DecorativeSourceIcon src={`/icons/social/${network}.svg`} />;
 }
 
-export function MapIcon({ provider }: { provider: "yandex" | "2gis" }) {
-  return (
-    <span
-      className={`${styles.mapIcon} ${provider === "yandex" ? styles.mapIconYandex : styles.mapIconTwoGis}`}
-      aria-hidden="true"
-    >
-      {provider === "yandex" ? "Я" : "2"}
-    </span>
-  );
+export function MapIcon({
+  provider,
+}: {
+  provider: "yandex" | "2gis" | "google";
+}) {
+  return <DecorativeSourceIcon src={`/icons/maps/${provider}.svg`} />;
 }

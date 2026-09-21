@@ -15,6 +15,12 @@ export const MAP_PROVIDERS = [
     placeholder: "2gis.ru/moscow/firm/…",
     hint: "Публичная ссылка на карточку организации 2ГИС. Доступный текст страницы будет собран без входа.",
   },
+  {
+    id: "google",
+    label: "Google Maps",
+    placeholder: "google.com/maps/place/…",
+    hint: "Публичная ссылка на карточку организации Google Maps. Доступный текст страницы будет собран без входа.",
+  },
 ] as const;
 
 export type MapProvider = (typeof MAP_PROVIDERS)[number]["id"] | "other";
@@ -29,6 +35,17 @@ const YANDEX_HOSTS = new Set([
   "maps.yandex.ru",
 ]);
 const TWO_GIS_HOST = /(?:^|\.)2gis\.(?:ru|com|kz|uz|ge|ae|by)$/i;
+const GOOGLE_HOST = /(?:^|\.)google\.[a-z.]{2,}$/i;
+
+function isGoogleMapsUrl(url: URL) {
+  const host = url.hostname.toLowerCase();
+  return (
+    host === "maps.app.goo.gl" ||
+    (host === "goo.gl" && /^\/maps(?:\/|$)/i.test(url.pathname)) ||
+    (GOOGLE_HOST.test(host) &&
+      (host.startsWith("maps.") || /^\/maps(?:\/|$)/i.test(url.pathname)))
+  );
+}
 
 export function mapProviderForUrl(value: string): MapProvider {
   try {
@@ -42,6 +59,7 @@ export function mapProviderForUrl(value: string): MapProvider {
     )
       return "yandex";
     if (TWO_GIS_HOST.test(url.hostname)) return "2gis";
+    if (isGoogleMapsUrl(url)) return "google";
   } catch {
     /* Incomplete address stays in the draft until submission. */
   }
