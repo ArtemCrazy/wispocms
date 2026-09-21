@@ -39,6 +39,7 @@ import { PlatformVkIntegration1791004800000 } from './migrations/1791004800000-P
 import { InstagramYoutubeSources1791091200000 } from './migrations/1791091200000-InstagramYoutubeSources';
 import { YouTubeTranscriptions1791177600000 } from './migrations/1791177600000-YouTubeTranscriptions';
 import { PreparationGeneralPrompts1791264000000 } from './migrations/1791264000000-PreparationGeneralPrompts';
+import { RemoveLegacyCompetitorStarter1791350400000 } from './migrations/1791350400000-RemoveLegacyCompetitorStarter';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -84,6 +85,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       InstagramYoutubeSources1791091200000,
       YouTubeTranscriptions1791177600000,
       PreparationGeneralPrompts1791264000000,
+      RemoveLegacyCompetitorStarter1791350400000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',
