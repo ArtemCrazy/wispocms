@@ -92,6 +92,7 @@ export async function readPublicResource(
     allowNotFound?: boolean;
     xml?: boolean;
     signal?: AbortSignal;
+    userAgent?: string;
   } = {},
   hops = 0,
 ): Promise<PublicResource> {
@@ -133,7 +134,7 @@ export async function readPublicResource(
             ? 'application/xml, text/xml, text/plain, text/html'
             : 'text/html, text/plain, text/markdown',
           'Accept-Encoding': 'identity',
-          'User-Agent': 'WispoCMS/1.0 MaterialImport',
+          'User-Agent': options.userAgent ?? 'WispoCMS/1.0 MaterialImport',
         },
       },
       (response) => {

@@ -45,6 +45,7 @@ import {
   youtubeChannel,
 } from './social-address';
 import { isYandexMapsUrl } from './yandex-map-source';
+import { is2GisMapsUrl } from './2gis-map-source';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -233,7 +234,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         !(
           material.url_category === 'site' ||
           (material.url_category === 'maps' &&
-            isYandexMapsUrl(material.source_url)) ||
+            (isYandexMapsUrl(material.source_url) ||
+              is2GisMapsUrl(material.source_url))) ||
           (material.url_category === 'social' &&
             (isVkUrl(material.source_url) ||
               isTelegramUrl(material.source_url) ||
@@ -243,7 +245,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         !material.source_url
       )
         throw new BadRequestException(
-          'Обновить сбор можно для сайта, Яндекс Карт, VK, Telegram, Instagram или YouTube',
+          'Обновить сбор можно для сайта, Яндекс Карт, 2ГИС, VK, Telegram, Instagram или YouTube',
         );
       if (material.revision !== revision)
         throw new ConflictException(
@@ -365,6 +367,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         dto.urlCategory === 'social' && isSocialUrl(dto.sourceUrl, 'youtube');
       const yandexMapsSource =
         dto.urlCategory === 'maps' && isYandexMapsUrl(dto.sourceUrl);
+      const twoGisMapsSource =
+        dto.urlCategory === 'maps' && is2GisMapsUrl(dto.sourceUrl);
       if (vkSource) vkCommunityAddress(dto.sourceUrl!);
       if (telegramSource) telegramChannel(dto.sourceUrl!);
       if (instagramSource) instagramUsername(dto.sourceUrl!);
@@ -372,6 +376,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       if (
         dto.urlCategory === 'site' ||
         yandexMapsSource ||
+        twoGisMapsSource ||
         vkSource ||
         telegramSource ||
         instagramSource ||

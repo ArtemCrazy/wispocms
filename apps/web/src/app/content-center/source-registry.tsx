@@ -122,7 +122,7 @@ function MapCardSummary({
           </a>
         )}
         <a href={card.sourceUrl} target="_blank" rel="noreferrer">
-          Оригинал в Яндекс Картах
+          Оригинал в {card.provider === "2gis" ? "2ГИС" : "Яндекс Картах"}
         </a>
       </div>
     </section>

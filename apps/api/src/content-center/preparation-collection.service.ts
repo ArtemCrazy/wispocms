@@ -27,6 +27,11 @@ import {
   YandexMapSourceClient,
   YandexMapSourceError,
 } from './yandex-map-source';
+import {
+  is2GisMapsUrl,
+  TwoGisMapSourceClient,
+  TwoGisMapSourceError,
+} from './2gis-map-source';
 import type {
   PreparationInput,
   PreparationProgress,
@@ -48,6 +53,7 @@ export class PreparationCollectionService {
     ),
     private readonly youtube: YoutubeSourceClient = new YoutubeSourceClient(),
     private readonly yandexMaps: YandexMapSourceClient = new YandexMapSourceClient(),
+    private readonly twoGisMaps: TwoGisMapSourceClient = new TwoGisMapSourceClient(),
   ) {}
 
   async collect(
@@ -105,6 +111,8 @@ export class PreparationCollectionService {
         isSocialUrl(material.sourceUrl, 'youtube');
       const yandexMapsSource =
         material.urlCategory === 'maps' && isYandexMapsUrl(material.sourceUrl);
+      const twoGisMapsSource =
+        material.urlCategory === 'maps' && is2GisMapsUrl(material.sourceUrl);
       if (material.sourceUrl && vkSource) {
         snapshot.mode = 'social-feed';
         try {
@@ -201,28 +209,28 @@ export class PreparationCollectionService {
             },
           ];
         }
-      } else if (material.sourceUrl && yandexMapsSource) {
+      } else if (material.sourceUrl && (yandexMapsSource || twoGisMapsSource)) {
         snapshot.mode = 'map-card';
         try {
-          const collected = await this.yandexMaps.collect(
-            material.sourceUrl,
-            signal,
-          );
+          const collected = yandexMapsSource
+            ? await this.yandexMaps.collect(material.sourceUrl, signal)
+            : await this.twoGisMaps.collect(material.sourceUrl, signal);
           snapshot.pages = collected.pages;
           snapshot.warnings = collected.warnings;
           snapshot.map = collected.map;
         } catch (error) {
           signal.throwIfAborted();
           const message =
-            error instanceof YandexMapSourceError
+            error instanceof YandexMapSourceError ||
+            error instanceof TwoGisMapSourceError
               ? error.message
-              : 'Не удалось прочитать публичную карточку Яндекс Карт. Проверьте ссылку или добавьте текст вручную.';
+              : `Не удалось прочитать публичную карточку ${yandexMapsSource ? 'Яндекс Карт' : '2ГИС'}. Проверьте ссылку или добавьте текст вручную.`;
           if (options.allowUnread) throw new AiProviderError(message);
           snapshot.pages = [
             {
               url: material.sourceUrl,
               title: material.title,
-              group: 'Яндекс Карты',
+              group: yandexMapsSource ? 'Яндекс Карты' : '2ГИС',
               status: 'failed',
               recommended: true,
               error: message,
@@ -392,6 +400,7 @@ export class PreparationCollectionService {
         material.sourceUrl &&
         (material.urlCategory === 'site' ||
           yandexMapsSource ||
+          twoGisMapsSource ||
           vkSource ||
           telegramSource ||
           instagramSource ||

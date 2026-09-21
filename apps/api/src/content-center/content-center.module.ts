@@ -38,6 +38,7 @@ import { YoutubeTranscriptionController } from './youtube-transcription.controll
 import { YoutubeTranscriptionSettingsService } from './youtube-transcription-settings.service';
 import { YoutubeWhisperService } from './youtube-whisper.service';
 import { YandexMapSourceClient } from './yandex-map-source';
+import { TwoGisMapSourceClient } from './2gis-map-source';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
@@ -66,6 +67,7 @@ import { YandexMapSourceClient } from './yandex-map-source';
     InstagramSourceClient,
     YoutubeSourceClient,
     YandexMapSourceClient,
+    TwoGisMapSourceClient,
     YoutubeTranscriptionSettingsService,
     YoutubeWhisperService,
     PlatformAdminGuard,

@@ -61,6 +61,11 @@ export type YandexMapCard = {
   features: string[];
   sourceUrl: string;
 };
+export type TwoGisMapCard = Omit<YandexMapCard, "provider" | "reviews"> & {
+  provider: "2gis";
+  reviews: Array<YandexMapCard["reviews"][number] & { officialAnswer?: string | null }>;
+};
+export type MapCard = YandexMapCard | TwoGisMapCard;
 export type SourceSnapshot = {
   mode?:
     | "main-pages"
@@ -88,7 +93,7 @@ export type SourceSnapshot = {
       unread: number;
     }>;
   };
-  map?: YandexMapCard;
+  map?: MapCard;
   pages: Array<{
     url: string;
     title: string;
@@ -174,6 +179,40 @@ export function isYandexMapsMaterial(material: {
       (/^\/profile\/\d+\/?$/i.test(url.pathname) ||
         /^\/profile\/org\/[^/]+\/\d+(?:\/[^/]*)*\/?$/i.test(url.pathname) ||
         /^\/(?:maps\/)?org\/[^/]+\/\d+(?:\/[^/]*)*\/?$/i.test(url.pathname))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isTwoGisMapsMaterial(material: {
+  url_category: string;
+  source_url: string | null | undefined;
+}) {
+  if (material.url_category !== "maps") return false;
+  try {
+    const url = new URL(material.source_url ?? "");
+    return (
+      url.protocol === "https:" &&
+      [
+        "2gis.ru",
+        "www.2gis.ru",
+        "2gis.com",
+        "www.2gis.com",
+        "2gis.kz",
+        "www.2gis.kz",
+        "2gis.uz",
+        "www.2gis.uz",
+        "2gis.ge",
+        "www.2gis.ge",
+        "2gis.ae",
+        "www.2gis.ae",
+        "2gis.by",
+        "www.2gis.by",
+      ].includes(url.hostname.toLowerCase()) &&
+      /^\/[^/]+\/firm\/\d+(?:\/tab\/(?:info|reviews|prices|questions))?\/?$/i.test(
+        url.pathname,
+      )
     );
   } catch {
     return false;

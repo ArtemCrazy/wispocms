@@ -26,6 +26,7 @@ import {
   REGISTER_REVIEW_RESERVE,
 } from './preparation-verification';
 import type { YandexMapCard } from './yandex-map-source';
+import type { TwoGisMapCard } from './2gis-map-source';
 
 export type PreparationProgress = {
   stage: 'collecting' | 'analysing' | 'synthesizing';
@@ -43,7 +44,7 @@ export type SourceSnapshot = {
   warnings: string[];
   pages: SitePage[];
   coverage?: SiteCoverage;
-  map?: YandexMapCard;
+  map?: YandexMapCard | TwoGisMapCard;
 };
 
 export type PreparationInput = {
