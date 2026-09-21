@@ -3,8 +3,8 @@ const { test } = require('node:test');
 const { randomUUID } = require('node:crypto');
 const { prompts, seed } = require('./seed-content-center-prompts.cjs');
 
-test('six realistic starter prompts fit the existing API limits', () => {
-  assert.deepEqual(prompts.map((p) => p.title), ['Анализ компании', 'Анализ интернет-магазина', 'Анализ лендинга', 'Без материалов', 'Структура статьи', 'Анализ конкурентов']);
+test('seven general starter prompts fit the existing API limits', () => {
+  assert.deepEqual(prompts.map((p) => p.title), ['Анализ компании', 'Анализ интернет-магазина', 'Анализ лендинга', 'Без материалов', 'Структура статьи', 'Отзывы и обратная связь', 'Общая сводка компании']);
   for (const prompt of prompts) {
     assert.ok(prompt.title.length <= 160);
     assert.ok(prompt.content.length > 1000 && prompt.content.length <= 12000);
@@ -30,9 +30,9 @@ test('PostgreSQL: one global library, dry-run, no overwrite, order, idempotency 
   try {
     await client.query('CREATE SCHEMA "' + schema + '"');
     await client.query('CREATE TABLE platform_prompts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),title varchar(160) NOT NULL,content text NOT NULL,created_at timestamptz NOT NULL DEFAULT now())');
-    assert.equal((await seed(client, true, false)).planned.length, 6);
+    assert.equal((await seed(client, true, false)).planned.length, prompts.length);
     assert.equal((await client.query('SELECT * FROM platform_prompts')).rowCount, 0);
-    assert.equal((await seed(client, true, true)).added.length, 6);
+    assert.equal((await seed(client, true, true)).added.length, prompts.length);
     const rows = (await client.query('SELECT title,content FROM platform_prompts ORDER BY created_at DESC')).rows;
     assert.deepEqual(rows, prompts);
     await client.query('UPDATE platform_prompts SET content=$1 WHERE title=$2', ['Авторский текст заказчика', 'Анализ компании']);
