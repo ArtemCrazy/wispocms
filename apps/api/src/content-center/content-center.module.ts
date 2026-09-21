@@ -37,6 +37,7 @@ import {
 import { YoutubeTranscriptionController } from './youtube-transcription.controller';
 import { YoutubeTranscriptionSettingsService } from './youtube-transcription-settings.service';
 import { YoutubeWhisperService } from './youtube-whisper.service';
+import { YandexMapSourceClient } from './yandex-map-source';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
@@ -64,6 +65,7 @@ import { YoutubeWhisperService } from './youtube-whisper.service';
     InstagramConnectionService,
     InstagramSourceClient,
     YoutubeSourceClient,
+    YandexMapSourceClient,
     YoutubeTranscriptionSettingsService,
     YoutubeWhisperService,
     PlatformAdminGuard,
