@@ -5,6 +5,7 @@ import {
   isVkMaterial,
   isTelegramMaterial,
   isApiSocialMaterial,
+  isYandexMapsMaterial,
   type ProjectMaterial,
 } from "./materials";
 import { VkConnection } from "./vk-connection";
@@ -33,6 +34,7 @@ export function SourceRefresh({
   const telegram = isTelegramMaterial(material);
   const instagram = isApiSocialMaterial(material, "instagram");
   const youtube = isApiSocialMaterial(material, "youtube");
+  const yandexMaps = isYandexMapsMaterial(material);
   const alive = useRef(true);
   const submittingRef = useRef(false);
   const running =
@@ -133,6 +135,7 @@ export function SourceRefresh({
         />
       )}
       {(material.url_category === "site" ||
+        yandexMaps ||
         vk ||
         telegram ||
         instagram ||

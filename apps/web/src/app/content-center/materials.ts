@@ -31,8 +31,43 @@ export const SOURCE_CATEGORIES = [
   },
 ] as const;
 export type SourceCategory = (typeof SOURCE_CATEGORIES)[number]["id"];
+export type YandexMapCard = {
+  provider: "yandex";
+  organizationId: string | null;
+  title: string;
+  address: string | null;
+  coordinates: { latitude: number; longitude: number } | null;
+  phone: string | null;
+  website: string | null;
+  image: string | null;
+  rating: number | null;
+  reviewCount: number | null;
+  ratingCount: number | null;
+  categories: string[];
+  openingHours: string[];
+  reviews: Array<{
+    author: string;
+    rating: number | null;
+    date: string | null;
+    text: string;
+    url: string | null;
+  }>;
+  products: Array<{
+    title: string;
+    description: string;
+    price: string | null;
+    volume: string | null;
+  }>;
+  features: string[];
+  sourceUrl: string;
+};
 export type SourceSnapshot = {
-  mode?: "main-pages" | "single-page" | "provided" | "social-feed";
+  mode?:
+    | "main-pages"
+    | "single-page"
+    | "provided"
+    | "social-feed"
+    | "map-card";
   sourceId: string;
   title: string;
   checkedAt: string;
@@ -53,6 +88,7 @@ export type SourceSnapshot = {
       unread: number;
     }>;
   };
+  map?: YandexMapCard;
   pages: Array<{
     url: string;
     title: string;
@@ -115,6 +151,33 @@ export function displaySourceChipUrl(
     // Older or malformed values keep the regular compact representation.
   }
   return displayMaterialUrl(value);
+}
+
+export function isYandexMapsMaterial(material: {
+  url_category: string;
+  source_url: string | null | undefined;
+}) {
+  if (material.url_category !== "maps") return false;
+  try {
+    const url = new URL(material.source_url ?? "");
+    return (
+      url.protocol === "https:" &&
+      [
+        "yandex.ru",
+        "www.yandex.ru",
+        "yandex.com",
+        "www.yandex.com",
+        "yandex.com.tr",
+        "www.yandex.com.tr",
+        "maps.yandex.ru",
+      ].includes(url.hostname.toLowerCase()) &&
+      (/^\/profile\/\d+\/?$/i.test(url.pathname) ||
+        /^\/profile\/org\/[^/]+\/\d+(?:\/[^/]*)*\/?$/i.test(url.pathname) ||
+        /^\/(?:maps\/)?org\/[^/]+\/\d+(?:\/[^/]*)*\/?$/i.test(url.pathname))
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** HTTPS is implicit only when no explicit scheme was supplied. */

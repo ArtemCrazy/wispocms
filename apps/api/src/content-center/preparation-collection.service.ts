@@ -22,6 +22,11 @@ import {
   TelegramSourceClient,
   TelegramSourceError,
 } from './telegram-source';
+import {
+  isYandexMapsUrl,
+  YandexMapSourceClient,
+  YandexMapSourceError,
+} from './yandex-map-source';
 import type {
   PreparationInput,
   PreparationProgress,
@@ -42,6 +47,7 @@ export class PreparationCollectionService {
       db,
     ),
     private readonly youtube: YoutubeSourceClient = new YoutubeSourceClient(),
+    private readonly yandexMaps: YandexMapSourceClient = new YandexMapSourceClient(),
   ) {}
 
   async collect(
@@ -74,7 +80,9 @@ export class PreparationCollectionService {
         mode: material.sourceUrl
           ? material.urlCategory === 'site'
             ? 'main-pages'
-            : 'single-page'
+            : material.urlCategory === 'maps'
+              ? 'map-card'
+              : 'single-page'
           : 'provided',
         warnings: [],
         pages: [],
@@ -95,6 +103,8 @@ export class PreparationCollectionService {
       const youtubeSource =
         material.urlCategory === 'social' &&
         isSocialUrl(material.sourceUrl, 'youtube');
+      const yandexMapsSource =
+        material.urlCategory === 'maps' && isYandexMapsUrl(material.sourceUrl);
       if (material.sourceUrl && vkSource) {
         snapshot.mode = 'social-feed';
         try {
@@ -185,6 +195,34 @@ export class PreparationCollectionService {
               url: material.sourceUrl,
               title: material.title,
               group: instagramSource ? 'Instagram' : 'YouTube',
+              status: 'failed',
+              recommended: true,
+              error: message,
+            },
+          ];
+        }
+      } else if (material.sourceUrl && yandexMapsSource) {
+        snapshot.mode = 'map-card';
+        try {
+          const collected = await this.yandexMaps.collect(
+            material.sourceUrl,
+            signal,
+          );
+          snapshot.pages = collected.pages;
+          snapshot.warnings = collected.warnings;
+          snapshot.map = collected.map;
+        } catch (error) {
+          signal.throwIfAborted();
+          const message =
+            error instanceof YandexMapSourceError
+              ? error.message
+              : 'Не удалось прочитать публичную карточку Яндекс Карт. Проверьте ссылку или добавьте текст вручную.';
+          if (options.allowUnread) throw new AiProviderError(message);
+          snapshot.pages = [
+            {
+              url: material.sourceUrl,
+              title: material.title,
+              group: 'Яндекс Карты',
               status: 'failed',
               recommended: true,
               error: message,
@@ -353,6 +391,7 @@ export class PreparationCollectionService {
         material.id &&
         material.sourceUrl &&
         (material.urlCategory === 'site' ||
+          yandexMapsSource ||
           vkSource ||
           telegramSource ||
           instagramSource ||

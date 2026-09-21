@@ -44,6 +44,7 @@ import {
   instagramUsername,
   youtubeChannel,
 } from './social-address';
+import { isYandexMapsUrl } from './yandex-map-source';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -231,6 +232,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         material.kind !== 'url' ||
         !(
           material.url_category === 'site' ||
+          (material.url_category === 'maps' &&
+            isYandexMapsUrl(material.source_url)) ||
           (material.url_category === 'social' &&
             (isVkUrl(material.source_url) ||
               isTelegramUrl(material.source_url) ||
@@ -240,7 +243,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         !material.source_url
       )
         throw new BadRequestException(
-          'Обновить сбор можно для сайта, VK, Telegram, Instagram или YouTube',
+          'Обновить сбор можно для сайта, Яндекс Карт, VK, Telegram, Instagram или YouTube',
         );
       if (material.revision !== revision)
         throw new ConflictException(
@@ -360,12 +363,15 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         dto.urlCategory === 'social' && isSocialUrl(dto.sourceUrl, 'instagram');
       const youtubeSource =
         dto.urlCategory === 'social' && isSocialUrl(dto.sourceUrl, 'youtube');
+      const yandexMapsSource =
+        dto.urlCategory === 'maps' && isYandexMapsUrl(dto.sourceUrl);
       if (vkSource) vkCommunityAddress(dto.sourceUrl!);
       if (telegramSource) telegramChannel(dto.sourceUrl!);
       if (instagramSource) instagramUsername(dto.sourceUrl!);
       if (youtubeSource) youtubeChannel(dto.sourceUrl!);
       if (
         dto.urlCategory === 'site' ||
+        yandexMapsSource ||
         vkSource ||
         telegramSource ||
         instagramSource ||

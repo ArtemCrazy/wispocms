@@ -25,6 +25,7 @@ import {
   REGISTER_PART_REVIEW_NOTE,
   REGISTER_REVIEW_RESERVE,
 } from './preparation-verification';
+import type { YandexMapCard } from './yandex-map-source';
 
 export type PreparationProgress = {
   stage: 'collecting' | 'analysing' | 'synthesizing';
@@ -38,10 +39,11 @@ export type SourceSnapshot = {
   title: string;
   sourceUrl: string | null;
   checkedAt: string;
-  mode: 'main-pages' | 'single-page' | 'provided' | 'social-feed';
+  mode: 'main-pages' | 'single-page' | 'provided' | 'social-feed' | 'map-card';
   warnings: string[];
   pages: SitePage[];
   coverage?: SiteCoverage;
+  map?: YandexMapCard;
 };
 
 export type PreparationInput = {

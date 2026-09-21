@@ -83,6 +83,52 @@ export function SourceTextPreview({ content }: { content: string }) {
   );
 }
 
+function MapCardSummary({
+  card,
+}: {
+  card: NonNullable<SourceSnapshot["map"]>;
+}) {
+  return (
+    <section className={styles.sourceMapSummary} aria-label="Карточка организации">
+      <div className={styles.sourceMapMain}>
+        <div>
+          <strong>{card.title}</strong>
+          {card.address && <p>{card.address}</p>}
+        </div>
+        {card.rating !== null && (
+          <span className={styles.sourceMapRating}>
+            ★ {card.rating.toLocaleString("ru-RU")}
+          </span>
+        )}
+      </div>
+      <div className={styles.sourceMapFacts}>
+        {card.ratingCount !== null && <span>{card.ratingCount} оценок</span>}
+        {card.reviewCount !== null && <span>{card.reviewCount} отзывов</span>}
+        <span>{card.reviews.length} отзывов собрано</span>
+        <span>{card.products.length} товаров и услуг собрано</span>
+      </div>
+      {card.categories.length > 0 && (
+        <div className={styles.sourceMapCategories}>
+          {card.categories.map((category) => (
+            <span key={category}>{category}</span>
+          ))}
+        </div>
+      )}
+      <div className={styles.sourceMapContacts}>
+        {card.phone && <span>{card.phone}</span>}
+        {card.website && (
+          <a href={card.website} target="_blank" rel="noreferrer">
+            {card.website.replace(/^https?:\/\//i, "").replace(/\/$/, "")}
+          </a>
+        )}
+        <a href={card.sourceUrl} target="_blank" rel="noreferrer">
+          Оригинал в Яндекс Картах
+        </a>
+      </div>
+    </section>
+  );
+}
+
 /** Archived plain text, never rendered as source-provided HTML. */
 export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
   const hintId = useId();
@@ -95,6 +141,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
     <div className={styles.sourceRegistry}>
       {sources.map((source) => {
         const social = source.mode === "social-feed";
+        const map = source.mode === "map-card";
         const selectedFilter = selectedFilters[source.sourceId] ?? "all";
         const visiblePages = filterSourcePages(source.pages, selectedFilter);
         const hintOpen = Boolean(openHints[source.sourceId]);
@@ -149,6 +196,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
               </span>
             </header>
             <div className={styles.sourceBody}>
+              {source.map && <MapCardSummary card={source.map} />}
               <div className={styles.sourceToolbar}>
                 <div
                   className={styles.sourceFilters}
@@ -198,6 +246,13 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                         включено» — репосты и записи без текста. Вложения не
                         прочитаны.
                       </p>
+                    ) : map ? (
+                      <p>
+                        Здесь обзор публичной карточки Яндекс Карт и доступные
+                        разделы. Включены только данные, которые отдала сама
+                        HTML-страница; отсутствие раздела не подтверждает его
+                        отсутствие у организации.
+                      </p>
                     ) : (
                       <p>
                         Найдено адресов: {source.pages.length}. «Включено» —
@@ -211,7 +266,11 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 </details>
                 <details className={styles.sourceText}>
                   <summary>
-                    {social ? "Период и ограничения" : "Охват разделов"}
+                    {social
+                      ? "Период и ограничения"
+                      : map
+                        ? "Охват карточки"
+                        : "Охват разделов"}
                   </summary>
                   <div className={styles.sourceHelpContent}>
                     {source.coverage ? (
@@ -230,7 +289,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                           ))}
                         </ul>
                       </>
-                    ) : social ? null : (
+                    ) : social || map ? null : (
                       <p>Для этого снимка охват разделов не сохранён.</p>
                     )}
                     {source.warnings.map((warning) => (
@@ -240,9 +299,11 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                 </details>
                 <details className={styles.sourceText}>
                   <summary>
-                    {social
-                      ? "Правила отбора публикаций"
-                      : "Как агент отбирал страницы"}
+                      {social
+                        ? "Правила отбора публикаций"
+                        : map
+                          ? "Как прочитана карточка"
+                          : "Как агент отбирал страницы"}
                   </summary>
                   <div className={styles.sourceHelpContent}>
                     <p>
@@ -254,7 +315,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                         В этом снимке нет сохранённых решений AI. Ниже — данные
                         {social
                           ? "сбора VK по правилам периода, авторства и наличия текста."
-                          : "сбора сайта."}
+                          : map
+                            ? "публичной HTML-карточки Яндекс Карт без API и входа."
+                            : "сбора сайта."}
                       </p>
                     )}
                     {selectionEntries.length ? (
@@ -280,7 +343,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                                   ? "Решение AI"
                                   : social
                                     ? "Сбор VK"
-                                    : "Сбор сайта"}
+                                    : map
+                                      ? "Сбор Яндекс Карт"
+                                      : "Сбор сайта"}
                               </span>
                               <p>{explanation}</p>
                               {/^https:\/\//i.test(page.url) && (
@@ -303,7 +368,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                       <p>
                         {social
                           ? "В снимке пока нет материалов."
-                          : "В снимке пока нет страниц."}
+                          : map
+                            ? "В снимке пока нет разделов карточки."
+                            : "В снимке пока нет страниц."}
                       </p>
                     )}
                   </div>
@@ -312,9 +379,11 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
               <p className={styles.sourceFilterCount} role="status">
                 {visiblePages.length
                   ? `Показано ${visiblePages.length} из ${source.pages.length}`
-                  : social
-                    ? "Нет материалов с таким статусом"
-                    : "Нет страниц с таким статусом"}
+                    : social
+                      ? "Нет материалов с таким статусом"
+                      : map
+                        ? "Нет разделов с таким статусом"
+                        : "Нет страниц с таким статусом"}
               </p>
               <ul className={styles.sourcePages}>
                 {visiblePages.map(({ page, index }) => (
@@ -363,7 +432,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                         <summary>
                           {social
                             ? "Сохранённый текст"
-                            : "Сохранённый текст страницы"}
+                            : map
+                              ? "Сохранённый текст раздела"
+                              : "Сохранённый текст страницы"}
                         </summary>
                         <SourceTextPreview content={page.content} />
                       </details>
