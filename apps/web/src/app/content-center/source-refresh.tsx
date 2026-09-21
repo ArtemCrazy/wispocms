@@ -5,9 +5,6 @@ import {
   isVkMaterial,
   isTelegramMaterial,
   isApiSocialMaterial,
-  isYandexMapsMaterial,
-  isTwoGisMapsMaterial,
-  isGoogleMapsMaterial,
   type ProjectMaterial,
 } from "./materials";
 import { VkConnection } from "./vk-connection";
@@ -36,9 +33,7 @@ export function SourceRefresh({
   const telegram = isTelegramMaterial(material);
   const instagram = isApiSocialMaterial(material, "instagram");
   const youtube = isApiSocialMaterial(material, "youtube");
-  const yandexMaps = isYandexMapsMaterial(material);
-  const twoGisMaps = isTwoGisMapsMaterial(material);
-  const googleMaps = isGoogleMapsMaterial(material);
+  const mapSource = material.url_category === "maps";
   const alive = useRef(true);
   const submittingRef = useRef(false);
   const running =
@@ -139,9 +134,7 @@ export function SourceRefresh({
         />
       )}
       {(material.url_category === "site" ||
-        yandexMaps ||
-        twoGisMaps ||
-        googleMaps ||
+        mapSource ||
         vk ||
         telegram ||
         instagram ||

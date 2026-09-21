@@ -15,7 +15,7 @@ const compile = async (name, imports = {}) => {
   new Function('require', 'module', 'exports', compiled.outputText)(id => imports[id] ?? (id.endsWith('.css') ? { default: {} } : require(id)), target, target.exports);
   return target.exports;
 };
-const component = await compile('source-refresh', { './source-registry': await compile('source-registry'), './materials': materials, './vk-connection': await compile('vk-connection'), './social-connection': await compile('social-connection') });
+const component = await compile('source-refresh', { './source-registry': await compile('source-registry'), './materials': materials, './vk-connection': await compile('vk-connection'), './social-connection': await compile('social-connection'), './youtube-transcription-queue': { YoutubeTranscriptionQueue: () => null } });
 const initial = { id: 'site', title: 'Сайт', url_category: 'site', revision: 1,
   site_pages: { sourceId: 'S1', title: 'Сохранённый снимок', checkedAt: '2026-09-20T00:00:00Z', warnings: [], pages: [] } };
 const render = changes => renderToStaticMarkup(React.createElement(component.SourceRefresh, {
@@ -54,6 +54,17 @@ test('Telegram has an immediately available refresh without key, bot or connecti
   assert.doesNotMatch(html, /type="checkbox"|Подключить сообщество|Проверяем настройки VK/);
 });
 
+test('2GIS map cards expose refresh before the first collection', () => {
+  const html = render({
+    kind: 'url',
+    url_category: 'maps',
+    source_url: 'https://2gis.ru/khimki/firm/70000001080050161',
+    site_pages: null,
+  });
+  assert.match(html, /<button type="button">Обновить сбор<\/button>/);
+  assert.match(html, /Сохранённого сбора пока нет/);
+});
+
 test('VK waits only for common-key readiness and has no manual connection step', () => {
   const html = render({ kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null });
   assert.match(html, /ВКонтакте/);
@@ -75,7 +86,7 @@ test('Instagram and YouTube expose collection but wait for verified configuratio
 test('VK refresh is enabled once the shared key is ready, even without a previous collection', async () => {
   let state = 0;
   const readyReact = { ...React, useState: initial => [++state === 4 ? true : initial, () => {}] };
-  const readyComponent = await compile('source-refresh', { react: readyReact, './source-registry': () => null, './materials': materials, './vk-connection': { VkConnection: () => null }, './social-connection': { SocialConnection: () => null } });
+  const readyComponent = await compile('source-refresh', { react: readyReact, './source-registry': () => null, './materials': materials, './vk-connection': { VkConnection: () => null }, './social-connection': { SocialConnection: () => null }, './youtube-transcription-queue': { YoutubeTranscriptionQueue: () => null } });
   const html = renderToStaticMarkup(React.createElement(readyComponent.SourceRefresh, {
     initial: { ...initial, kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null },
     base: '/api/workspaces/one/content-center', request: async () => {}, onUpdated: async () => {},
