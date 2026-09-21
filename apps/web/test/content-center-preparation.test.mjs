@@ -96,6 +96,8 @@ test("content center dialogs keep the header visible and close from the backdrop
   assert.match(view, /className=\{styles\.dialogBody\}/);
   assert.match(css, /\.dialog \{[^}]*overflow: hidden;/);
   assert.match(css, /\.dialogBody \{[^}]*overflow-y: auto;/);
+  assert.match(css, /\.dialogBody \{[^}]*scrollbar-width: none;/);
+  assert.match(css, /\.dialogBody::-webkit-scrollbar \{[^}]*display: none;/);
 });
 
 test("draft prefill preserves a snapshot and only matches unambiguous exact copied prompts", () => {
