@@ -46,9 +46,14 @@ export function SpeechInput({
 
   useEffect(() => {
     const dialog = consentDialog.current;
-    if (consentOpen) dialog?.showModal();
-    else dialog?.close();
-    return () => dialog?.close();
+    if (consentOpen) {
+      if (dialog && !dialog.open) dialog.showModal();
+    } else if (dialog?.open) {
+      dialog.close();
+    }
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
   }, [consentOpen]);
 
   useEffect(
@@ -67,9 +72,15 @@ export function SpeechInput({
     [onActiveChange],
   );
 
+  function closeConsent() {
+    setConsentOpen(false);
+    const dialog = consentDialog.current;
+    if (dialog?.open) dialog.close();
+  }
+
   function start() {
     if (recognition.current || disabled) return;
-    setConsentOpen(false);
+    closeConsent();
     setError("");
     const browser = window as SpeechWindow;
     const Constructor =
@@ -212,7 +223,7 @@ export function SpeechInput({
         aria-label="Голосовой ввод инструкции"
         onCancel={(event) => {
           event.preventDefault();
-          setConsentOpen(false);
+          closeConsent();
         }}
       >
         <div className={styles.dialogHeader}>
@@ -220,7 +231,7 @@ export function SpeechInput({
           <button
             type="button"
             aria-label="Закрыть окно голосового ввода"
-            onClick={() => setConsentOpen(false)}
+            onClick={closeConsent}
           >
             ×
           </button>
@@ -251,7 +262,7 @@ export function SpeechInput({
             <button
               type="button"
               autoFocus
-              onClick={() => setConsentOpen(false)}
+              onClick={closeConsent}
             >
               Отмена
             </button>
