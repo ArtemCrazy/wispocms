@@ -37,6 +37,7 @@ import { SourceRefreshJobs1790832000000 } from './migrations/1790832000000-Sourc
 import { ContentCenterVkSources1790918400000 } from './migrations/1790918400000-ContentCenterVkSources';
 import { PlatformVkIntegration1791004800000 } from './migrations/1791004800000-PlatformVkIntegration';
 import { InstagramYoutubeSources1791091200000 } from './migrations/1791091200000-InstagramYoutubeSources';
+import { YouTubeTranscriptions1791177600000 } from './migrations/1791177600000-YouTubeTranscriptions';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -80,6 +81,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       ContentCenterVkSources1790918400000,
       PlatformVkIntegration1791004800000,
       InstagramYoutubeSources1791091200000,
+      YouTubeTranscriptions1791177600000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

@@ -5,6 +5,7 @@ import styles from "./platform-ai-settings.module.css";
 import { PlatformPromptSettings } from "./platform-prompt-settings";
 import { PlatformVkSettings } from "./platform-vk-settings";
 import { PlatformSocialSettings } from "./platform-social-settings";
+import { PlatformYoutubeTranscriptionSettings } from "./platform-youtube-transcription-settings";
 
 type Settings = {
   configured: boolean;
@@ -57,8 +58,15 @@ export function PlatformAiSettings({
   const [vkDirty, setVkDirty] = useState(false);
   const [youtubeDirty, setYoutubeDirty] = useState(false);
   const [instagramDirty, setInstagramDirty] = useState(false);
+  const [youtubeTranscriptionDirty, setYoutubeTranscriptionDirty] =
+    useState(false);
   const dirty =
-    aiDirty || promptsDirty || vkDirty || youtubeDirty || instagramDirty;
+    aiDirty ||
+    promptsDirty ||
+    vkDirty ||
+    youtubeDirty ||
+    instagramDirty ||
+    youtubeTranscriptionDirty;
 
   useEffect(() => {
     let active = true;
@@ -284,6 +292,9 @@ export function PlatformAiSettings({
       <PlatformSocialSettings
         network="youtube"
         onDirtyChange={setYoutubeDirty}
+      />
+      <PlatformYoutubeTranscriptionSettings
+        onDirtyChange={setYoutubeTranscriptionDirty}
       />
       <PlatformSocialSettings
         network="instagram"

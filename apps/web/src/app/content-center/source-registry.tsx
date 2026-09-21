@@ -352,6 +352,12 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                           ? `Совпадает с ${page.duplicateOf}`
                           : page.reason)}
                     </p>
+                    {social && page.transcriptStatus && (
+                      <p className={styles.sourceReason}>
+                        Расшифровка: {transcriptLabel(page.transcriptStatus)}
+                        {page.transcriptError ? ` — ${page.transcriptError}` : ""}
+                      </p>
+                    )}
                     {page.status === "loaded" && page.content && (
                       <details className={styles.sourceText}>
                         <summary>
@@ -371,4 +377,16 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
       })}
     </div>
   );
+}
+
+function transcriptLabel(
+  status: NonNullable<SourceSnapshot["pages"][number]["transcriptStatus"]>,
+) {
+  return status === "succeeded"
+    ? "готова"
+    : status === "processing"
+      ? "обрабатывается"
+      : status === "queued"
+        ? "в очереди"
+        : "ошибка";
 }

@@ -925,6 +925,32 @@
   top: 24px;
   right: 72px;
 }
+.youtubeTranscription {
+  margin: 16px 0 4px;
+  padding: 14px 16px;
+  border: 1px solid #e2def7;
+  border-radius: 10px;
+  background: #fbfaff;
+}
+.youtubeTranscription .sourceRefreshBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.youtubeTranscription .sourceRefreshBar p {
+  margin: 4px 0 0;
+}
+.youtubeTranscription .sourceActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.youtubeTranscription .sourceActions button {
+  position: static;
+  flex-shrink: 0;
+}
 .promptGrid {
   display: grid;
   grid-template-columns: minmax(160px, 0.7fr) minmax(200px, 1.3fr);
@@ -1330,6 +1356,13 @@
   .sourceRefreshBar > button {
     position: static;
     flex-shrink: 0;
+  }
+  .youtubeTranscription .sourceRefreshBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .youtubeTranscription .sourceActions {
+    justify-content: flex-start;
   }
   .sourceHeading {
     flex-wrap: wrap;

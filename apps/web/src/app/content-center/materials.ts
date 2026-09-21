@@ -61,6 +61,9 @@ export type SourceSnapshot = {
     error?: string;
     reason?: string;
     duplicateOf?: string;
+    transcript?: string;
+    transcriptStatus?: "queued" | "processing" | "succeeded" | "failed";
+    transcriptError?: string;
   }>;
 };
 export type ProjectMaterial = {

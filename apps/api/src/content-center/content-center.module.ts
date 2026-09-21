@@ -34,6 +34,9 @@ import {
   SocialConnectionController,
   InstagramCallbackController,
 } from './social-connection.controller';
+import { YoutubeTranscriptionController } from './youtube-transcription.controller';
+import { YoutubeTranscriptionSettingsService } from './youtube-transcription-settings.service';
+import { YoutubeWhisperService } from './youtube-whisper.service';
 
 @Module({
   imports: [AuthModule, ContentModule, AiModule],
@@ -44,6 +47,7 @@ import {
     PlatformSocialSettingsController,
     SocialConnectionController,
     InstagramCallbackController,
+    YoutubeTranscriptionController,
     ResearchController,
     CreationController,
   ],
@@ -60,6 +64,8 @@ import {
     InstagramConnectionService,
     InstagramSourceClient,
     YoutubeSourceClient,
+    YoutubeTranscriptionSettingsService,
+    YoutubeWhisperService,
     PlatformAdminGuard,
     MaterialUploadGuard,
     ResearchService,

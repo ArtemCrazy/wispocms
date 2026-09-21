@@ -10,6 +10,7 @@ import {
 import { VkConnection } from "./vk-connection";
 import { SocialConnection } from "./social-connection";
 import { SourceRegistry } from "./source-registry";
+import { YoutubeTranscriptionQueue } from "./youtube-transcription-queue";
 import styles from "./content-center-view.module.css";
 
 export function SourceRefresh({
@@ -167,6 +168,17 @@ export function SourceRefresh({
             </p>
           )}
         </>
+      )}
+      {youtube && (
+        <YoutubeTranscriptionQueue
+          material={material}
+          path={path}
+          request={request}
+          onMaterialUpdated={(updated) => {
+            setMaterial(updated);
+            void onUpdated();
+          }}
+        />
       )}
       {material.site_pages ? (
         <SourceRegistry sources={[material.site_pages]} />

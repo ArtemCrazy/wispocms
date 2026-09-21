@@ -54,7 +54,9 @@ services:
     volumes:
       - wispo_preview_media:/data/media
     tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+      # yt-dlp/ffmpeg need room for one temporary audio file and its chunks.
+      # The worker is single-flight, so this is bounded per API container.
+      - /tmp:rw,noexec,nosuid,size=256m,uid=1000,gid=1000
     ports:
       - "127.0.0.1:4300:4000"
     healthcheck:

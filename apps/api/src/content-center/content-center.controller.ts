@@ -33,6 +33,7 @@ import { ContentCenterService } from './content-center.service';
 import { MaterialUploadGuard } from './material-upload.guard';
 import { MATERIAL_FILE_LIMIT } from './material-file';
 import type { MaterialUpload } from './material-file';
+import { YoutubeWhisperService } from './youtube-whisper.service';
 
 class RestoreVersionDto {
   @IsInt()
@@ -49,7 +50,10 @@ class RefreshSourceDto {
 @Controller('workspaces/:workspaceId/content-center')
 @UseGuards(JwtAuthGuard)
 export class ContentCenterController {
-  constructor(private readonly service: ContentCenterService) {}
+  constructor(
+    private readonly service: ContentCenterService,
+    private readonly youtubeWhisper: YoutubeWhisperService,
+  ) {}
 
   @Post('files')
   @UseGuards(MaterialUploadGuard)
@@ -115,6 +119,38 @@ export class ContentCenterController {
     @Body() dto: RefreshSourceDto,
   ) {
     return this.service.refreshSource(workspaceId, id, req.auth!, dto.revision);
+  }
+  @Get('materials/:id/transcriptions')
+  async transcriptions(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.service.access(workspaceId, req.auth!);
+    return this.youtubeWhisper.list(workspaceId, id);
+  }
+  @Post('materials/:id/transcriptions')
+  @HttpCode(202)
+  enqueueTranscriptions(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: RefreshSourceDto,
+  ) {
+    return this.service
+      .access(workspaceId, req.auth!)
+      .then(() => this.youtubeWhisper.enqueue(workspaceId, id, dto.revision));
+  }
+  @Post('materials/:id/transcriptions/retry')
+  @HttpCode(202)
+  retryTranscriptions(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.service
+      .access(workspaceId, req.auth!)
+      .then(() => this.youtubeWhisper.retry(workspaceId, id));
   }
   @Put('materials/:id')
   updateMaterial(
