@@ -14,6 +14,12 @@ import { SpeechInput } from "./speech-input";
 import { ProjectMaterials } from "./project-materials";
 import { SiteMaterialFields, siteMaterialTitle } from "./site-material-fields";
 import {
+  MapMaterialFields,
+  mapProviderForUrl,
+  mapSourceUrl,
+  type MapProvider,
+} from "./map-material-fields";
+import {
   SocialMaterialFields,
   socialNetworkForUrl,
   socialSourceUrl,
@@ -207,7 +213,9 @@ export function ContentCenterView({
   const [material, setMaterial] = useState<MaterialDraft | null>(null);
   const [siteMaterialMode, setSiteMaterialMode] = useState(false);
   const [socialMaterialMode, setSocialMaterialMode] = useState(false);
+  const [mapMaterialMode, setMapMaterialMode] = useState(false);
   const [socialNetwork, setSocialNetwork] = useState<SocialNetwork>("vk");
+  const [mapProvider, setMapProvider] = useState<MapProvider>("yandex");
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
@@ -495,6 +503,10 @@ export function ContentCenterView({
                       kind === "url" && urlCategory === "social",
                     );
                     setSocialNetwork("vk");
+                    setMapMaterialMode(
+                      kind === "url" && urlCategory === "maps",
+                    );
+                    setMapProvider("yandex");
                     setSiteMaterialMode(
                       kind === "url" && urlCategory === "site",
                     );
@@ -512,6 +524,10 @@ export function ContentCenterView({
                       setSocialMaterialMode(
                         row.kind === "url" && row.url_category === "social",
                       );
+                      setMapMaterialMode(
+                        row.kind === "url" && row.url_category === "maps",
+                      );
+                      setMapProvider(mapProviderForUrl(row.source_url ?? ""));
                       setSocialNetwork(
                         socialNetworkForUrl(row.source_url ?? ""),
                       );
@@ -901,6 +917,10 @@ export function ContentCenterView({
               ? material.id
                 ? "Изменить сайт"
                 : "Добавить сайт"
+              : mapMaterialMode
+                ? material.id
+                  ? "Изменить карту"
+                  : "Добавить карту"
               : socialMaterialMode
                 ? material.id
                   ? "Изменить социальную сеть"
@@ -953,6 +973,19 @@ export function ContentCenterView({
                             material.title ||
                             siteMaterialTitle(material.sourceUrl),
                         }
+                      : mapMaterialMode
+                        ? {
+                            ...normalizedMaterial,
+                            kind: "url",
+                            urlCategory: "maps",
+                            sourceUrl: mapSourceUrl(
+                              material.sourceUrl,
+                              mapProvider,
+                            ),
+                            title:
+                              material.title ||
+                              siteMaterialTitle(material.sourceUrl),
+                          }
                       : normalizedMaterial,
                 );
                 await load();
@@ -962,7 +995,8 @@ export function ContentCenterView({
                     kind: material.kind,
                     url_category: material.urlCategory ?? "other",
                     source_url: normalizedMaterial.sourceUrl,
-                  })
+                  }) ||
+                  mapMaterialMode
                 ) {
                   const row = await request<Material>(
                     `${base}/materials/${saved.id}`,
@@ -979,6 +1013,19 @@ export function ContentCenterView({
                   onChange={(sourceUrl) =>
                     setMaterial({ ...material, sourceUrl })
                   }
+                />
+              ) : mapMaterialMode ? (
+                <MapMaterialFields
+                  provider={mapProvider}
+                  sourceUrl={material.sourceUrl}
+                  onProviderChange={(provider) => {
+                    setMapProvider(provider);
+                    setDialogError("");
+                  }}
+                  onChange={(sourceUrl) => {
+                    setMaterial({ ...material, sourceUrl });
+                    setDialogError("");
+                  }}
                 />
               ) : socialMaterialMode ? (
                 <SocialMaterialFields

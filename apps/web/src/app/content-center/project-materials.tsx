@@ -12,7 +12,8 @@ import {
   type SourceCategory,
 } from "./materials";
 import styles from "./content-center-view.module.css";
-import { SocialIcon, WebsiteIcon } from "./social-icon";
+import { MapIcon, SocialIcon, WebsiteIcon } from "./social-icon";
+import { mapProviderForUrl } from "./map-material-fields";
 
 export function ProjectMaterials({
   materials,
@@ -69,6 +70,14 @@ export function ProjectMaterials({
                       >
                         {m.url_category === "site" ? (
                           <WebsiteIcon />
+                        ) : m.url_category === "maps" ? (
+                          <MapIcon
+                            provider={
+                              mapProviderForUrl(m.source_url ?? "") === "2gis"
+                                ? "2gis"
+                                : "yandex"
+                            }
+                          />
                         ) : (
                           <SocialIcon network={socialIconNetwork(m)} />
                         )}
@@ -78,6 +87,7 @@ export function ProjectMaterials({
                       </button>
                       {(m.site_checked_at ||
                         m.url_category === "site" ||
+                        m.url_category === "maps" ||
                         isSocialFeedMaterial(m)) &&
                         showSources && (
                           <button
