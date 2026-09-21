@@ -161,6 +161,52 @@ export function displaySourceChipUrl(
   return displayMaterialUrl(value);
 }
 
+/**
+ * Map cards are identified by their public numeric organization ID. Keep the
+ * full URL in the material and use this compact label only in the source chip.
+ * Google Maps links without a numeric `cid` keep their compact URL because
+ * place URLs do not always expose a stable numeric identifier.
+ */
+export function displayMapSourceId(
+  value: string | null | undefined,
+): string {
+  try {
+    const url = new URL(materialSourceUrl(value ?? ""));
+    const path = decodeURIComponent(url.pathname);
+    const host = url.hostname.toLowerCase();
+
+    if (
+      [
+        "yandex.ru",
+        "www.yandex.ru",
+        "yandex.com",
+        "www.yandex.com",
+        "yandex.com.tr",
+        "www.yandex.com.tr",
+        "maps.yandex.ru",
+      ].includes(host)
+    ) {
+      const match = path.match(
+        /^\/(?:profile\/(?:org\/[^/]+\/)?|(?:maps\/)?org\/[^/]+\/)(\d+)(?:\/|$)/i,
+      );
+      if (match) return match[1];
+    }
+
+    if (/(?:^|\.)2gis\.(?:ru|com|kz|uz|ge|ae|by)$/i.test(host)) {
+      const match = path.match(/\/firm\/(\d+)(?:\/|$)/i);
+      if (match) return match[1];
+    }
+
+    if (/(?:^|\.)google\.[a-z.]{2,}$/i.test(host)) {
+      const cid = url.searchParams.get("cid");
+      if (cid && /^\d+$/.test(cid)) return cid;
+    }
+  } catch {
+    // Older or malformed values keep the regular compact representation.
+  }
+  return displayMaterialUrl(value);
+}
+
 export function isYandexMapsMaterial(material: {
   url_category: string;
   source_url: string | null | undefined;

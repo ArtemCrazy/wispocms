@@ -7,6 +7,7 @@ import {
   fileSize,
   isSocialFeedMaterial,
   socialIconNetwork,
+  displayMapSourceId,
   displaySourceChipUrl,
   type ProjectMaterial,
   type SourceCategory,
@@ -81,7 +82,9 @@ export function ProjectMaterials({
                           <SocialIcon network={socialIconNetwork(m)} />
                         )}
                         <span className={styles.sourceUrlText}>
-                          {displaySourceChipUrl(m.source_url)}
+                          {m.url_category === "maps"
+                            ? displayMapSourceId(m.source_url)
+                            : displaySourceChipUrl(m.source_url)}
                         </span>
                       </button>
                       {(m.site_checked_at ||

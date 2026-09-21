@@ -16,7 +16,7 @@ const websiteIconSource = await readFile(new URL('../public/icons/source/website
 const iconCompiled = ts.transpileModule(iconSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
 const iconTarget = { exports: {} };
 new Function('require', 'module', 'exports', iconCompiled.outputText)(id => id.endsWith('.css') ? { default: {} } : require(id), iconTarget, iconTarget.exports);
-new Function('require', 'module', 'exports', compiled.outputText)(id => id === './social-icon' ? iconTarget.exports : id === './materials' ? materials : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
+new Function('require', 'module', 'exports', compiled.outputText)(id => id === './social-icon' ? iconTarget.exports : id === './materials' ? materials : id === './map-material-fields' ? { mapProviderForUrl() { return 'other'; } } : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
 const render = (items, props = {}) => renderToStaticMarkup(React.createElement(target.exports.ProjectMaterials, { materials: items, busy: false, base: '/api/workspaces/one/content-center', add() {}, edit() {}, remove() {}, upload() {}, ...props }));
 
 test('social source chips show the matching brand without changing actions or lookalike domains', () => {
@@ -37,6 +37,27 @@ test('YouTube handle chips omit the long host while retaining the full address i
   assert.match(html, />@soundyogaschool<\/span>/);
   assert.match(html, /title="https:\/\/www\.youtube\.com\/@soundyogaschool"/);
   assert.doesNotMatch(html, />www\.youtube\.com\/@soundyogaschool<\/span>/);
+});
+
+test('map source chips show only the numeric public card identifier', () => {
+  const cases = [
+    ['https://yandex.ru/profile/84036619207', '84036619207'],
+    ['https://yandex.ru/profile/org/example/84036619207/reviews', '84036619207'],
+    ['https://2gis.ru/khimki/firm/70000001080050161', '70000001080050161'],
+    ['https://www.google.com/maps?cid=123456789', '123456789'],
+  ];
+  for (const [source_url, id] of cases) {
+    assert.equal(materials.displayMapSourceId(source_url), id);
+    const html = render([{ id, title: 'Карточка', kind: 'url', url_category: 'maps', source_url }], { showSources() {} });
+    assert.match(html, new RegExp(`>${id}<\\/span>`));
+    assert.match(html, new RegExp(`title="${source_url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+    assert.doesNotMatch(html, new RegExp(`>${source_url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}<\\/span>`));
+  }
+});
+
+test('map source chips keep a usable label when a Google place URL has no numeric cid', () => {
+  const source_url = 'https://www.google.com/maps/place/Example';
+  assert.equal(materials.displayMapSourceId(source_url), 'www.google.com/maps/place/Example');
 });
 
 test('checked website groups URL, source information icon and remove action in that order', () => {
