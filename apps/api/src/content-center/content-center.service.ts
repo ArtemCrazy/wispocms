@@ -46,6 +46,7 @@ import {
 } from './social-address';
 import { isYandexMapsUrl } from './yandex-map-source';
 import { is2GisMapsUrl } from './2gis-map-source';
+import { isGoogleMapsUrl } from './google-maps-source';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -235,7 +236,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           material.url_category === 'site' ||
           (material.url_category === 'maps' &&
             (isYandexMapsUrl(material.source_url) ||
-              is2GisMapsUrl(material.source_url))) ||
+              is2GisMapsUrl(material.source_url) ||
+              isGoogleMapsUrl(material.source_url))) ||
           (material.url_category === 'social' &&
             (isVkUrl(material.source_url) ||
               isTelegramUrl(material.source_url) ||
@@ -245,7 +247,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         !material.source_url
       )
         throw new BadRequestException(
-          'Обновить сбор можно для сайта, Яндекс Карт, 2ГИС, VK, Telegram, Instagram или YouTube',
+          'Обновить сбор можно для сайта, Яндекс Карт, 2ГИС, Google Maps, VK, Telegram, Instagram или YouTube',
         );
       if (material.revision !== revision)
         throw new ConflictException(
@@ -369,6 +371,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         dto.urlCategory === 'maps' && isYandexMapsUrl(dto.sourceUrl);
       const twoGisMapsSource =
         dto.urlCategory === 'maps' && is2GisMapsUrl(dto.sourceUrl);
+      const googleMapsSource =
+        dto.urlCategory === 'maps' && isGoogleMapsUrl(dto.sourceUrl);
       if (vkSource) vkCommunityAddress(dto.sourceUrl!);
       if (telegramSource) telegramChannel(dto.sourceUrl!);
       if (instagramSource) instagramUsername(dto.sourceUrl!);
@@ -377,6 +381,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         dto.urlCategory === 'site' ||
         yandexMapsSource ||
         twoGisMapsSource ||
+        googleMapsSource ||
         vkSource ||
         telegramSource ||
         instagramSource ||

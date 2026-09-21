@@ -91,6 +91,7 @@ export async function readPublicResource(
     beforeRequest?: (url: URL) => void | Promise<void>;
     allowNotFound?: boolean;
     xml?: boolean;
+    json?: boolean;
     signal?: AbortSignal;
     userAgent?: string;
   } = {},
@@ -132,7 +133,9 @@ export async function readPublicResource(
         headers: {
           Accept: options.xml
             ? 'application/xml, text/xml, text/plain, text/html'
-            : 'text/html, text/plain, text/markdown',
+            : options.json
+              ? 'application/json, text/plain, text/html'
+              : 'text/html, text/plain, text/markdown',
           'Accept-Encoding': 'identity',
           'User-Agent': options.userAgent ?? 'WispoCMS/1.0 MaterialImport',
         },
@@ -171,6 +174,7 @@ export async function readPublicResource(
           status !== 200 ||
           !(
             /^text\/(html|plain|markdown)\b/i.test(type) ||
+            (options.json && /^application\/json\b/i.test(type)) ||
             (options.xml &&
               /^(application|text)\/(xml|[^;]+\+xml)\b/i.test(type))
           ) ||

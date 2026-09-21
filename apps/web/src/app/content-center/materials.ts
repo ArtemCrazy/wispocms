@@ -65,7 +65,10 @@ export type TwoGisMapCard = Omit<YandexMapCard, "provider" | "reviews"> & {
   provider: "2gis";
   reviews: Array<YandexMapCard["reviews"][number] & { officialAnswer?: string | null }>;
 };
-export type MapCard = YandexMapCard | TwoGisMapCard;
+export type GoogleMapCard = Omit<YandexMapCard, "provider"> & {
+  provider: "google";
+};
+export type MapCard = YandexMapCard | TwoGisMapCard | GoogleMapCard;
 export type SourceSnapshot = {
   mode?:
     | "main-pages"
@@ -213,6 +216,37 @@ export function isTwoGisMapsMaterial(material: {
       /^\/[^/]+\/firm\/\d+(?:\/tab\/(?:info|reviews|prices|questions))?\/?$/i.test(
         url.pathname,
       )
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function isGoogleMapsMaterial(material: {
+  url_category: string;
+  source_url: string | null | undefined;
+}) {
+  if (material.url_category !== "maps") return false;
+  try {
+    const url = new URL(material.source_url ?? "");
+    const host = url.hostname.toLowerCase();
+    const googleHost =
+      [
+        "google.com",
+        "www.google.com",
+        "maps.google.com",
+        "google.ru",
+        "www.google.ru",
+        "maps.google.ru",
+        "maps.app.goo.gl",
+        "goo.gl",
+      ].includes(host) ||
+      /^(?:www\.|maps\.)?google\.[a-z]{2,}(?:\.[a-z]{2,})?$/.test(host);
+    return (
+      url.protocol === "https:" &&
+      googleHost &&
+      (/^\/maps\/(?:place|search)(?:\/|$)/i.test(url.pathname) ||
+        (/^\/maps\/?$/i.test(url.pathname) && url.searchParams.has("cid")))
     );
   } catch {
     return false;

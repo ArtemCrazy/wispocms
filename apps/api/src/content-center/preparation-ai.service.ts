@@ -27,6 +27,7 @@ import {
 } from './preparation-verification';
 import type { YandexMapCard } from './yandex-map-source';
 import type { TwoGisMapCard } from './2gis-map-source';
+import type { GoogleMapCard } from './google-maps-source';
 
 export type PreparationProgress = {
   stage: 'collecting' | 'analysing' | 'synthesizing';
@@ -44,7 +45,7 @@ export type SourceSnapshot = {
   warnings: string[];
   pages: SitePage[];
   coverage?: SiteCoverage;
-  map?: YandexMapCard | TwoGisMapCard;
+  map?: YandexMapCard | TwoGisMapCard | GoogleMapCard;
 };
 
 export type PreparationInput = {

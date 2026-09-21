@@ -88,6 +88,12 @@ function MapCardSummary({
 }: {
   card: NonNullable<SourceSnapshot["map"]>;
 }) {
+  const providerLabel =
+    card.provider === "2gis"
+      ? "2ГИС"
+      : card.provider === "google"
+        ? "Google Maps"
+        : "Яндекс Картах";
   return (
     <section className={styles.sourceMapSummary} aria-label="Карточка организации">
       <div className={styles.sourceMapMain}>
@@ -122,7 +128,7 @@ function MapCardSummary({
           </a>
         )}
         <a href={card.sourceUrl} target="_blank" rel="noreferrer">
-          Оригинал в {card.provider === "2gis" ? "2ГИС" : "Яндекс Картах"}
+          Оригинал в {providerLabel}
         </a>
       </div>
     </section>
@@ -142,6 +148,13 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
       {sources.map((source) => {
         const social = source.mode === "social-feed";
         const map = source.mode === "map-card";
+        const mapProviderLabel = source.map
+          ? source.map.provider === "2gis"
+            ? "2ГИС"
+            : source.map.provider === "google"
+              ? "Google Maps"
+              : "Яндекс Картах"
+          : "картах";
         const selectedFilter = selectedFilters[source.sourceId] ?? "all";
         const visiblePages = filterSourcePages(source.pages, selectedFilter);
         const hintOpen = Boolean(openHints[source.sourceId]);
@@ -248,9 +261,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                       </p>
                     ) : map ? (
                       <p>
-                        Здесь обзор публичной карточки Яндекс Карт и доступные
-                        разделы. Включены только данные, которые отдала сама
-                        HTML-страница; отсутствие раздела не подтверждает его
+                        Здесь обзор публичной карточки {mapProviderLabel} и доступные
+                        разделы. Включены только данные, которые отдал сам
+                        публичный ответ площадки; отсутствие раздела не подтверждает его
                         отсутствие у организации.
                       </p>
                     ) : (
@@ -316,7 +329,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                         {social
                           ? "сбора VK по правилам периода, авторства и наличия текста."
                           : map
-                            ? "публичной HTML-карточки Яндекс Карт без API и входа."
+                            ? `публичной карточки ${mapProviderLabel} без API и входа.`
                             : "сбора сайта."}
                       </p>
                     )}
@@ -344,7 +357,7 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                                   : social
                                     ? "Сбор VK"
                                     : map
-                                      ? "Сбор Яндекс Карт"
+                                      ? `Сбор ${mapProviderLabel}`
                                       : "Сбор сайта"}
                               </span>
                               <p>{explanation}</p>
