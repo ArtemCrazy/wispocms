@@ -215,7 +215,7 @@ export function SpeechInput({
           setConsentOpen(false);
         }}
       >
-        <div className={styles.cardHead}>
+        <div className={styles.dialogHeader}>
           <h2>Голосовой ввод инструкции</h2>
           <button
             type="button"
@@ -225,31 +225,37 @@ export function SpeechInput({
             ×
           </button>
         </div>
-        <p>
-          Микрофон пока выключен. После нажатия «Включить микрофон» браузер
-          запросит разрешение и начнёт распознавание русской речи.
-        </p>
-        <p>
-          Браузер может передавать речь своему сервису распознавания. CMS не
-          сохраняет аудио. Текст добавится в конец инструкции — проверьте его
-          перед сохранением.
-        </p>
-        <p className={styles.muted}>
-          Если браузер не поддерживает распознавание, можно ввести текст вручную
-          или воспользоваться системной диктовкой.
-        </p>
-        <div className={styles.actions}>
-          <button
-            type="button"
-            className={styles.primary}
-            disabled={disabled}
-            onClick={start}
-          >
-            Включить микрофон
-          </button>
-          <button type="button" autoFocus onClick={() => setConsentOpen(false)}>
-            Отмена
-          </button>
+        <div className={styles.dialogBody}>
+          <p>
+            Микрофон пока выключен. После нажатия «Включить микрофон» браузер
+            запросит разрешение и начнёт распознавание русской речи.
+          </p>
+          <p>
+            Браузер может передавать речь своему сервису распознавания. CMS не
+            сохраняет аудио. Текст добавится в конец инструкции — проверьте его
+            перед сохранением.
+          </p>
+          <p className={styles.muted}>
+            Если браузер не поддерживает распознавание, можно ввести текст
+            вручную или воспользоваться системной диктовкой.
+          </p>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={disabled}
+              onClick={start}
+            >
+              Включить микрофон
+            </button>
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setConsentOpen(false)}
+            >
+              Отмена
+            </button>
+          </div>
         </div>
       </dialog>
     </div>
