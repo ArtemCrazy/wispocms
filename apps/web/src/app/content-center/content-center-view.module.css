@@ -350,10 +350,6 @@
   grid-template-columns: minmax(120px, 0.32fr) minmax(0, 1fr);
   gap: 8px 14px;
 }
-.preparationStack .sourceRow > p {
-  grid-column: 2;
-  margin: 0;
-}
 .preparationTask .cardHead {
   flex-wrap: wrap;
 }
@@ -368,9 +364,6 @@
 @container (max-width: 650px) {
   .preparationStack .sourceRow {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .preparationStack .sourceRow > p {
-    grid-column: 1;
   }
 }
 .research {
@@ -527,8 +520,8 @@
 }
 .sourceRow {
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr) minmax(180px, 0.65fr);
-  gap: 20px;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 16px;
   padding: 18px 0;
   border-bottom: 1px solid #eeeef4;
   align-items: start;
@@ -537,8 +530,21 @@
   border-bottom: 0;
   padding-bottom: 0;
 }
-.sourceRow > strong {
-  padding-top: 8px;
+.sourceLabel {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 6px;
+}
+.sourceLabel strong {
+  line-height: 1.35;
+}
+.sourceHint {
+  color: #747d8d;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .sourceItems {
   display: flex;
@@ -1056,9 +1062,6 @@
     grid-template-columns: 160px minmax(0, 1fr);
     gap: 12px;
   }
-  .sourceRow > p {
-    grid-column: 2;
-  }
   .processingHistory {
     grid-template-columns: 1fr;
   }
@@ -1080,9 +1083,6 @@
   }
   .sourceRow {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .sourceRow > p {
-    grid-column: 1;
   }
   .cardHead {
     flex-wrap: wrap;

@@ -87,7 +87,12 @@ export function ProjectMaterials({
       <div className={styles.sourceRows}>
         {SOURCE_CATEGORIES.map((category) => (
           <div key={category.id} className={styles.sourceRow}>
-            <strong>{category.label}</strong>
+            <div className={styles.sourceLabel}>
+              <strong>{category.label}</strong>
+              {category.hint && (
+                <span className={styles.sourceHint}>{category.hint}</span>
+              )}
+            </div>
             <div className={styles.sourceItems}>
               {materials
                 .filter(
@@ -256,7 +261,6 @@ export function ProjectMaterials({
                 </>
               )}
             </div>
-            {category.hint && <p className={styles.muted}>{category.hint}</p>}
           </div>
         ))}
       </div>

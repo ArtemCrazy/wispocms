@@ -45,6 +45,13 @@ test('site row has no novice helper text while keeping its add action', () => {
   assert.match(html, /aria-label="Добавить ссылку: Сайты"/);
 });
 
+test('category hints sit directly under muted labels, before source actions', () => {
+  const html = render([]);
+  assert.match(source, /<div className=\{styles\.sourceLabel\}>[\s\S]*?<span className=\{styles\.sourceHint\}>/);
+  assert.match(html, /<strong>Карты и отзывы<\/strong><span>Яндекс Карты, 2ГИС, Google Maps<\/span><\/div><div/);
+  assert.ok(html.indexOf('Яндекс Карты, 2ГИС, Google Maps') < html.indexOf('aria-label="Добавить ссылку: Карты и отзывы"'));
+});
+
 test('map source chips show only the numeric public card identifier', () => {
   const cases = [
     ['https://yandex.ru/profile/84036619207', '84036619207'],
