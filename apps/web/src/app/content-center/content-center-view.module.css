@@ -524,7 +524,7 @@
   min-width: 0;
   max-width: 100%;
 }
-.sourceChip > button:first-child {
+.sourceChip > :first-child {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -535,6 +535,17 @@
   background: #f8f7ff;
   color: #674ad3;
   border-radius: 8px 0 0 8px;
+}
+.sourceChip > a:first-child {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #dedee9;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.sourceChip > a:first-child:focus-visible {
+  outline: 2px solid #7256ee;
+  outline-offset: 3px;
 }
 .sourceUrlText {
   min-width: 0;
@@ -550,7 +561,7 @@
   object-fit: contain;
   border-radius: 4px;
 }
-.sourceChip > button + button {
+.sourceChip > :not(:first-child) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -559,44 +570,15 @@
   border-left: 0;
   border-radius: 0;
 }
-.sourceChip > button:last-child {
+.sourceChip > :last-child {
   border-radius: 0 8px 8px 0;
 }
 .sourceWarning {
   color: #8a641b;
   margin-top: 6px;
 }
-.materialsSection {
-  margin-top: 28px;
-  padding-top: 24px;
-  border-top: 1px solid #eeeef4;
-}
-.materialsSection h3 {
-  margin: 0;
-  font-size: 16px;
-}
-.uploadArea {
-  padding: 20px 0;
-}
-.uploadArea > .actions > button {
-  min-width: min(300px, 100%);
-  min-height: 54px;
-  border-style: dashed;
-  border-color: #b8a8ee;
-  color: #674ad3;
-}
 .fileInput {
   display: none;
-}
-.fileTable caption {
-  text-align: left;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-.fileTable td:first-child {
-  min-width: 220px;
-  overflow-wrap: anywhere;
-  max-width: 500px;
 }
 .download {
   color: #6849df;

@@ -26,8 +26,8 @@ export const SOURCE_CATEGORIES = [
   },
   {
     id: "other",
-    label: "Другие источники",
-    hint: "Другие публичные онлайн-ресурсы проекта",
+    label: "Материалы проекта",
+    hint: "Файлы, тексты и дополнительные ссылки · до 10 МБ на файл",
   },
 ] as const;
 export type SourceCategory = (typeof SOURCE_CATEGORIES)[number]["id"];

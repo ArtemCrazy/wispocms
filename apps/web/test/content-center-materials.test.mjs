@@ -95,50 +95,54 @@ test('source information remains disabled during a pending operation', () => {
   }
 });
 
-test('source collection exposes categorized links and a real file input', () => {
+test('materials row exposes links, file upload and text input without a separate entity', () => {
   const html = render([]);
   for (const category of materials.SOURCE_CATEGORIES) assert.ok(html.includes(category.label));
   assert.match(html, /type="file"/);
   assert.ok(html.includes(materials.FILE_ACCEPT));
   assert.equal((html.match(/<article\b/g) ?? []).length, 1);
-  assert.match(html, /<h3>Файлы и тексты проекта<\/h3>/);
+  assert.doesNotMatch(html, /Файлы и тексты проекта/);
   assert.doesNotMatch(html, /из 50 МБ/);
   assert.doesNotMatch(html, /Текст — UTF-8|40 000 символов/);
-  assert.match(html, /Добавить текст/);
+  assert.match(html, /Добавить текст проекта/);
   assert.doesNotMatch(html, /Текстовые материалы/);
-  assert.ok(html.indexOf('Другие источники') < html.indexOf('<h3>Файлы и тексты проекта'));
+  assert.match(html, /Материалы проекта/);
+  assert.doesNotMatch(html, /Другие источники/);
+  assert.ok(html.indexOf('Материалы проекта') < html.indexOf('Загрузить файл проекта'));
   assert.doesNotMatch(html, /Создать форму/);
 });
 
-test('files and typed materials share one table without losing their actions', () => {
+test('existing files, text and additional links share the materials row without losing actions', () => {
   const html = render([
     { id: 'file-id', kind: 'file', title: 'Бриф', file_name: 'Бриф.pdf', file_size: 1024, characters: 12, created_at: '2026-09-19T00:00:00Z' },
     { id: 'text-id', kind: 'text', title: 'Заметки клиента', characters: 125, created_at: '2026-09-19T00:00:00Z' },
+    { id: 'link-id', kind: 'url', url_category: 'other', title: 'Дополнительная ссылка', source_url: 'https://example.com/notes' },
   ]);
-  assert.equal((html.match(/<table\b/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /<table\b/);
   assert.match(html, /Бриф\.pdf/);
   assert.match(html, /Заметки клиента/);
-  assert.match(html, /125 симв\./);
-  assert.match(html, /Открыть и изменить/);
+  assert.match(html, /example\.com\/notes/);
+  assert.match(html, /Открыть и изменить текст/);
   assert.match(html, /Удалить материал «Заметки клиента»/);
+  assert.match(html, /Удалить файл «Бриф»/);
   assert.match(html, /materials\/file-id\/file/);
   assert.doesNotMatch(html, /materials\/text-id\/file/);
 });
 
 test('text-only collection is not shown as empty', () => {
   const html = render([{ id: 'text-id', kind: 'text', title: 'Заметка', characters: 0, created_at: '2026-09-19T00:00:00Z' }]);
-  assert.match(html, /<table/);
-  assert.match(html, /0 симв\./);
+  assert.match(html, /Заметка/);
   assert.doesNotMatch(html, /Файлов и текстов пока нет/);
 });
 
-test('empty collection keeps add actions without an empty-state banner or table', () => {
+test('empty collection keeps three add actions without an empty-state banner or table', () => {
   const html = render([]);
   assert.doesNotMatch(html, /Файлов и текстов пока нет/);
   assert.doesNotMatch(html, /<table/);
   assert.doesNotMatch(source, /styles\.empty/);
-  assert.match(html, /Загрузить файл/);
-  assert.match(html, /Добавить текст/);
+  assert.match(html, /Добавить ссылку: Материалы проекта/);
+  assert.match(html, /Загрузить файл проекта/);
+  assert.match(html, /Добавить текст проекта/);
 });
 
 test('saved originals link to private downloads and never claim AI processing', () => {
@@ -146,8 +150,8 @@ test('saved originals link to private downloads and never claim AI processing', 
   assert.match(html, /href="\/api\/workspaces\/one\/content-center\/materials\/file-id\/file"/);
   assert.match(html, /24 КБ/);
   assert.doesNotMatch(html, /из 50 МБ/);
-  assert.match(html, /Оригинал сохранён/);
-  assert.match(html, /обработка после подключения AI/);
+  assert.match(html, /Скачать файл «Бриф\.pdf»/);
+  assert.doesNotMatch(html, /обработка после подключения AI/);
 });
 
 test('inaccessible source warning is visible and client supplied markup is inert', () => {

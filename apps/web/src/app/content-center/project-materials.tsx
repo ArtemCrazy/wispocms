@@ -139,142 +139,89 @@ export function ProjectMaterials({
                     )}
                   </div>
                 ))}
+              {category.id === "other" &&
+                documents.map((document) => (
+                  <div key={document.id} className={styles.sourceItem}>
+                    <div className={styles.sourceChip}>
+                      {document.kind === "file" ? (
+                        <a
+                          href={`${base}/materials/${document.id}/file`}
+                          download={document.file_name ?? document.title}
+                          title={`Скачать ${document.file_name ?? document.title}${document.file_size ? ` · ${fileSize(document.file_size)}` : ""}`}
+                          aria-label={`Скачать файл «${document.title}»`}
+                        >
+                          <span className={styles.sourceUrlText}>
+                            {document.file_name ?? document.title}
+                          </span>
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => edit(document)}
+                          title="Открыть и изменить текст"
+                          aria-label={`Открыть и изменить текст «${document.title}»`}
+                        >
+                          <span className={styles.sourceUrlText}>
+                            {document.title}
+                          </span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => remove(document)}
+                        title="Удалить материал"
+                        aria-label={`Удалить ${document.kind === "file" ? "файл" : "материал"} «${document.title}»`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                ))}
               <button
                 disabled={busy || materials.length >= 50}
                 onClick={() => add("url", category.id)}
                 aria-label={`Добавить ссылку: ${category.label}`}
               >
-                + Добавить
+                {category.id === "other" ? "+ Ссылку" : "+ Добавить"}
               </button>
+              {category.id === "other" && (
+                <>
+                  <input
+                    ref={input}
+                    className={styles.fileInput}
+                    type="file"
+                    accept={FILE_ACCEPT}
+                    disabled={busy}
+                    aria-label="Выбрать файл проекта"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) upload(file);
+                    }}
+                  />
+                  <button
+                    disabled={busy || materials.length >= 50}
+                    onClick={() => input.current?.click()}
+                    aria-label="Загрузить файл проекта"
+                  >
+                    + Файл
+                  </button>
+                  <button
+                    disabled={busy || materials.length >= 50}
+                    onClick={() => add("text")}
+                    aria-label="Добавить текст проекта"
+                  >
+                    + Текст
+                  </button>
+                </>
+              )}
             </div>
             <p className={styles.muted}>{category.hint}</p>
           </div>
         ))}
       </div>
-      <section
-        className={styles.materialsSection}
-        aria-label="Файлы и тексты проекта"
-      >
-        <div className={styles.cardHead}>
-          <h3>Файлы и тексты проекта</h3>
-        </div>
-        <p className={styles.muted}>
-          Загрузите документы, таблицы, презентации и изображения или добавьте
-          текст вручную.
-        </p>
-        <div className={styles.uploadArea}>
-          <input
-            ref={input}
-            className={styles.fileInput}
-            type="file"
-            accept={FILE_ACCEPT}
-            disabled={busy}
-            aria-label="Выбрать файл проекта"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) upload(file);
-            }}
-          />
-          <div className={styles.actions}>
-            <button
-              disabled={busy || materials.length >= 50}
-              onClick={() => input.current?.click()}
-            >
-              + Загрузить файл
-            </button>
-            <button
-              disabled={busy || materials.length >= 50}
-              onClick={() => add("text")}
-            >
-              + Добавить текст
-            </button>
-          </div>
-          <p className={styles.muted}>
-            PDF, DOCX, XLSX, PPTX, PNG, JPG, TXT, MD, CSV · до 10 МБ на файл.
-          </p>
-        </div>
-        {documents.length ? (
-          <div className={styles.tableWrap}>
-            <table className={styles.fileTable}>
-              <caption>Добавленные файлы и тексты</caption>
-              <thead>
-                <tr>
-                  <th>Название</th>
-                  <th>Тип</th>
-                  <th>Размер</th>
-                  <th>Дата добавления</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {documents.map((file) => (
-                  <tr key={file.id}>
-                    <td>
-                      <strong>
-                        {file.kind === "file"
-                          ? (file.file_name ?? file.title)
-                          : file.title}
-                      </strong>
-                      <div className={styles.muted}>
-                        {file.kind === "text"
-                          ? "Добавлен вручную"
-                          : file.characters
-                            ? "Текст извлечён"
-                            : "Оригинал сохранён · обработка после подключения AI"}
-                      </div>
-                    </td>
-                    <td>
-                      {file.kind === "text"
-                        ? "Текст"
-                        : (file.file_name?.split(".").pop()?.toUpperCase() ??
-                          "—")}
-                    </td>
-                    <td>
-                      {file.kind === "text"
-                        ? `${file.characters.toLocaleString("ru-RU")} симв.`
-                        : fileSize(file.file_size)}
-                    </td>
-                    <td>
-                      {new Date(
-                        file.created_at ?? file.updated_at,
-                      ).toLocaleString("ru-RU", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </td>
-                    <td>
-                      <div className={styles.actions}>
-                        {file.kind === "file" ? (
-                          <a
-                            href={`${base}/materials/${file.id}/file`}
-                            download={file.file_name ?? file.title}
-                            className={styles.download}
-                            aria-label={`Скачать ${file.title}`}
-                          >
-                            Скачать
-                          </a>
-                        ) : (
-                          <button disabled={busy} onClick={() => edit(file)}>
-                            Открыть и изменить
-                          </button>
-                        )}
-                        <button
-                          disabled={busy}
-                          onClick={() => remove(file)}
-                          aria-label={`Удалить ${file.kind === "file" ? "файл" : "материал"} «${file.title}»`}
-                        >
-                          Удалить
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </section>
     </article>
   );
 }
