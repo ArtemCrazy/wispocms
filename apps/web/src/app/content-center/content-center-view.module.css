@@ -963,6 +963,7 @@
   position: absolute;
   top: 24px;
   right: 72px;
+  z-index: 2;
 }
 .youtubeTranscription {
   margin: 16px 0 4px;
