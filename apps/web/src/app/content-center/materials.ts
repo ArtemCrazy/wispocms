@@ -2,7 +2,7 @@ export const SOURCE_CATEGORIES = [
   {
     id: "site",
     label: "Сайты",
-    hint: "Основной сайт, лендинги и другие сайты компании",
+    hint: "",
   },
   {
     id: "social",

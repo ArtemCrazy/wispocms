@@ -39,6 +39,12 @@ test('YouTube handle chips omit the long host while retaining the full address i
   assert.doesNotMatch(html, />www\.youtube\.com\/@soundyogaschool<\/span>/);
 });
 
+test('site row has no novice helper text while keeping its add action', () => {
+  const html = render([]);
+  assert.doesNotMatch(html, /Основной сайт, лендинги и другие сайты компании/);
+  assert.match(html, /aria-label="Добавить ссылку: Сайты"/);
+});
+
 test('map source chips show only the numeric public card identifier', () => {
   const cases = [
     ['https://yandex.ru/profile/84036619207', '84036619207'],

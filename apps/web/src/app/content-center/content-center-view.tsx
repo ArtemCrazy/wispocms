@@ -562,7 +562,7 @@ export function ContentCenterView({
                     })
                   }
                 />
-                <article className={styles.card}>
+                <article className={`${styles.card} ${styles.preparationTask}`}>
                   <div className={styles.cardHead}>
                     <h2>Сформировать обработанную информацию</h2>
                     <button

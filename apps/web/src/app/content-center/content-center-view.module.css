@@ -1,6 +1,7 @@
 .view {
   width: 100%;
   min-width: 0;
+  container-type: inline-size;
   /* Spacing comes from the shared .content container and breadcrumb bar. */
   padding: 0;
   color: var(--ink, #202127);
@@ -335,8 +336,39 @@
 }
 .preparationStack {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(380px, 0.85fr);
+  align-items: start;
   gap: 20px;
+}
+.preparationStack > .processingHistory {
+  grid-column: 1 / -1;
+}
+.preparationStack .sourceRow {
+  grid-template-columns: minmax(120px, 0.32fr) minmax(0, 1fr);
+  gap: 8px 14px;
+}
+.preparationStack .sourceRow > p {
+  grid-column: 2;
+  margin: 0;
+}
+.preparationTask .cardHead {
+  flex-wrap: wrap;
+}
+.preparationTask .cardHead > button {
+  margin-left: auto;
+}
+@container (max-width: 1100px) {
+  .preparationStack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container (max-width: 650px) {
+  .preparationStack .sourceRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .preparationStack .sourceRow > p {
+    grid-column: 1;
+  }
 }
 .research {
   display: grid;

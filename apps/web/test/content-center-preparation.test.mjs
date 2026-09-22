@@ -12,6 +12,16 @@ import {
   preparationVersionLabel,
 } from "../src/app/content-center/preparation-version.ts";
 
+test("preparation keeps materials and instruction side by side until the workspace narrows", () => {
+  const css = readFileSync(
+    new URL("../src/app/content-center/content-center-view.module.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(css, /\.preparationStack\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.15fr\) minmax\(380px, 0\.85fr\)/);
+  assert.match(css, /\.preparationStack\s*>\s*\.processingHistory\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+  assert.match(css, /@container\s*\(max-width:\s*1100px\)\s*\{\s*\.preparationStack\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
+
 test("manual material input does not impose the old 40k character cap", () => {
   const view = readFileSync(new URL("../src/app/content-center/content-center-view.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(view, /maxLength=\{40000\}|40 000 символов/);

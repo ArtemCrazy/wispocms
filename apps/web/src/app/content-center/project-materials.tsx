@@ -256,7 +256,7 @@ export function ProjectMaterials({
                 </>
               )}
             </div>
-            <p className={styles.muted}>{category.hint}</p>
+            {category.hint && <p className={styles.muted}>{category.hint}</p>}
           </div>
         ))}
       </div>
