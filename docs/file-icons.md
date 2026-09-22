@@ -1,14 +1,12 @@
 # Значки типов файлов
 
-Значки в `apps/web/public/icons/files/` взяты без изменений из официального
-набора Microsoft Fluent UI File Type Icons (SVG 24 px):
-`https://res.cdn.office.net/files/fabric-cdn-prod_20260113.001/assets/item-types/24/`.
-Набор опубликован в пакете
-[`@fluentui/react-file-type-icons`](https://github.com/microsoft/fluentui/tree/master/packages/react-file-type-icons)
-под лицензией MIT. Названия и товарные знаки остаются у владельцев.
+В строке «Материалы проекта» используется стиль плашек из локального Crazy CRM:
+`resources/js/Components/Sales/SalesCardPresaleTab.vue` в рабочем дереве
+`Documents/crazycrm-worktrees/agent-idea-icons`. Плашка создаётся прямо как
+SVG: скруглённый цветной квадрат и короткая подпись формата. В Wispo она
+уменьшена до 32 px, чтобы поместиться в строке источников.
 
-Локально хранятся `docx`, `xlsx`, `pptx`, `pdf`, `txt`, `csv`, `photo` и `code`.
-Для неизвестных расширений используется копия общего значка `public/file.svg`.
-Для `.md` используется `code`, для `.png/.jpg/.jpeg` — `photo`, для вручную
-введённого текста — `txt`. Это только представление: содержимое файлов не
-изменяется, а загрузка не зависит от Microsoft CDN.
+Цвета и подписи DOC, XLS, PPT и PDF перенесены из Crazy CRM. Для текстов,
+Markdown, изображений и неизвестных файлов добавлены плашки того же вида:
+TXT, MD, IMG и FILE. Подпись не меняет формат файла; исходное имя и действия
+скачивания, редактирования и удаления остаются прежними.

@@ -538,7 +538,7 @@
 }
 .sourceChip > a:first-child {
   min-height: 40px;
-  padding: 8px 14px;
+  padding: 4px 10px;
   border: 1px solid #dedee9;
   text-decoration: none;
   box-sizing: border-box;
@@ -553,12 +553,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.materialFileIcon {
+.sourceChip > button.materialPrimary:first-child {
+  min-height: 40px;
+  padding: 4px 10px;
+}
+.materialFileBadge {
   display: block;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
 }
 .socialIcon {
   display: block;

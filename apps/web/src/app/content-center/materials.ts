@@ -138,33 +138,33 @@ export type ProjectMaterial = {
 export const FILE_ACCEPT =
   ".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv";
 
-/** Local Microsoft Fluent file-type icons; unknown files use a generic file. */
-export function materialFileIcon(fileName: string | null, kind: "file" | "text") {
-  if (kind === "text") return "txt";
-  const extension = fileName?.split(".").pop()?.toLowerCase();
-  switch (extension) {
-    case "doc":
-    case "docx":
-      return "docx";
-    case "xls":
-    case "xlsx":
-      return "xlsx";
-    case "ppt":
-    case "pptx":
-      return "pptx";
-    case "pdf":
-    case "csv":
-    case "txt":
-      return extension;
-    case "png":
-    case "jpg":
-    case "jpeg":
-      return "photo";
-    case "md":
-      return "code";
-    default:
-      return "file";
+/** Compact format tiles use the same labels and colors as Crazy CRM materials. */
+export function materialFileBadge(
+  fileName: string | null,
+  kind: "file" | "text",
+  mediaType?: string | null,
+) {
+  const extension = fileName?.match(/\.([^.]+)$/)?.[1].toLowerCase() ?? "";
+  const mime = mediaType?.toLowerCase() ?? "";
+  if (kind === "text") return { label: "TXT", color: "#64748B" };
+  if (["doc", "docx", "odt", "rtf"].includes(extension) || /wordprocessingml|msword/.test(mime)) {
+    return { label: "DOC", color: "#2B579A" };
   }
+  if (["xls", "xlsx", "ods", "csv"].includes(extension) || /spreadsheetml|ms-excel|text\/csv/.test(mime)) {
+    return { label: "XLS", color: "#1D6F42" };
+  }
+  if (["ppt", "pptx", "odp"].includes(extension) || /presentationml|ms-powerpoint/.test(mime)) {
+    return { label: "PPT", color: "#D24726" };
+  }
+  if (extension === "pdf" || mime === "application/pdf") {
+    return { label: "PDF", color: "#D93832" };
+  }
+  if (["png", "jpg", "jpeg"].includes(extension) || mime.startsWith("image/")) {
+    return { label: "IMG", color: "#7C5BD7" };
+  }
+  if (extension === "md") return { label: "MD", color: "#595F8E" };
+  if (extension === "txt" || mime === "text/plain") return { label: "TXT", color: "#64748B" };
+  return { label: "FILE", color: "#737373" };
 }
 
 export function displayMaterialUrl(value: string | null | undefined): string {

@@ -120,9 +120,10 @@ test('existing files, text and additional links share the materials row without 
   ]);
   assert.doesNotMatch(html, /<table\b/);
   assert.match(html, /Бриф\.pdf/);
-  assert.match(html, /src="\/icons\/files\/pdf\.svg"/);
+  assert.match(html, /<rect[^>]+fill="#D93832"/);
+  assert.match(html, />PDF<\/text>/);
   assert.match(html, /Заметки клиента/);
-  assert.match(html, /src="\/icons\/files\/txt\.svg"/);
+  assert.match(html, />TXT<\/text>/);
   assert.match(html, /example\.com\/notes/);
   assert.match(html, /Открыть и изменить текст/);
   assert.match(html, /Удалить материал «Заметки клиента»/);
@@ -131,24 +132,26 @@ test('existing files, text and additional links share the materials row without 
   assert.doesNotMatch(html, /materials\/text-id\/file/);
 });
 
-test('supported document, table, presentation and image types use matching local icons', async () => {
+test('file format badges match the local Crazy CRM style and supported types', () => {
   const cases = [
-    ['Договор.DOC', 'docx'],
-    ['Бриф.DOCX', 'docx'],
-    ['Данные.xlsx', 'xlsx'],
-    ['Показ.pptx', 'pptx'],
-    ['Заметка.TXT', 'txt'],
-    ['Таблица.csv', 'csv'],
-    ['Фото.jpeg', 'photo'],
-    ['README.md', 'code'],
+    ['Договор.DOC', 'DOC', '#2B579A'],
+    ['Бриф.DOCX', 'DOC', '#2B579A'],
+    ['Данные.xlsx', 'XLS', '#1D6F42'],
+    ['Показ.pptx', 'PPT', '#D24726'],
+    ['Заметка.TXT', 'TXT', '#64748B'],
+    ['Таблица.csv', 'XLS', '#1D6F42'],
+    ['Фото.jpeg', 'IMG', '#7C5BD7'],
+    ['README.md', 'MD', '#595F8E'],
   ];
-  for (const [file_name, icon] of cases) {
-    assert.equal(materials.materialFileIcon(file_name, 'file'), icon);
-    assert.match(render([{ id: icon, kind: 'file', title: file_name, file_name }]), new RegExp(`src="/icons/files/${icon}\\.svg"`));
-    assert.match(await readFile(new URL(`../public/icons/files/${icon}.svg`, import.meta.url), 'utf8'), /^<svg[^>]+viewBox="0 0 24 24"/);
+  for (const [file_name, label, color] of cases) {
+    assert.deepEqual(materials.materialFileBadge(file_name, 'file'), { label, color });
+    const html = render([{ id: file_name, kind: 'file', title: file_name, file_name }]);
+    assert.match(html, new RegExp(`<rect[^>]+fill="${color}"`));
+    assert.match(html, new RegExp(`>${label}<\\/text>`));
   }
-  assert.equal(materials.materialFileIcon(null, 'text'), 'txt');
-  assert.equal(materials.materialFileIcon('unknown.bin', 'file'), 'file');
+  assert.deepEqual(materials.materialFileBadge(null, 'text'), { label: 'TXT', color: '#64748B' });
+  assert.deepEqual(materials.materialFileBadge('unknown.bin', 'file'), { label: 'FILE', color: '#737373' });
+  assert.deepEqual(materials.materialFileBadge(null, 'file', 'application/pdf'), { label: 'PDF', color: '#D93832' });
 });
 
 test('text-only collection is not shown as empty', () => {

@@ -5,7 +5,7 @@ import {
   FILE_ACCEPT,
   SOURCE_CATEGORIES,
   fileSize,
-  materialFileIcon,
+  materialFileBadge,
   isSocialFeedMaterial,
   socialIconNetwork,
   displayMapSourceId,
@@ -20,6 +20,36 @@ import { mapProviderForUrl } from "./map-material-fields";
 function MapSourceIcon({ sourceUrl }: { sourceUrl: string | null }) {
   const provider = mapProviderForUrl(sourceUrl ?? "");
   return provider === "other" ? null : <MapIcon provider={provider} />;
+}
+
+function FileTypeBadge({
+  fileName,
+  kind,
+  mediaType,
+}: {
+  fileName: string | null;
+  kind: "file" | "text";
+  mediaType?: string | null;
+}) {
+  const { label, color } = materialFileBadge(fileName, kind, mediaType);
+  return (
+    <svg className={styles.materialFileBadge} viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <rect x="2" y="2" width="36" height="36" rx="6" fill={color} />
+      <text
+        x="20"
+        y="20"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily="Segoe UI, Arial, sans-serif"
+        fontSize="11"
+        fontWeight="800"
+        fill="#fff"
+        letterSpacing="0.5"
+      >
+        {label}
+      </text>
+    </svg>
+  );
 }
 
 export function ProjectMaterials({
@@ -151,15 +181,10 @@ export function ProjectMaterials({
                           title={`Скачать ${document.file_name ?? document.title}${document.file_size ? ` · ${fileSize(document.file_size)}` : ""}`}
                           aria-label={`Скачать файл «${document.title}»`}
                         >
-                          {/* Small local file-type SVG; optimization would add overhead. */}
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            className={styles.materialFileIcon}
-                            src={`/icons/files/${materialFileIcon(document.file_name ?? document.title, "file")}.svg`}
-                            width={24}
-                            height={24}
-                            alt=""
-                            aria-hidden="true"
+                          <FileTypeBadge
+                            fileName={document.file_name ?? document.title}
+                            kind="file"
+                            mediaType={document.media_type}
                           />
                           <span className={styles.sourceUrlText}>
                             {document.file_name ?? document.title}
@@ -168,20 +193,13 @@ export function ProjectMaterials({
                       ) : (
                         <button
                           type="button"
+                          className={styles.materialPrimary}
                           disabled={busy}
                           onClick={() => edit(document)}
                           title="Открыть и изменить текст"
                           aria-label={`Открыть и изменить текст «${document.title}»`}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            className={styles.materialFileIcon}
-                            src="/icons/files/txt.svg"
-                            width={24}
-                            height={24}
-                            alt=""
-                            aria-hidden="true"
-                          />
+                          <FileTypeBadge fileName={document.title} kind="text" />
                           <span className={styles.sourceUrlText}>
                             {document.title}
                           </span>
