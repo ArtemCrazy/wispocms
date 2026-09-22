@@ -1037,16 +1037,32 @@
   display: grid;
   grid-template-columns: minmax(160px, 0.7fr) minmax(200px, 1.3fr);
   gap: 20px;
-  margin-top: 20px;
+  margin-top: 16px;
+  min-width: 0;
 }
 .promptList {
   display: grid;
   gap: 8px;
   align-content: start;
+  max-height: min(54vh, 440px);
+  overflow-y: auto;
 }
 .promptList button {
   text-align: left;
   overflow-wrap: anywhere;
+}
+.promptPreview {
+  min-width: 0;
+}
+.promptPreview h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.promptPreview .actions {
+  margin-top: 12px;
+}
+.promptPreview > p {
+  margin-bottom: 0;
 }
 .promptText {
   white-space: pre-wrap;
@@ -1056,6 +1072,9 @@
   border-radius: 10px;
   max-height: 360px;
   overflow-y: auto;
+}
+.promptPicker .promptText {
+  max-height: min(32vh, 280px);
 }
 @media (max-width: 1050px) {
   .sourceRow {
@@ -1096,6 +1115,9 @@
   }
   .promptGrid {
     grid-template-columns: 1fr;
+  }
+  .promptPicker .promptList {
+    max-height: min(32vh, 220px);
   }
   .runSteps {
     grid-template-columns: 1fr;

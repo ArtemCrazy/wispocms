@@ -127,6 +127,18 @@ test("content center dialogs keep the header visible and close from the backdrop
   assert.match(css, /\.dialogBody::-webkit-scrollbar \{[^}]*display: none;/);
 });
 
+test("shared prompt picker keeps padded header and scrollable body within the dialog", () => {
+  const root = new URL("../src/app/content-center/", import.meta.url);
+  const picker = readFileSync(new URL("global-prompt-picker.tsx", root), "utf8");
+  const css = readFileSync(new URL("content-center-view.module.css", root), "utf8");
+  assert.match(picker, /className=\{`\$\{styles\.dialog\} \$\{styles\.promptPicker\}`\}/);
+  assert.match(picker, /className=\{styles\.dialogHeader\}/);
+  assert.match(picker, /className=\{styles\.dialogBody\}/);
+  assert.match(picker, /className=\{styles\.promptPreview\}/);
+  assert.match(css, /\.promptPicker \.promptText \{[^}]*max-height: min\(32vh, 280px\);/);
+  assert.match(picker, /onClick=\{\(\) => onSelect\(selected\.content, selected\.title\)\}/);
+});
+
 test("draft prefill preserves a snapshot and only matches unambiguous exact copied prompts", () => {
   const prompts = [{ title: "Анализ компании", content: "Task" }];
   assert.equal(
