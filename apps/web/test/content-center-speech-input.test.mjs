@@ -26,7 +26,8 @@ test('dictation uses an accessible icon-only microphone button with a tooltip', 
   assert.match(html, /Микрофон пока выключен/);
   assert.match(html, /Браузер может передавать речь своему сервису распознавания/);
   assert.match(source, /function closeConsent\(\)/);
-  assert.match(source, /if \(dialog\?\.open\) dialog\.close\(\)/);
+  assert.match(html, /role="dialog" aria-modal="true"/);
+  assert.match(source, /event\.key === "Escape"/);
   assert.doesNotMatch(html, /Распознавание выполняет браузер/);
   assert.doesNotMatch(html, /Текст сохраняется только кнопкой/);
 });

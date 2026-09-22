@@ -36,25 +36,12 @@ export function SpeechInput({
   onActiveChange: (active: boolean) => void;
 }) {
   const recognition = useRef<Recognition | null>(null);
-  const consentDialog = useRef<HTMLDialogElement | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [active, setActive] = useState(false);
   const [listening, setListening] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState("");
   const [interim, setInterim] = useState("");
-
-  useEffect(() => {
-    const dialog = consentDialog.current;
-    if (consentOpen) {
-      if (dialog && !dialog.open) dialog.showModal();
-    } else if (dialog?.open) {
-      dialog.close();
-    }
-    return () => {
-      if (dialog?.open) dialog.close();
-    };
-  }, [consentOpen]);
 
   useEffect(
     () => () => {
@@ -74,8 +61,6 @@ export function SpeechInput({
 
   function closeConsent() {
     setConsentOpen(false);
-    const dialog = consentDialog.current;
-    if (dialog?.open) dialog.close();
   }
 
   function start() {
@@ -217,58 +202,65 @@ export function SpeechInput({
           {error}
         </p>
       )}
-      <dialog
-        ref={consentDialog}
-        className={styles.dialog}
-        aria-label="Голосовой ввод инструкции"
-        onCancel={(event) => {
-          event.preventDefault();
-          closeConsent();
+      <div
+        className={styles.dialogOverlay}
+        hidden={!consentOpen}
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeConsent();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeConsent();
+          }
         }}
       >
-        <div className={styles.dialogHeader}>
-          <h2>Голосовой ввод инструкции</h2>
-          <button
-            type="button"
-            aria-label="Закрыть окно голосового ввода"
-            onClick={closeConsent}
-          >
-            ×
-          </button>
-        </div>
-        <div className={styles.dialogBody}>
-          <p>
-            Микрофон пока выключен. После нажатия «Включить микрофон» браузер
-            запросит разрешение и начнёт распознавание русской речи.
-          </p>
-          <p>
-            Браузер может передавать речь своему сервису распознавания. CMS не
-            сохраняет аудио. Текст добавится в конец инструкции — проверьте его
-            перед сохранением.
-          </p>
-          <p className={styles.muted}>
-            Если браузер не поддерживает распознавание, можно ввести текст
-            вручную или воспользоваться системной диктовкой.
-          </p>
-          <div className={styles.actions}>
+        <div
+          className={styles.dialog}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Голосовой ввод инструкции"
+        >
+          <div className={styles.dialogHeader}>
+            <h2>Голосовой ввод инструкции</h2>
             <button
               type="button"
-              className={styles.primary}
-              disabled={disabled}
-              onClick={start}
-            >
-              Включить микрофон
-            </button>
-            <button
-              type="button"
-              autoFocus
+              aria-label="Закрыть окно голосового ввода"
               onClick={closeConsent}
             >
-              Отмена
+              ×
             </button>
           </div>
+          <div className={styles.dialogBody}>
+            <p>
+              Микрофон пока выключен. После нажатия «Включить микрофон» браузер
+              запросит разрешение и начнёт распознавание русской речи.
+            </p>
+            <p>
+              Браузер может передавать речь своему сервису распознавания. CMS не
+              сохраняет аудио. Текст добавится в конец инструкции — проверьте его
+              перед сохранением.
+            </p>
+            <p className={styles.muted}>
+              Если браузер не поддерживает распознавание, можно ввести текст
+              вручную или воспользоваться системной диктовкой.
+            </p>
+            <div className={styles.actions}>
+              <button
+                type="button"
+                className={styles.primary}
+                disabled={disabled}
+                onClick={start}
+              >
+                Включить микрофон
+              </button>
+              <button type="button" autoFocus onClick={closeConsent}>
+                Отмена
+              </button>
+            </div>
+          </div>
         </div>
-      </dialog>
+      </div>
     </div>
   );
 }
