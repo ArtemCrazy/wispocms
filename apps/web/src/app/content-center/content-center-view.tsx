@@ -39,7 +39,7 @@ import {
   type SourceCategory,
   type SourceSnapshot,
 } from "./materials";
-import { appendDictation, preparationSteps } from "./preparation-state";
+import { appendDictation, preparationRunLabel } from "./preparation-state";
 import {
   CONTENT_CENTER_SECTIONS,
   parseContentCenterScreen,
@@ -206,6 +206,8 @@ export function ContentCenterView({
   const [promptTitle, setPromptTitle] = useState("");
   const instructionRef = useRef("");
   const [voiceActive, setVoiceActive] = useState(false);
+  const [submittingRun, setSubmittingRun] = useState(false);
+  const [runRequestError, setRunRequestError] = useState("");
   const [draftRevision, setDraftRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [researchDirty, setResearchDirty] = useState(false);
@@ -320,10 +322,15 @@ export function ContentCenterView({
     setVersionId(id ?? null);
     setDocument(null);
     setError("");
+    setRunRequestError("");
     setNotice("");
   }
 
-  async function act(action: () => Promise<void>, modal = false) {
+  async function act(
+    action: () => Promise<void>,
+    modal = false,
+    onError?: (message: string) => void,
+  ) {
     setBusy(true);
     setError("");
     setDialogError("");
@@ -335,7 +342,8 @@ export function ContentCenterView({
         reason instanceof Error
           ? reason.message
           : "Не удалось выполнить действие";
-      if (modal) setDialogError(message);
+      if (onError) onError(message);
+      else if (modal) setDialogError(message);
       else setError(message);
     } finally {
       if (alive.current) setBusy(false);
@@ -351,12 +359,12 @@ export function ContentCenterView({
     });
     setDraftRevision(result.revision);
     setDirty(false);
-    setNotice("Задача сохранена");
   }
 
   function changeInstruction(value: string) {
     instructionRef.current = value;
     setInstruction(value);
+    setRunRequestError("");
     setDirty(true);
     setNotice("");
   }
@@ -611,12 +619,15 @@ export function ContentCenterView({
                       className={styles.primary}
                       disabled={
                         busy ||
+                        submittingRun ||
                         voiceActive ||
                         running ||
                         !data.ai.connected ||
                         !instruction.trim()
                       }
-                      onClick={() =>
+                      onClick={() => {
+                        setSubmittingRun(true);
+                        setRunRequestError("");
                         void act(async () => {
                           if (dirty) await saveDraft();
                           await request(`${base}/runs`, "POST", {
@@ -625,13 +636,33 @@ export function ContentCenterView({
                             withoutMaterials: !data.materials.length,
                           });
                           await load();
-                        })
-                      }
+                        }, false, setRunRequestError).finally(() => {
+                          if (alive.current) setSubmittingRun(false);
+                        });
+                      }}
                     >
                       {running
                         ? "Обработка выполняется…"
                         : "Запустить обработку материалов"}
                     </button>
+                    {(submittingRun || runRequestError || data.run) && (
+                      <span
+                        className={styles.runInlineStatus}
+                        data-state={submittingRun ? "processing" : runRequestError ? "failed" : data.run?.status}
+                        role={(runRequestError || data.run?.status === "failed") && !submittingRun ? "alert" : "status"}
+                      >
+                        {(submittingRun || running) && (
+                          <span className={styles.runSpinner} aria-hidden="true" />
+                        )}
+                        {submittingRun
+                          ? "Запускаем задачу…"
+                          : runRequestError
+                            ? `Не удалось запустить: ${runRequestError}`
+                          : data.run
+                            ? preparationRunLabel(data.run.status, data.run.error)
+                            : null}
+                      </span>
+                    )}
                   </div>
                   <p className={styles.muted}>
                     Контекст:{" "}
@@ -646,84 +677,7 @@ export function ContentCenterView({
                       " Будет передана только инструкция, без прежних результатов."}
                   </p>
                 </article>
-                <article
-                  className={`${styles.card} ${styles.processingHistory}`}
-                >
-                  <div>
-                    <div className={styles.cardHead}>
-                      <h2>Процесс обработки</h2>
-                    </div>
-                    {!data.run && (
-                      <p className={styles.muted}>
-                        {data.ai.connected
-                          ? "Обработка ещё не запускалась. Добавьте материалы, задайте инструкцию и запустите обработку."
-                          : "Ожидает подключения AI. Материалы, промпты и инструкцию можно сохранить заранее."}
-                      </p>
-                    )}
-                    {data.run && (
-                      <div
-                        className={
-                          data.run.status === "failed"
-                            ? styles.error
-                            : styles.notice
-                        }
-                        role="status"
-                        style={{ marginTop: 20 }}
-                      >
-                        {data.run.status === "queued"
-                          ? "Задача в очереди. Можно уйти со страницы — обработка продолжится."
-                          : data.run.status === "processing"
-                            ? (data.run.progress?.message ??
-                              "AI готовит документ. Текущая версия остаётся доступной.")
-                            : data.run.status === "failed"
-                              ? data.run.error
-                              : "Обработка завершена. Новая версия доступна ниже."}
-                        <ol
-                          className={styles.runSteps}
-                          aria-label="Этапы обработки"
-                        >
-                          {preparationSteps(data.run.status).map(
-                            (step, index) => (
-                              <li
-                                key={step.title}
-                                data-state={step.state}
-                                aria-current={
-                                  step.state === "active" ? "step" : undefined
-                                }
-                              >
-                                <span
-                                  className={styles.stepNumber}
-                                  aria-hidden="true"
-                                >
-                                  {step.state === "done" ? "✓" : index + 1}
-                                </span>
-                                <span>
-                                  {step.title}
-                                  <small>
-                                    {
-                                      {
-                                        done: "Готово",
-                                        active: "Выполняется",
-                                        waiting: "Ожидание",
-                                        failed: "Не завершено",
-                                      }[step.state]
-                                    }
-                                  </small>
-                                </span>
-                              </li>
-                            ),
-                          )}
-                        </ol>
-                        {data.run.status === "failed" && (
-                          <p className={styles.muted}>
-                            Новая версия не создана. Последний успешный
-                            результат сохранён. Проверьте задачу и повторите
-                            запуск.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                <article className={styles.card}>
                   <div>
                     <div className={styles.cardHead}>
                       <h2>История версий</h2>

@@ -1,30 +1,17 @@
 export type PreparationStatus =
   "queued" | "processing" | "succeeded" | "failed";
-export type PreparationStep = {
-  title: string;
-  state: "done" | "active" | "waiting" | "failed";
-};
 
-/** Only states the server actually confirms; no simulated percentages. */
-export function preparationSteps(status: PreparationStatus): PreparationStep[] {
-  return [
-    { title: "Задача принята", state: "done" },
-    {
-      title: "Обработка информации",
-      state:
-        status === "queued"
-          ? "waiting"
-          : status === "processing"
-            ? "active"
-            : status === "failed"
-              ? "failed"
-              : "done",
-    },
-    {
-      title: "Новая версия сохранена",
-      state: status === "succeeded" ? "done" : "waiting",
-    },
-  ];
+/** Keep the latest server-confirmed state readable beside the run button. */
+export function preparationRunLabel(
+  status: PreparationStatus,
+  error?: string | null,
+): string {
+  if (status === "queued") return "Задача в очереди";
+  if (status === "processing") return "Обрабатываем материалы…";
+  if (status === "succeeded") return "Готово — версия доступна в истории";
+  return error?.trim()
+    ? `Не завершено: ${error}`
+    : "Обработка не завершена. Последняя версия сохранена.";
 }
 
 export function appendDictation(

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   appendDictation,
   collectDictation,
-  preparationSteps,
+  preparationRunLabel,
   speechErrorMessage,
 } from "../src/app/content-center/preparation-state.ts";
 import {
@@ -71,6 +71,10 @@ test("preparation opens saved results from history without a duplicate result ca
   assert.match(view, /<h2>История версий<\/h2>/);
   assert.match(view, /\{preparationVersionLabel\(version\)\} ↗/);
   assert.match(view, /onClick=\{\(\) => navigate\("document", version\.id\)\}/);
+  assert.doesNotMatch(view, /<h2>Процесс обработки<\/h2>|className=\{styles\.processingHistory\}/);
+  assert.match(view, /className=\{styles\.runInlineStatus\}/);
+  assert.match(view, /Не удалось запустить: \$\{runRequestError\}/);
+  assert.match(view, /false, setRunRequestError\)/);
 });
 
 test("version labels use the saved request name, not a current template or a guessed legacy name", () => {
@@ -186,23 +190,12 @@ test("dictation preserves entered text instead of silently truncating over the l
   });
 });
 
-test("run steps only report saved result after server success", () => {
-  assert.deepEqual(
-    preparationSteps("queued").map((s) => s.state),
-    ["done", "waiting", "waiting"],
-  );
-  assert.deepEqual(
-    preparationSteps("processing").map((s) => s.state),
-    ["done", "active", "waiting"],
-  );
-  assert.deepEqual(
-    preparationSteps("failed").map((s) => s.state),
-    ["done", "failed", "waiting"],
-  );
-  assert.deepEqual(
-    preparationSteps("succeeded").map((s) => s.state),
-    ["done", "done", "done"],
-  );
+test("inline run status reflects only server-confirmed states and preserves failure detail", () => {
+  assert.equal(preparationRunLabel("queued"), "Задача в очереди");
+  assert.equal(preparationRunLabel("processing"), "Обрабатываем материалы…");
+  assert.equal(preparationRunLabel("succeeded"), "Готово — версия доступна в истории");
+  assert.match(preparationRunLabel("failed", "DeepSeek вернул неполный результат"), /Не завершено: DeepSeek вернул неполный результат/);
+  assert.match(preparationRunLabel("failed", null), /Последняя версия сохранена/);
 });
 
 test("speech permission and service failures offer a text fallback", () => {
