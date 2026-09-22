@@ -5,6 +5,7 @@ import {
   FILE_ACCEPT,
   SOURCE_CATEGORIES,
   fileSize,
+  materialFileIcon,
   isSocialFeedMaterial,
   socialIconNetwork,
   displayMapSourceId,
@@ -150,6 +151,16 @@ export function ProjectMaterials({
                           title={`Скачать ${document.file_name ?? document.title}${document.file_size ? ` · ${fileSize(document.file_size)}` : ""}`}
                           aria-label={`Скачать файл «${document.title}»`}
                         >
+                          {/* Small local file-type SVG; optimization would add overhead. */}
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            className={styles.materialFileIcon}
+                            src={`/icons/files/${materialFileIcon(document.file_name ?? document.title, "file")}.svg`}
+                            width={24}
+                            height={24}
+                            alt=""
+                            aria-hidden="true"
+                          />
                           <span className={styles.sourceUrlText}>
                             {document.file_name ?? document.title}
                           </span>
@@ -162,6 +173,15 @@ export function ProjectMaterials({
                           title="Открыть и изменить текст"
                           aria-label={`Открыть и изменить текст «${document.title}»`}
                         >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            className={styles.materialFileIcon}
+                            src="/icons/files/txt.svg"
+                            width={24}
+                            height={24}
+                            alt=""
+                            aria-hidden="true"
+                          />
                           <span className={styles.sourceUrlText}>
                             {document.title}
                           </span>

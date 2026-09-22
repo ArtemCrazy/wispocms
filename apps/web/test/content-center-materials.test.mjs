@@ -120,13 +120,35 @@ test('existing files, text and additional links share the materials row without 
   ]);
   assert.doesNotMatch(html, /<table\b/);
   assert.match(html, /Бриф\.pdf/);
+  assert.match(html, /src="\/icons\/files\/pdf\.svg"/);
   assert.match(html, /Заметки клиента/);
+  assert.match(html, /src="\/icons\/files\/txt\.svg"/);
   assert.match(html, /example\.com\/notes/);
   assert.match(html, /Открыть и изменить текст/);
   assert.match(html, /Удалить материал «Заметки клиента»/);
   assert.match(html, /Удалить файл «Бриф»/);
   assert.match(html, /materials\/file-id\/file/);
   assert.doesNotMatch(html, /materials\/text-id\/file/);
+});
+
+test('supported document, table, presentation and image types use matching local icons', async () => {
+  const cases = [
+    ['Договор.DOC', 'docx'],
+    ['Бриф.DOCX', 'docx'],
+    ['Данные.xlsx', 'xlsx'],
+    ['Показ.pptx', 'pptx'],
+    ['Заметка.TXT', 'txt'],
+    ['Таблица.csv', 'csv'],
+    ['Фото.jpeg', 'photo'],
+    ['README.md', 'code'],
+  ];
+  for (const [file_name, icon] of cases) {
+    assert.equal(materials.materialFileIcon(file_name, 'file'), icon);
+    assert.match(render([{ id: icon, kind: 'file', title: file_name, file_name }]), new RegExp(`src="/icons/files/${icon}\\.svg"`));
+    assert.match(await readFile(new URL(`../public/icons/files/${icon}.svg`, import.meta.url), 'utf8'), /^<svg[^>]+viewBox="0 0 24 24"/);
+  }
+  assert.equal(materials.materialFileIcon(null, 'text'), 'txt');
+  assert.equal(materials.materialFileIcon('unknown.bin', 'file'), 'file');
 });
 
 test('text-only collection is not shown as empty', () => {

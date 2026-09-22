@@ -553,6 +553,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.materialFileIcon {
+  display: block;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
 .socialIcon {
   display: block;
   flex: 0 0 20px;

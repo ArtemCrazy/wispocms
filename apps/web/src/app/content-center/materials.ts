@@ -138,6 +138,35 @@ export type ProjectMaterial = {
 export const FILE_ACCEPT =
   ".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv";
 
+/** Local Microsoft Fluent file-type icons; unknown files use a generic file. */
+export function materialFileIcon(fileName: string | null, kind: "file" | "text") {
+  if (kind === "text") return "txt";
+  const extension = fileName?.split(".").pop()?.toLowerCase();
+  switch (extension) {
+    case "doc":
+    case "docx":
+      return "docx";
+    case "xls":
+    case "xlsx":
+      return "xlsx";
+    case "ppt":
+    case "pptx":
+      return "pptx";
+    case "pdf":
+    case "csv":
+    case "txt":
+      return extension;
+    case "png":
+    case "jpg":
+    case "jpeg":
+      return "photo";
+    case "md":
+      return "code";
+    default:
+      return "file";
+  }
+}
+
 export function displayMaterialUrl(value: string | null | undefined): string {
   return (value ?? "").replace(/^https:\/\//i, "");
 }
