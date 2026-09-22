@@ -54,6 +54,9 @@ test("preparation opens launch configuration with material selection and outcome
   assert.match(view, /aria-label="Результат обработки"/);
   assert.match(view, /materialIds: selectedMaterialIds/);
   assert.match(css, /\.runDialogGrid\s*\{[^}]*grid-template-columns/);
+  assert.match(view, /Файл ·/);
+  assert.match(view, /displayMaterialUrl\(item\.source_url\)/);
+  assert.match(css, /\.runSourceList::-webkit-scrollbar-button\s*\{[^}]*display:\s*none/);
 });
 
 test("manual material input does not impose the old 40k character cap", () => {

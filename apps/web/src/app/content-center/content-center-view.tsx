@@ -784,8 +784,8 @@ export function ContentCenterView({
           close={() => setRunDialogOpen(false)}
         >
           <p className={styles.muted}>
-            Выберите материалы для этой обработки и укажите, какой результат нужен.
-            Невыбранные источники не попадут в запрос к AI.
+            Выберите источники и опишите желаемый результат. AI получит только
+            отмеченные материалы.
           </p>
           <div className={styles.runDialogGrid}>
             <section className={styles.runSources} aria-label="Источники обработки">
@@ -824,8 +824,14 @@ export function ContentCenterView({
                         }}
                       />
                       <span>
-                        <strong>{item.title}</strong>
-                        <small>{item.kind === "file" ? item.file_name : item.source_url ?? "Текст проекта"}</small>
+                        <strong title={item.title}>{item.title}</strong>
+                        <small title={item.source_url ?? undefined}>
+                          {item.kind === "file"
+                            ? `Файл · ${item.file_name?.split(".").pop()?.toUpperCase() ?? "документ"}`
+                            : item.kind === "url"
+                              ? displayMaterialUrl(item.source_url)
+                              : "Текст проекта"}
+                        </small>
                       </span>
                     </label>
                   ))}
