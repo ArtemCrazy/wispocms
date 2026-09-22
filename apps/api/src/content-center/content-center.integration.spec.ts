@@ -1991,6 +1991,80 @@ integration('Content Center / isolated PostgreSQL', () => {
     ).rejects.toThrow('Появилась новая версия');
   });
 
+  it('sends only selected workspace materials and excludes unrelated previous results', async () => {
+    const first = await service.saveMaterial(workspace, admin, {
+      kind: 'text',
+      title: 'Первый',
+      content: 'Первый источник',
+    });
+    const second = await service.saveMaterial(workspace, admin, {
+      kind: 'text',
+      title: 'Второй',
+      content: 'Второй источник',
+    });
+    const foreign = await service.saveMaterial(otherWorkspace, admin, {
+      kind: 'text',
+      title: 'Чужой',
+      content: 'Чужие данные',
+    });
+    await service.start(workspace, admin, {
+      instruction: 'Общая сводка',
+      promptTitle: 'Общая сводка',
+      withoutMaterials: false,
+    });
+    await service.processNext();
+    await expect(
+      service.start(workspace, admin, {
+        instruction: 'Исследование',
+        promptTitle: 'Исследование',
+        withoutMaterials: false,
+        materialIds: [],
+      }),
+    ).rejects.toThrow('Выберите хотя бы один материал');
+    await expect(
+      service.start(workspace, admin, {
+        instruction: 'Исследование',
+        promptTitle: 'Исследование',
+        withoutMaterials: false,
+        materialIds: [first.id, first.id],
+      }),
+    ).rejects.toThrow('не должны повторяться');
+    await expect(
+      service.start(workspace, admin, {
+        instruction: 'Исследование',
+        promptTitle: 'Исследование',
+        withoutMaterials: false,
+        materialIds: [foreign.id],
+      }),
+    ).rejects.toThrow('недоступен');
+    const run = await service.start(workspace, admin, {
+      instruction: 'Исследование',
+      promptTitle: 'Исследование',
+      withoutMaterials: false,
+      materialIds: [second.id],
+    });
+    const [snapshot] = await db.query<
+      Array<{
+        input_context: {
+          materials: Array<{ id: string; content: string }>;
+          previousResult: string | null;
+          resumeGuard: { selectedMaterialIds: string[] };
+        };
+      }>
+    >('SELECT input_context FROM cc_preparation_runs WHERE id=$1', [run.id]);
+    expect(snapshot.input_context.materials.map((item) => item.id)).toEqual([
+      second.id,
+    ]);
+    expect(snapshot.input_context.materials[0].content).toBe('Второй источник');
+    expect(snapshot.input_context.previousResult).toBeNull();
+    expect(snapshot.input_context.resumeGuard.selectedMaterialIds).toEqual([
+      second.id,
+    ]);
+    expect((await service.overview(workspace, admin)).run.materialIds).toEqual([
+      second.id,
+    ]);
+  });
+
   it('refreshes source snapshots through an authorized queued HTTP action without AI or version writes', async () => {
     const page: SitePage = {
       url: 'https://example.com/about',

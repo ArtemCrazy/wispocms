@@ -389,9 +389,110 @@
 .preparationTask .cardHead > button {
   margin-left: auto;
 }
+.runDialogGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 24px;
+  margin: 20px 0;
+}
+.runDialogGrid section {
+  min-width: 0;
+}
+.runSources {
+  border-right: 1px solid #e3e2ed;
+  padding-right: 24px;
+}
+.runSectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.runSectionHead h3 {
+  margin: 0;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.runSourceList {
+  display: grid;
+  gap: 8px;
+  max-height: min(46vh, 400px);
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #c8c5d4 transparent;
+}
+.runSource {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #e3e2ed;
+  border-radius: 10px;
+  padding: 10px;
+  cursor: pointer;
+}
+.runSource:has(input:checked) {
+  border-color: #b9aafa;
+  background: #f8f6ff;
+}
+.dialog .runSource input {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  accent-color: #7054ec;
+}
+.runSource span {
+  min-width: 0;
+}
+.runSource strong,
+.runSource small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.runSource small {
+  color: #6c7282;
+  margin-top: 3px;
+}
+.runOutcome .field {
+  margin: 12px 0;
+}
+.runOutcome textarea {
+  min-height: 180px;
+}
+.runDialogFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-top: 1px solid #e3e2ed;
+  padding-top: 16px;
+}
 @container (max-width: 1100px) {
   .preparationStack {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .runDialogGrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .runSources {
+    border-right: 0;
+    border-bottom: 1px solid #e3e2ed;
+    padding: 0 0 16px;
+  }
+  .runSourceList {
+    max-height: 220px;
   }
 }
 @container (max-width: 650px) {

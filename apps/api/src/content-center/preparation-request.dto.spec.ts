@@ -3,6 +3,25 @@ import { validate } from 'class-validator';
 import { PreparationDraftDto, PreparationDto } from './content-center.dto';
 
 describe('preparation request title validation', () => {
+  it('accepts selected material UUIDs and rejects malformed selections', async () => {
+    const valid = plainToInstance(PreparationDto, {
+      instruction: 'Task',
+      withoutMaterials: false,
+      materialIds: ['fe3f753d-8c7a-4b28-88f7-a989a9ec999d'],
+    });
+    expect(await validate(valid)).toEqual([]);
+    for (const materialIds of ['wrong', [123], ['not-a-uuid']]) {
+      const dto = plainToInstance(PreparationDto, {
+        instruction: 'Task',
+        withoutMaterials: false,
+        materialIds,
+      });
+      expect(
+        (await validate(dto)).some((error) => error.property === 'materialIds'),
+      ).toBe(true);
+    }
+  });
+
   it('trims names and preserves compatibility with unnamed requests', async () => {
     const dto = plainToInstance(PreparationDto, {
       instruction: 'Task',

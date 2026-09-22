@@ -39,6 +39,23 @@ test("prompt selection supplies the saved name without a separate title or save 
   assert.match(view, /promptTitle,/);
 });
 
+test("preparation opens launch configuration with material selection and outcome instruction", () => {
+  const view = readFileSync(
+    new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
+    "utf8",
+  );
+  const css = readFileSync(
+    new URL("../src/app/content-center/content-center-view.module.css", import.meta.url),
+    "utf8",
+  );
+  assert.match(view, /onClick=\{openRunDialog\}/);
+  assert.match(view, /title="Запустить обработку материалов"/);
+  assert.match(view, /aria-label="Источники обработки"/);
+  assert.match(view, /aria-label="Результат обработки"/);
+  assert.match(view, /materialIds: selectedMaterialIds/);
+  assert.match(css, /\.runDialogGrid\s*\{[^}]*grid-template-columns/);
+});
+
 test("manual material input does not impose the old 40k character cap", () => {
   const view = readFileSync(new URL("../src/app/content-center/content-center-view.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(view, /maxLength=\{40000\}|40 000 символов/);

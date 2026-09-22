@@ -1,10 +1,13 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
   MinLength,
@@ -66,6 +69,12 @@ export class PromptDto {
 }
 
 export class PreparationDto {
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('4', { each: true })
+  materialIds?: string[];
+
   @IsOptional()
   @Transform(trim)
   @IsString()

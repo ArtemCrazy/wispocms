@@ -54,6 +54,7 @@ export type PreparationInput = {
   resumeGuard?: {
     materialRevisions: Array<[string, number]>;
     baseVersionId: string | null;
+    selectedMaterialIds?: string[];
   };
   materials: Array<{
     title: string;

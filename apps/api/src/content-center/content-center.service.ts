@@ -226,6 +226,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           started_at: run.started_at,
           finished_at: run.finished_at,
           resumable: canResume,
+          materialIds: run.resume_guard?.selectedMaterialIds ?? null,
         }
       : null;
     return {
@@ -578,28 +579,42 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     return this.db.transaction(async (manager) => {
       await this.lock(manager, workspaceId);
       await this.requireIdle(manager, workspaceId);
-      const materials = await manager.query<
+      const allMaterials = await manager.query<
         Array<Material & { file_data: Buffer | null }>
       >(
         `SELECT id,revision,url_category,title,content,source_url,source_error,file_name,media_type,file_data FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at`,
         [workspaceId],
       );
-      if (!materials.length && !dto.withoutMaterials)
+      if (!allMaterials.length && !dto.withoutMaterials)
         throw new BadRequestException(
           'Добавьте материалы или выберите «У меня нет материалов»',
         );
-      if (materials.length && dto.withoutMaterials)
+      if (allMaterials.length && dto.withoutMaterials)
         throw new BadRequestException(
-          'В пространстве уже есть материалы — они должны участвовать в обработке',
+          'В пространстве уже есть материалы — выберите хотя бы один для обработки',
         );
+      const requestedIds = dto.materialIds;
+      if (requestedIds && new Set(requestedIds).size !== requestedIds.length)
+        throw new BadRequestException('Источники не должны повторяться');
+      const requested = requestedIds ? new Set(requestedIds) : null;
+      const materials = requested
+        ? allMaterials.filter((material) => requested.has(material.id))
+        : allMaterials;
+      if (requested && materials.length !== requested.size)
+        throw new BadRequestException(
+          'Один из выбранных источников недоступен',
+        );
+      if (allMaterials.length && !materials.length)
+        throw new BadRequestException('Выберите хотя бы один материал');
       const [previous] = await manager.query<Version[]>(
-        `SELECT id,content FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC LIMIT 1`,
+        `SELECT id,content,prompt_title FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC LIMIT 1`,
         [workspaceId],
       );
       const input: PreparationInput = {
         resumeGuard: {
-          materialRevisions: materialRevisions(materials),
+          materialRevisions: materialRevisions(allMaterials),
           baseVersionId: previous?.id ?? null,
+          selectedMaterialIds: materials.map((material) => material.id),
         },
         materials: materials.map((m) => ({
           id: m.id,
@@ -610,11 +625,16 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           content: m.content,
           sourceUrl: m.source_url,
         })),
-        // With no materials the specification permits only the user's message.
-        // A saved result must not silently reintroduce deleted source facts.
-        previousResult: dto.withoutMaterials
-          ? null
-          : (previous?.content ?? null),
+        // Explicit launch selection starts a self-contained task: a result from
+        // another investigation must never be imported as source evidence.
+        previousResult:
+          requested !== null ||
+          dto.withoutMaterials ||
+          materials.length !== allMaterials.length ||
+          (previous?.prompt_title ?? 'Свой запрос') !==
+            (dto.promptTitle?.trim() || 'Свой запрос')
+            ? null
+            : (previous?.content ?? null),
       };
       if (JSON.stringify(input).length > PREPARATION_CONTEXT_LIMIT)
         throw new BadRequestException(

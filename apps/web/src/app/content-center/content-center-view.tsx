@@ -73,6 +73,7 @@ type Overview = {
     id: string;
     status: "queued" | "processing" | "succeeded" | "failed";
     resumable?: boolean;
+    materialIds?: string[] | null;
     error: string | null;
     progress?: { message: string } | null;
   } | null;
@@ -209,6 +210,8 @@ export function ContentCenterView({
   const [voiceActive, setVoiceActive] = useState(false);
   const [submittingRun, setSubmittingRun] = useState(false);
   const [runRequestError, setRunRequestError] = useState("");
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
   const [draftRevision, setDraftRevision] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [researchDirty, setResearchDirty] = useState(false);
@@ -377,6 +380,22 @@ export function ContentCenterView({
       !dirty &&
       instruction === data.draft.instruction,
   );
+  const resumableMaterialIds =
+    data?.run?.materialIds ?? data?.materials.map((item) => item.id) ?? [];
+  const resumeMatchesSelection =
+    canResumeRun &&
+    selectedMaterialIds.length === resumableMaterialIds.length &&
+    selectedMaterialIds.every((id) => resumableMaterialIds.includes(id));
+  function openRunDialog() {
+    if (!data) return;
+    setSelectedMaterialIds(
+      canResumeRun && data.run?.materialIds
+        ? data.run.materialIds
+        : data.materials.map((item) => item.id),
+    );
+    setRunRequestError("");
+    setRunDialogOpen(true);
+  }
   const title = {
     root: "Контент-центр",
     preparation: "Подготовка информации",
@@ -402,7 +421,7 @@ export function ContentCenterView({
             {screen === "root"
               ? "Информация о проекте и подготовка материалов для ваших сайтов."
               : screen === "preparation"
-                ? "Добавьте материалы проекта и задайте, какую информацию нужно подготовить."
+                ? "Добавьте материалы проекта. Источники и результат выберете при запуске обработки."
                 : screen === "history"
                   ? "Сохранённые результаты. Восстановление создаёт новую версию."
                   : screen === "document"
@@ -579,84 +598,13 @@ export function ContentCenterView({
                 />
                 <div className={styles.preparationSidebar}>
                 <article className={`${styles.card} ${styles.preparationTask}`}>
-                  <div className={styles.cardHead}>
-                    <h2>Сформировать обработанную информацию</h2>
-                    <button
-                      disabled={busy || voiceActive}
-                      onClick={() => {
-                        setPromptsOpen(true);
-                        setDialogError("");
-                      }}
-                    >
-                      Выбрать промпт
-                    </button>
-                  </div>
-                  <p className={styles.muted}>
-                    {promptTitle
-                      ? `Основа: ${promptTitle}`
-                      : "Выберите промпт или напишите инструкцию."}
-                  </p>
-                  <label className={styles.field}>
-                    Инструкция
-                    <textarea
-                      disabled={busy}
-                      value={instruction}
-                      maxLength={12000}
-                      onChange={(e) => changeInstruction(e.target.value)}
-                      placeholder="Собери информацию о компании: продукты, аудитория, преимущества, тон коммуникации. Отдельно перечисли, каких сведений не хватает."
-                    />
-                  </label>
-                  <SpeechInput
-                    disabled={busy}
-                    onActiveChange={setVoiceActive}
-                    onTranscript={(text) => {
-                      const appended = appendDictation(
-                        instructionRef.current,
-                        text,
-                      );
-                      if (appended.overflow) {
-                        setError(
-                          "Инструкция ограничена 12 000 символами. Последняя распознанная фраза не добавлена; остановите диктовку и сократите текст.",
-                        );
-                      } else changeInstruction(appended.value);
-                    }}
-                  />
                   <div className={styles.actions}>
                     <button
                       className={styles.primary}
-                      disabled={
-                        busy ||
-                        submittingRun ||
-                        voiceActive ||
-                        running ||
-                        !data.ai.connected ||
-                        !instruction.trim()
-                      }
-                      onClick={() => {
-                        setSubmittingRun(true);
-                        setRunRequestError("");
-                        void act(async () => {
-                          if (canResumeRun && data.run) {
-                            await request(`${base}/runs/${data.run.id}/resume`, "POST");
-                          } else {
-                            if (dirty) await saveDraft();
-                            await request(`${base}/runs`, "POST", {
-                              instruction,
-                              promptTitle,
-                              withoutMaterials: !data.materials.length,
-                            });
-                          }
-                          await load();
-                        }, false, setRunRequestError).finally(() => {
-                          if (alive.current) setSubmittingRun(false);
-                        });
-                      }}
+                      disabled={busy || submittingRun || running}
+                      onClick={openRunDialog}
                     >
-                      {running
-                        ? "Обработка выполняется…"
-                        : canResumeRun
-                          ? "Продолжить обработку"
-                          : "Запустить обработку материалов"}
+                      Запустить обработку материалов
                     </button>
                     {(submittingRun || runRequestError || data.run) && (
                       <span
@@ -677,18 +625,6 @@ export function ContentCenterView({
                       </span>
                     )}
                   </div>
-                  <p className={styles.muted}>
-                    Контекст:{" "}
-                    {data.materials.length
-                      ? materialCount(data.materials.length)
-                      : "без материалов"}
-                    {data.materials.length && latest
-                      ? ` и предыдущий результат V${latest.number}`
-                      : ""}
-                    .
-                    {!data.materials.length &&
-                      " Будет передана только инструкция, без прежних результатов."}
-                  </p>
                 </article>
                 <article className={styles.card}>
                   <div>
@@ -839,6 +775,149 @@ export function ContentCenterView({
             </article>
           )}
         </>
+      )}
+
+      {runDialogOpen && data && (
+        <Dialog
+          title="Запустить обработку материалов"
+          busy={busy || submittingRun || voiceActive}
+          close={() => setRunDialogOpen(false)}
+        >
+          <p className={styles.muted}>
+            Выберите материалы для этой обработки и укажите, какой результат нужен.
+            Невыбранные источники не попадут в запрос к AI.
+          </p>
+          <div className={styles.runDialogGrid}>
+            <section className={styles.runSources} aria-label="Источники обработки">
+              <div className={styles.runSectionHead}>
+                <h3>Источники</h3>
+                {data.materials.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={busy || submittingRun}
+                    onClick={() => setSelectedMaterialIds(
+                      selectedMaterialIds.length === data.materials.length
+                        ? []
+                        : data.materials.map((item) => item.id),
+                    )}
+                  >
+                    {selectedMaterialIds.length === data.materials.length ? "Снять все" : "Выбрать все"}
+                  </button>
+                )}
+              </div>
+              <p className={styles.muted}>{selectedMaterialIds.length} из {data.materials.length} выбрано</p>
+              {data.materials.length ? (
+                <div className={styles.runSourceList}>
+                  {data.materials.map((item) => (
+                    <label className={styles.runSource} key={item.id}>
+                      <input
+                        type="checkbox"
+                        checked={selectedMaterialIds.includes(item.id)}
+                        disabled={busy || submittingRun}
+                        onChange={(event) => {
+                          setSelectedMaterialIds((ids) =>
+                            event.target.checked
+                              ? [...ids, item.id]
+                              : ids.filter((id) => id !== item.id),
+                          );
+                          setRunRequestError("");
+                        }}
+                      />
+                      <span>
+                        <strong>{item.title}</strong>
+                        <small>{item.kind === "file" ? item.file_name : item.source_url ?? "Текст проекта"}</small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className={styles.muted}>Материалов пока нет. Можно запустить обработку только по инструкции.</p>
+              )}
+            </section>
+            <section className={styles.runOutcome} aria-label="Результат обработки">
+              <div className={styles.runSectionHead}>
+                <h3>Что получить на выходе</h3>
+                <button
+                  type="button"
+                  disabled={busy || submittingRun || voiceActive}
+                  onClick={() => setPromptsOpen(true)}
+                >
+                  Выбрать промпт
+                </button>
+              </div>
+              <p className={styles.muted}>
+                {promptTitle ? `Основа: ${promptTitle}` : "Выберите готовый промпт или напишите свою инструкцию."}
+              </p>
+              <label className={styles.field}>
+                Инструкция
+                <textarea
+                  disabled={busy || submittingRun}
+                  value={instruction}
+                  maxLength={12000}
+                  onChange={(event) => changeInstruction(event.target.value)}
+                  placeholder="Какие выводы нужны по выбранным источникам?"
+                />
+              </label>
+              <SpeechInput
+                disabled={busy || submittingRun}
+                onActiveChange={setVoiceActive}
+                onTranscript={(text) => {
+                  const appended = appendDictation(instructionRef.current, text);
+                  if (appended.overflow) {
+                    setRunRequestError("Инструкция ограничена 12 000 символами. Сократите текст перед запуском.");
+                  } else changeInstruction(appended.value);
+                }}
+              />
+            </section>
+          </div>
+          {runRequestError && <div className={styles.error} role="alert">{runRequestError}</div>}
+          {canResumeRun && (
+            <p className={styles.muted}>
+              {resumeMatchesSelection
+                ? "Предыдущую неудачную обработку можно продолжить с сохранённого этапа."
+                : "Выбран другой набор материалов: начнётся новая обработка."}
+            </p>
+          )}
+          <div className={styles.runDialogFooter}>
+            <span className={styles.muted}>
+              {selectedMaterialIds.length ? materialCount(selectedMaterialIds.length) : "Без материалов"}
+              {resumeMatchesSelection
+                ? " · продолжение прежнего запуска"
+                : " · прежние результаты не входят в новый запрос"}
+            </span>
+            <div className={styles.actions}>
+              <button type="button" disabled={busy || submittingRun || voiceActive} onClick={() => setRunDialogOpen(false)}>Отмена</button>
+              <button
+                type="button"
+                className={styles.primary}
+                disabled={busy || submittingRun || voiceActive || !data.ai.connected || !instruction.trim() || (data.materials.length > 0 && !selectedMaterialIds.length)}
+                onClick={() => {
+                  setSubmittingRun(true);
+                  setRunRequestError("");
+                  void act(async () => {
+                    if (resumeMatchesSelection && data.run) {
+                      await request(`${base}/runs/${data.run.id}/resume`, "POST");
+                    } else {
+                      if (dirty) await saveDraft();
+                      await request(`${base}/runs`, "POST", {
+                        instruction,
+                        promptTitle,
+                        withoutMaterials: !data.materials.length,
+                        materialIds: selectedMaterialIds,
+                      });
+                    }
+                    await load();
+                    setRunDialogOpen(false);
+                  }, false, setRunRequestError).finally(() => {
+                    if (alive.current) setSubmittingRun(false);
+                  });
+                }}
+              >
+                {submittingRun ? "Запускаем…" : resumeMatchesSelection ? "Продолжить обработку" : "Запустить обработку"}
+              </button>
+            </div>
+          </div>
+        </Dialog>
       )}
 
       {sourceDetails && sourceDetails.sourceBase === base && (
