@@ -484,7 +484,7 @@ export function ContentCenterView({
               {!data.ai.connected && (
                 <div className={styles.notice}>
                   <strong>Материалы можно готовить уже сейчас.</strong> AI ещё
-                  не подключён. Сохраните источники, промпты и задачу —
+                  не подключён. Источники и промпты можно подготовить заранее;
                   обработка станет доступна после подключения API.
                 </div>
               )}
@@ -562,6 +562,7 @@ export function ContentCenterView({
                     })
                   }
                 />
+                <div className={styles.preparationSidebar}>
                 <article className={`${styles.card} ${styles.preparationTask}`}>
                   <div className={styles.cardHead}>
                     <h2>Сформировать обработанную информацию</h2>
@@ -572,29 +573,16 @@ export function ContentCenterView({
                         setDialogError("");
                       }}
                     >
-                      Список промптов
+                      Выбрать промпт
                     </button>
                   </div>
                   <p className={styles.muted}>
-                    Опишите структуру документа, нужные акценты или
-                    корректировки предыдущего результата.
+                    {promptTitle
+                      ? `Основа: ${promptTitle}`
+                      : "Выберите промпт или напишите инструкцию."}
                   </p>
                   <label className={styles.field}>
-                    Название запроса
-                    <input
-                      disabled={busy}
-                      value={promptTitle}
-                      maxLength={160}
-                      placeholder="Например, Анализ компании"
-                      onChange={(event) => {
-                        setPromptTitle(event.target.value);
-                        setDirty(true);
-                        setNotice("");
-                      }}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    Ваша инструкция
+                    Инструкция
                     <textarea
                       disabled={busy}
                       value={instruction}
@@ -619,12 +607,6 @@ export function ContentCenterView({
                     }}
                   />
                   <div className={styles.actions}>
-                    <button
-                      disabled={busy || voiceActive || !dirty}
-                      onClick={() => void act(saveDraft)}
-                    >
-                      Сохранить задачу
-                    </button>
                     <button
                       className={styles.primary}
                       disabled={
@@ -651,13 +633,6 @@ export function ContentCenterView({
                         : "Запустить обработку материалов"}
                     </button>
                   </div>
-                  <p className={styles.muted}>
-                    {dirty
-                      ? "Есть несохранённые изменения задачи"
-                      : draftRevision
-                        ? "Задача сохранена в рабочем пространстве"
-                        : "Инструкция пока не задана"}
-                  </p>
                   <p className={styles.muted}>
                     Контекст:{" "}
                     {data.materials.length
@@ -788,6 +763,7 @@ export function ContentCenterView({
                     )}
                   </div>
                 </article>
+                </div>
               </div>
             </>
           )}

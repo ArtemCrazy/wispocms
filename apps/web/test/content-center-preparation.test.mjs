@@ -12,14 +12,31 @@ import {
   preparationVersionLabel,
 } from "../src/app/content-center/preparation-version.ts";
 
-test("preparation keeps materials and instruction side by side until the workspace narrows", () => {
+test("preparation keeps materials left and the task and history right until the workspace narrows", () => {
+  const view = readFileSync(
+    new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
+    "utf8",
+  );
   const css = readFileSync(
     new URL("../src/app/content-center/content-center-view.module.css", import.meta.url),
     "utf8",
   );
   assert.match(css, /\.preparationStack\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.15fr\) minmax\(380px, 0\.85fr\)/);
-  assert.match(css, /\.preparationStack\s*>\s*\.processingHistory\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+  assert.match(view, /<ProjectMaterials[\s\S]*?<div className=\{styles\.preparationSidebar\}>[\s\S]*?<h2>История версий<\/h2>/);
+  assert.match(css, /\.preparationSidebar\s*\{[^}]*display:\s*grid/);
   assert.match(css, /@container\s*\(max-width:\s*1100px\)\s*\{\s*\.preparationStack\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
+
+test("prompt selection supplies the saved name without a separate title or save button", () => {
+  const view = readFileSync(
+    new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(view, /Название запроса|Сохранить задачу/);
+  assert.match(view, /Выбрать промпт/);
+  assert.match(view, /setPromptTitle\(title\)/);
+  assert.match(view, /if \(dirty\) await saveDraft\(\)/);
+  assert.match(view, /promptTitle,/);
 });
 
 test("manual material input does not impose the old 40k character cap", () => {
