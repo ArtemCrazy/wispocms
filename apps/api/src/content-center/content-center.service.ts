@@ -83,9 +83,14 @@ type RunSummary = {
   status: string;
   actor_name: string;
   error: string | null;
+  progress?: PreparationProgress | null;
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
+  resumable: boolean;
+  instruction?: string;
+  prompt_title?: string | null;
+  resume_guard?: PreparationInput['resumeGuard'];
 };
 type Draft = {
   instruction: string;
@@ -101,16 +106,26 @@ type Run = {
   actor_name: string;
   input_context: PreparationInput;
   status: string;
+  provider: string;
   operation: 'prepare' | 'collect';
   source_material_id: string | null;
 };
 const RUN_FIELDS =
-  'id, status, actor_name, error, progress, created_at, started_at, finished_at';
+  "id, status, actor_name, error, progress, created_at, started_at, finished_at, (status='failed' AND operation='prepare' AND input_context IS NOT NULL AND finished_at > now()-interval '7 days') AS resumable";
+
+function materialRevisions(
+  rows: Array<{ id: string; revision: number }>,
+): Array<[string, number]> {
+  return rows
+    .map((row): [string, number] => [row.id, row.revision])
+    .sort(([left], [right]) => left.localeCompare(right));
+}
 
 @Injectable()
 export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private working = false;
+  private lastCheckpointCleanup = 0;
   private readonly logger = new Logger(ContentCenterService.name);
 
   constructor(
@@ -178,7 +193,8 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         [workspaceId],
       ),
       this.db.query<RunSummary[]>(
-        `SELECT ${RUN_FIELDS} FROM cc_preparation_runs WHERE workspace_id=$1 AND operation='prepare' ORDER BY created_at DESC LIMIT 1`,
+        `SELECT ${RUN_FIELDS},instruction,prompt_title,input_context->'resumeGuard' AS resume_guard
+         FROM cc_preparation_runs WHERE workspace_id=$1 AND operation='prepare' ORDER BY created_at DESC LIMIT 1`,
         [workspaceId],
       ),
       this.db.query<Draft[]>(
@@ -186,11 +202,37 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         [workspaceId],
       ),
     ]);
+    const run = runs[0];
+    const currentDraft = drafts[0];
+    const canResume = Boolean(
+      run?.resumable &&
+      run.resume_guard &&
+      (!currentDraft ||
+        (run.instruction === currentDraft.instruction &&
+          (run.prompt_title ?? 'Свой запрос') ===
+            (currentDraft.prompt_title?.trim() || 'Свой запрос'))) &&
+      (run.resume_guard.baseVersionId ?? null) === (versions[0]?.id ?? null) &&
+      JSON.stringify(run.resume_guard.materialRevisions) ===
+        JSON.stringify(materialRevisions(materials)),
+    );
+    const publicRun = run
+      ? {
+          id: run.id,
+          status: run.status,
+          actor_name: run.actor_name,
+          error: run.error,
+          progress: run.progress,
+          created_at: run.created_at,
+          started_at: run.started_at,
+          finished_at: run.finished_at,
+          resumable: canResume,
+        }
+      : null;
     return {
       materials,
       prompts,
       versions,
-      run: runs[0] ?? null,
+      run: publicRun,
       draft: drafts[0] ?? {
         instruction: '',
         prompt_title: null,
@@ -551,10 +593,14 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           'В пространстве уже есть материалы — они должны участвовать в обработке',
         );
       const [previous] = await manager.query<Version[]>(
-        `SELECT content FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC LIMIT 1`,
+        `SELECT id,content FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC LIMIT 1`,
         [workspaceId],
       );
       const input: PreparationInput = {
+        resumeGuard: {
+          materialRevisions: materialRevisions(materials),
+          baseVersionId: previous?.id ?? null,
+        },
         materials: materials.map((m) => ({
           id: m.id,
           revision: m.revision,
@@ -600,6 +646,87 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         ],
       );
       return row;
+    });
+  }
+
+  async resume(workspaceId: string, id: string, actor: Actor) {
+    const actorName = await this.access(workspaceId, actor);
+    if (!this.ai.configured)
+      throw new ServiceUnavailableException('AI не подключён.');
+    return this.db.transaction(async (manager) => {
+      await this.lock(manager, workspaceId);
+      await this.requireIdle(manager, workspaceId);
+      const [run] = await manager.query<Run[]>(
+        `SELECT * FROM cc_preparation_runs WHERE workspace_id=$1 AND id=$2 AND operation='prepare' FOR UPDATE`,
+        [workspaceId, id],
+      );
+      if (!run) throw new NotFoundException('Запуск не найден');
+      if (
+        run.status !== 'failed' ||
+        !run.input_context ||
+        !run.input_context.resumeGuard
+      )
+        throw new ConflictException(
+          'Этот запуск нельзя продолжить. Создайте новый.',
+        );
+      const [lastRun] = await manager.query<Array<{ id: string }>>(
+        `SELECT id FROM cc_preparation_runs WHERE workspace_id=$1 AND operation='prepare'
+         ORDER BY created_at DESC LIMIT 1`,
+        [workspaceId],
+      );
+      if (lastRun?.id !== id)
+        throw new ConflictException(
+          'Этот запуск уже не последний. Создайте новый.',
+        );
+      const [age] = await manager.query<Array<{ recent: boolean }>>(
+        `SELECT finished_at > now()-interval '7 days' AS recent FROM cc_preparation_runs WHERE id=$1`,
+        [id],
+      );
+      if (!age?.recent || run.provider !== this.ai.name)
+        throw new ConflictException(
+          'Срок продолжения истёк или изменился AI. Создайте новый запуск.',
+        );
+      const [draft] = await manager.query<Draft[]>(
+        `SELECT instruction,prompt_title FROM cc_preparation_drafts WHERE workspace_id=$1`,
+        [workspaceId],
+      );
+      if (
+        draft &&
+        (draft.instruction !== run.instruction ||
+          (draft.prompt_title?.trim() || 'Свой запрос') !==
+            (run.prompt_title ?? 'Свой запрос'))
+      )
+        throw new ConflictException(
+          'Инструкция или промпт изменились. Создайте новый запуск.',
+        );
+      const revisions = await manager.query<
+        Array<{ id: string; revision: number }>
+      >(
+        `SELECT id,revision FROM cc_materials WHERE workspace_id=$1 ORDER BY created_at`,
+        [workspaceId],
+      );
+      if (
+        JSON.stringify(materialRevisions(revisions)) !==
+        JSON.stringify(run.input_context.resumeGuard.materialRevisions)
+      )
+        throw new ConflictException(
+          'Материалы изменились. Создайте новый запуск.',
+        );
+      const [latest] = await manager.query<Array<{ id: string }>>(
+        `SELECT id FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC LIMIT 1`,
+        [workspaceId],
+      );
+      if ((latest?.id ?? null) !== run.input_context.resumeGuard.baseVersionId)
+        throw new ConflictException(
+          'Предыдущая версия изменилась. Создайте новый запуск.',
+        );
+      const [queued] = await manager.query<RunSummary[]>(
+        `UPDATE cc_preparation_runs SET status='queued',actor_name=$2,error=NULL,progress=NULL,
+         started_at=NULL,heartbeat_at=NULL,finished_at=NULL,resume_count=resume_count+1
+         WHERE id=$1 RETURNING ${RUN_FIELDS}`,
+        [id, actorName],
+      );
+      return queued;
     });
   }
 
@@ -696,12 +823,20 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     if (this.working) return;
     this.working = true;
     try {
+      if (Date.now() - this.lastCheckpointCleanup > 3_600_000) {
+        await this.db
+          .query(`DELETE FROM cc_preparation_checkpoints WHERE run_id IN
+          (SELECT id FROM cc_preparation_runs WHERE status='failed' AND finished_at < now()-interval '7 days')`);
+        await this.db.query(`UPDATE cc_preparation_runs SET input_context=NULL
+          WHERE status='failed' AND finished_at < now()-interval '7 days' AND input_context IS NOT NULL`);
+        this.lastCheckpointCleanup = Date.now();
+      }
       // A terminated worker must not leave the workspace locked forever. Never retry a paid call automatically.
       await this.db.query(
-        `UPDATE cc_preparation_runs SET status='failed', error='Обработка прервалась. Повторите запуск.', input_context=NULL, finished_at=now() WHERE status='processing' AND COALESCE(heartbeat_at,started_at) < now()-interval '5 minutes'`,
+        `UPDATE cc_preparation_runs SET status='failed', error='Обработка прервалась. Продолжите запуск.', finished_at=now() WHERE status='processing' AND COALESCE(heartbeat_at,started_at) < now()-interval '5 minutes'`,
       );
       await this.db.query(
-        `UPDATE cc_preparation_runs SET status='failed', error='Истекло время ожидания обработки. Повторите запуск.', input_context=NULL, finished_at=now() WHERE status='queued' AND created_at < now()-interval '30 minutes'`,
+        `UPDATE cc_preparation_runs SET status='failed', error='Истекло время ожидания обработки. Продолжите запуск.', finished_at=now() WHERE status='queued' AND created_at < now()-interval '30 minutes'`,
       );
       const [run] = await this.db.query<Run[]>(
         `WITH claimed AS (UPDATE cc_preparation_runs SET status='processing',started_at=now(),heartbeat_at=now() WHERE id=(SELECT id FROM cc_preparation_runs WHERE status='queued' AND (operation='collect' OR ($2::boolean AND provider=$1)) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *) SELECT * FROM claimed`,
@@ -727,23 +862,26 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             throw new AiProviderError('Запуск больше не активен');
         };
         if (run.operation === 'collect') await this.requireRefreshSource(run);
-        const resolved = await this.collection.collect(
-          run.workspace_id,
-          run.input_context,
-          progress,
-          AbortSignal.timeout(6 * 60_000),
-          run.operation === 'collect'
-            ? { persistSnapshots: false, allowUnread: true }
-            : {
-                selectPages: (pages, signal) =>
-                  this.ai.selectSitePages(
-                    run.instruction,
-                    pages,
-                    signal,
-                    progress,
-                  ),
-              },
-        );
+        const resolved =
+          run.operation === 'prepare' && run.input_context.sources
+            ? run.input_context
+            : await this.collection.collect(
+                run.workspace_id,
+                run.input_context,
+                progress,
+                AbortSignal.timeout(6 * 60_000),
+                run.operation === 'collect'
+                  ? { persistSnapshots: false, allowUnread: true }
+                  : {
+                      selectPages: (pages, signal) =>
+                        this.ai.selectSitePages(
+                          run.instruction,
+                          pages,
+                          signal,
+                          progress,
+                        ),
+                    },
+              );
         if (run.operation === 'collect') {
           await this.db.transaction(async (manager) => {
             await this.lock(manager, run.workspace_id);
@@ -779,12 +917,37 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         }
         await this.db.query(
           `UPDATE cc_preparation_runs SET input_context=$2::jsonb WHERE id=$1 AND status='processing'`,
-          [run.id, JSON.stringify(resolved)],
+          [
+            run.id,
+            JSON.stringify({
+              ...resolved,
+              resumeGuard: run.input_context.resumeGuard,
+            }),
+          ],
         );
         const content = await this.ai.generate(
           run.instruction,
           resolved,
           progress,
+          {
+            get: async (requestHash) => {
+              const [checkpoint] = await this.db.query<
+                Array<{ content: string }>
+              >(
+                `SELECT content FROM cc_preparation_checkpoints WHERE run_id=$1 AND request_hash=$2`,
+                [run.id, requestHash],
+              );
+              return checkpoint?.content ?? null;
+            },
+            put: async (requestHash, value) => {
+              await this.db.query(
+                `INSERT INTO cc_preparation_checkpoints(run_id,request_hash,content)
+                 SELECT id,$2,$3 FROM cc_preparation_runs WHERE id=$1 AND status='processing'
+                 ON CONFLICT (run_id,request_hash) DO NOTHING`,
+                [run.id, requestHash, value],
+              );
+            },
+          },
         );
         await this.db.transaction(async (manager) => {
           await this.lock(manager, run.workspace_id);
@@ -808,10 +971,14 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             `UPDATE cc_preparation_runs SET status='succeeded',input_context=NULL,finished_at=now() WHERE id=$1`,
             [run.id],
           );
+          await manager.query(
+            `DELETE FROM cc_preparation_checkpoints WHERE run_id=$1`,
+            [run.id],
+          );
         });
       } catch (error) {
         await this.db.query(
-          `UPDATE cc_preparation_runs SET status='failed',error=$2,input_context=NULL,finished_at=now() WHERE id=$1 AND status='processing'`,
+          `UPDATE cc_preparation_runs SET status='failed',error=$2,finished_at=now() WHERE id=$1 AND status='processing'`,
           [
             run.id,
             error instanceof AiProviderError

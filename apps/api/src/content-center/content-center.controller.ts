@@ -194,6 +194,14 @@ export class ContentCenterController {
   ) {
     return this.service.start(workspaceId, req.auth!, dto);
   }
+  @Post('runs/:id/resume')
+  resume(
+    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.service.resume(workspaceId, id, req.auth!);
+  }
   @Get('versions/:id')
   version(
     @Param('workspaceId', ParseUUIDPipe) workspaceId: string,

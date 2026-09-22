@@ -198,6 +198,17 @@ test("inline run status reflects only server-confirmed states and preserves fail
   assert.match(preparationRunLabel("failed", null), /Последняя версия сохранена/);
 });
 
+test("a failed run can be continued explicitly without silently starting a fresh paid run", () => {
+  const view = readFileSync(
+    new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(view, /data\.run\.resumable/);
+  assert.match(view, /!dirty/);
+  assert.match(view, /\/runs\/\$\{data\.run\.id\}\/resume/);
+  assert.match(view, /Продолжить обработку/);
+});
+
 test("speech permission and service failures offer a text fallback", () => {
   assert.match(speechErrorMessage("not-allowed"), /разрешение микрофона/);
   assert.match(speechErrorMessage("network"), /текстом/);

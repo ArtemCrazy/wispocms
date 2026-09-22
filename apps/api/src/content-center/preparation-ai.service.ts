@@ -4,6 +4,7 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { AiProviderError } from '../ai/ai-provider.error';
 import type { SitePage, SiteCoverage } from './site-crawler';
 import type { PreparationTopic } from './preparation-topics';
@@ -50,6 +51,10 @@ export type SourceSnapshot = {
 
 export type PreparationInput = {
   processingStage?: 'register';
+  resumeGuard?: {
+    materialRevisions: Array<[string, number]>;
+    baseVersionId: string | null;
+  };
   materials: Array<{
     title: string;
     content: string;
@@ -77,12 +82,18 @@ export interface PreparationProvider {
     signal: AbortSignal,
   ): Promise<PageDecision[]>;
   measureInput?(instruction: string, context: PreparationInput): number;
+  checkpointIdentity?(): Promise<string>;
   generate(request: {
     instruction: string;
     context: PreparationInput;
     signal: AbortSignal;
   }): Promise<{ content: string }>;
 }
+
+export type PreparationCheckpointStore = {
+  get(requestHash: string): Promise<string | null>;
+  put(requestHash: string, content: string): Promise<void>;
+};
 
 @Injectable()
 export class PreparationAiService {
@@ -116,6 +127,7 @@ export class PreparationAiService {
     input: PreparationInput,
     onProgress: (progress: PreparationProgress) => Promise<void> = () =>
       Promise.resolve(),
+    checkpoints?: PreparationCheckpointStore,
   ): Promise<string> {
     if (!this.provider || !this.configured)
       throw new ServiceUnavailableException(
@@ -134,6 +146,7 @@ export class PreparationAiService {
           input,
           controller.signal,
           onProgress,
+          checkpoints,
         ),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
@@ -164,6 +177,7 @@ export class PreparationAiService {
     input: PreparationInput,
     signal: AbortSignal,
     progress: (value: PreparationProgress) => Promise<void>,
+    checkpoints?: PreparationCheckpointStore,
   ) {
     // Never send the duplicate archive of raw sources; it is retained by CMS for evidence.
     let materials = input.materials;
@@ -171,13 +185,38 @@ export class PreparationAiService {
     const measure = (task: string, context: PreparationInput) =>
       this.provider!.measureInput?.(task, context) ??
       preparationRequestSize(task, context);
-    const call = (task: string, context: PreparationInput) => {
+    const identity =
+      (await this.provider!.checkpointIdentity?.()) ?? this.provider!.name;
+    const call = async (task: string, context: PreparationInput) => {
       signal.throwIfAborted();
       if (measure(task, context) > PREPARATION_REQUEST_LIMIT)
         throw new AiProviderError(
           'Полный вход AI превышает 60 000 символов. Новая версия не создана.',
         );
-      return this.provider!.generate({ instruction: task, context, signal });
+      const requestHash = createHash('sha256')
+        .update(JSON.stringify([identity, task, context]))
+        .digest('hex');
+      const saved = await checkpoints?.get(requestHash);
+      if (saved !== undefined && saved !== null) return { content: saved };
+      const result = await this.provider!.generate({
+        instruction: task,
+        context,
+        signal,
+      });
+      // Store only a structurally valid completed response. An extracted draft
+      // remains a draft; the separate verification call is also checkpointed.
+      if (context.processingStage === 'register')
+        checkedRegister(result.content);
+      else if (
+        !result.content?.trim() ||
+        result.content.length > 80_000 ||
+        result.content.includes('\0')
+      )
+        throw new AiProviderError(
+          'AI вернул неполный результат. Новая версия не создана.',
+        );
+      await checkpoints?.put(requestHash, result.content);
+      return result;
     };
     const task = `${instruction}\n\nИтоговый документ предназначен для чтения: не добавляй ссылки на источники, сноски, библиографию и служебные идентификаторы [S…], в том числе из предыдущей версии. Источники и охват доступны отдельно в CMS. Адрес сайта компании и другие URL оставляй только как существенные данные проекта, не как ссылки-доказательства. Не описывай внутренние реестры и этапы сборки. Охват ограничен собранными источниками; пропущенные страницы не считаются прочитанными. Отсутствие сведений в выборке не доказывает отсутствие свойства у компании. Противоречия сохраняй явно. Предыдущая версия — исторический контекст, не свежий источник; её ссылки относятся к прежнему запуску. При объединении не теряй условия фактов: цену, срок, географию, исключения, отрицания и оговорки «от», «до», «только», «при условии». Не объединяй условия разных услуг. Не называй модельную сверку гарантией достоверности или независимым аудитом.`;
     const context = (): PreparationInput => ({

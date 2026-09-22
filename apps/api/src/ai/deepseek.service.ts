@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { AiProviderError as DeepseekError } from './ai-provider.error';
 import { DeepseekSettingsService } from './deepseek-settings.service';
 import { escapeJsonTextWhitespace } from './json-text-whitespace';
@@ -60,6 +61,16 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     return this.settings.configured;
   }
   constructor(private readonly settings: DeepseekSettingsService) {}
+
+  async checkpointIdentity(): Promise<string> {
+    const { model, revision } = await this.settings.credentials();
+    // A changed model/settings revision must never reuse an older AI response.
+    const promptRevision = createHash('sha256')
+      .update(PREPARATION_PROMPT)
+      .update(REGISTER_PROMPT)
+      .digest('hex');
+    return `${this.name}:${model}:${revision}:${promptRevision}`;
+  }
 
   private async request(
     path: '/models' | '/chat/completions',
@@ -172,7 +183,9 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     );
     try {
       if (!Array.isArray(response.choices) || response.choices.length !== 1)
-        throw new Error();
+        throw new DeepseekError(
+          'DeepSeek вернул ответ без ожидаемого варианта. Новая версия не создана.',
+        );
       const choice = object(response.choices[0]);
       if (choice.finish_reason !== 'stop') {
         const reasons = new Map<unknown, string>([
@@ -198,7 +211,15 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
             'DeepSeek не завершил генерацию ожидаемым образом. Новая версия не создана.',
         );
       }
-      const content = object(choice.message).content;
+      if (
+        !choice.message ||
+        typeof choice.message !== 'object' ||
+        Array.isArray(choice.message)
+      )
+        throw new DeepseekError(
+          'DeepSeek вернул ответ без сообщения. Новая версия не создана.',
+        );
+      const content = (choice.message as Record<string, unknown>).content;
       if (typeof content === 'string' && !content.trim())
         throw new DeepseekError(
           'DeepSeek вернул пустой ответ. Новая версия не создана. Уточните задачу и повторите запуск.',
@@ -208,14 +229,26 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
         !content.trim() ||
         content.length > 240_000
       )
-        throw new Error();
-      return object(
-        JSON.parse(
+        throw new DeepseekError(
+          'DeepSeek вернул повреждённый или слишком большой текст ответа. Новая версия не создана.',
+        );
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(
           allowLiteralTextWhitespace
             ? escapeJsonTextWhitespace(content)
             : content,
-        ) as unknown,
-      );
+        ) as unknown;
+      } catch {
+        throw new DeepseekError(
+          'DeepSeek вернул некорректный JSON. Новая версия не создана.',
+        );
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        throw new DeepseekError(
+          'DeepSeek вернул JSON не в ожидаемой структуре. Новая версия не создана.',
+        );
+      return parsed as Record<string, unknown>;
     } catch (error) {
       if (error instanceof DeepseekError) throw error;
       throw new DeepseekError(

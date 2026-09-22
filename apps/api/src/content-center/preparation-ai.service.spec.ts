@@ -44,6 +44,93 @@ describe('provider-neutral preparation', () => {
     expect(called[0].context).toEqual(context);
     expect(called[0].signal).toBeInstanceOf(AbortSignal);
   });
+  it('reuses only completed requests for the same input and provider revision', async () => {
+    const saved = new Map<string, string>();
+    const checkpoints = {
+      get: (key: string) => Promise.resolve(saved.get(key) ?? null),
+      put: (key: string, content: string) => {
+        saved.set(key, content);
+        return Promise.resolve();
+      },
+    };
+    let revision = 'model:1';
+    const generate = jest
+      .fn()
+      .mockResolvedValue({ content: 'Проверенный ответ' });
+    const ai = new PreparationAiService({
+      name: 'test-only',
+      checkpointIdentity: () => Promise.resolve(revision),
+      generate,
+    });
+    await ai.generate('Задача', context, undefined, checkpoints);
+    await ai.generate('Задача', context, undefined, checkpoints);
+    expect(generate).toHaveBeenCalledTimes(1);
+    await ai.generate('Изменённая задача', context, undefined, checkpoints);
+    expect(generate).toHaveBeenCalledTimes(2);
+    revision = 'model:2';
+    await ai.generate('Задача', context, undefined, checkpoints);
+    expect(generate).toHaveBeenCalledTimes(3);
+  });
+  it('never checkpoints a failed or malformed provider response', async () => {
+    const put = jest.fn();
+    const generate = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('provider failed'))
+      .mockResolvedValueOnce({ content: '' });
+    const ai = new PreparationAiService({ name: 'test-only', generate });
+    const checkpoints = { get: () => Promise.resolve(null), put };
+    await expect(
+      ai.generate('Задача', context, undefined, checkpoints),
+    ).rejects.toThrow();
+    await expect(
+      ai.generate('Задача', context, undefined, checkpoints),
+    ).rejects.toThrow();
+    expect(put).not.toHaveBeenCalled();
+  });
+  it('continues a multi-part run from saved stages after a late failure', async () => {
+    const saved = new Map<string, string>();
+    const checkpoints = {
+      get: (key: string) => Promise.resolve(saved.get(key) ?? null),
+      put: (key: string, content: string) => {
+        saved.set(key, content);
+        return Promise.resolve();
+      },
+    };
+    let failFinal = true;
+    const generate = jest
+      .fn<
+        ReturnType<PreparationProvider['generate']>,
+        Parameters<PreparationProvider['generate']>
+      >()
+      .mockImplementation((request) => {
+        if (!request.context.processingStage && failFinal) {
+          failFinal = false;
+          return Promise.reject(new Error('late provider failure'));
+        }
+        return Promise.resolve({ content: '[S1.1] Проверенный факт.' });
+      });
+    const ai = new PreparationAiService({ name: 'test-only', generate });
+    const large = {
+      materials: [
+        {
+          title: '[S1.1] Источник',
+          content: 'Факт компании.\n'.repeat(9000),
+          sourceUrl: null,
+        },
+      ],
+      previousResult: null,
+    };
+    await expect(
+      ai.generate('Сводка', large, undefined, checkpoints),
+    ).rejects.toThrow('late provider failure');
+    const firstCalls = generate.mock.calls.length;
+    expect(firstCalls).toBeGreaterThan(2);
+    expect(saved.size).toBeGreaterThan(1);
+    await expect(
+      ai.generate('Сводка', large, undefined, checkpoints),
+    ).resolves.toContain('Проверенный факт');
+    expect(generate.mock.calls.length).toBe(firstCalls + 1);
+  });
   it.each(['', ' '.repeat(5), 'x'.repeat(80001), 'bad\0text'])(
     'rejects an invalid result',
     async (content) => {

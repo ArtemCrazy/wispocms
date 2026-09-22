@@ -72,6 +72,7 @@ type Overview = {
   run: {
     id: string;
     status: "queued" | "processing" | "succeeded" | "failed";
+    resumable?: boolean;
     error: string | null;
     progress?: { message: string } | null;
   } | null;
@@ -370,6 +371,12 @@ export function ContentCenterView({
   }
 
   const latest = data?.versions[0];
+  const canResumeRun = Boolean(
+    data?.run?.status === "failed" &&
+      data.run.resumable &&
+      !dirty &&
+      instruction === data.draft.instruction,
+  );
   const title = {
     root: "Контент-центр",
     preparation: "Подготовка информации",
@@ -629,12 +636,16 @@ export function ContentCenterView({
                         setSubmittingRun(true);
                         setRunRequestError("");
                         void act(async () => {
-                          if (dirty) await saveDraft();
-                          await request(`${base}/runs`, "POST", {
-                            instruction,
-                            promptTitle,
-                            withoutMaterials: !data.materials.length,
-                          });
+                          if (canResumeRun && data.run) {
+                            await request(`${base}/runs/${data.run.id}/resume`, "POST");
+                          } else {
+                            if (dirty) await saveDraft();
+                            await request(`${base}/runs`, "POST", {
+                              instruction,
+                              promptTitle,
+                              withoutMaterials: !data.materials.length,
+                            });
+                          }
                           await load();
                         }, false, setRunRequestError).finally(() => {
                           if (alive.current) setSubmittingRun(false);
@@ -643,7 +654,9 @@ export function ContentCenterView({
                     >
                       {running
                         ? "Обработка выполняется…"
-                        : "Запустить обработку материалов"}
+                        : canResumeRun
+                          ? "Продолжить обработку"
+                          : "Запустить обработку материалов"}
                     </button>
                     {(submittingRun || runRequestError || data.run) && (
                       <span
@@ -659,7 +672,7 @@ export function ContentCenterView({
                           : runRequestError
                             ? `Не удалось запустить: ${runRequestError}`
                           : data.run
-                            ? preparationRunLabel(data.run.status, data.run.error)
+                            ? `${preparationRunLabel(data.run.status, data.run.error)}${data.run.status === "failed" && data.run.progress?.message ? ` Этап: ${data.run.progress.message}.` : ""}`
                             : null}
                       </span>
                     )}

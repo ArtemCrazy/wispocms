@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import type { Server } from 'node:http';
 import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
 import { SourceRefreshJobs1790832000000 } from '../database/migrations/1790832000000-SourceRefreshJobs';
+import { PreparationCheckpoints1791436800000 } from '../database/migrations/1791436800000-PreparationCheckpoints';
 import { ContentCenterVkSources1790918400000 } from '../database/migrations/1790918400000-ContentCenterVkSources';
 import { PlatformVkIntegration1791004800000 } from '../database/migrations/1791004800000-PlatformVkIntegration';
 import { InstagramYoutubeSources1791091200000 } from '../database/migrations/1791091200000-InstagramYoutubeSources';
@@ -102,6 +103,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       await new ContentCenterVkSources1790918400000().up(runner);
       await new PlatformVkIntegration1791004800000().up(runner);
       await new InstagramYoutubeSources1791091200000().up(runner);
+      await new PreparationCheckpoints1791436800000().up(runner);
     } finally {
       await runner.release();
     }
@@ -137,7 +139,7 @@ integration('Content Center / isolated PostgreSQL', () => {
 
   beforeEach(async () => {
     await db.query(
-      `TRUNCATE cc_instagram_oauth_states,cc_instagram_connections,cc_vk_connections,cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts,platform_prompts`,
+      `TRUNCATE cc_preparation_checkpoints,cc_instagram_oauth_states,cc_instagram_connections,cc_vk_connections,cc_preparation_runs,cc_preparation_versions,cc_preparation_drafts,cc_materials,cc_prompts,platform_prompts`,
     );
     await db.query(
       'UPDATE platform_vk_settings SET encrypted_key=NULL,revision=0,verified_at=NULL,updated_at=NULL,updated_by=NULL',
@@ -2489,12 +2491,11 @@ integration('Content Center / isolated PostgreSQL', () => {
       expect(state.versions).toHaveLength(1);
       expect(state.versions[0].id).toBe(previous.id);
       expect(generate).toHaveBeenCalledTimes(2);
-      expect(
-        await db.query(
-          'SELECT input_context FROM cc_preparation_runs WHERE id=$1',
-          [failed.id],
-        ),
-      ).toEqual([{ input_context: null }]);
+      const [failedRow] = await db.query<Array<{ input_context: unknown }>>(
+        'SELECT input_context FROM cc_preparation_runs WHERE id=$1',
+        [failed.id],
+      );
+      expect(JSON.stringify(failedRow?.input_context)).toContain('resumeGuard');
     },
   );
 
@@ -2537,12 +2538,65 @@ integration('Content Center / isolated PostgreSQL', () => {
           ),
         ),
     ).toBe(true);
-    expect(
-      await db.query(
-        'SELECT input_context FROM cc_preparation_runs WHERE id=$1',
-        [run.id],
+    const [failedRow] = await db.query<Array<{ input_context: unknown }>>(
+      'SELECT input_context FROM cc_preparation_runs WHERE id=$1',
+      [run.id],
+    );
+    expect(JSON.stringify(failedRow?.input_context)).toContain('resumeGuard');
+  });
+
+  it('manually resumes a failed preparation from its frozen context without changing the prior version on failure', async () => {
+    const material = await service.saveMaterial(workspace, admin, {
+      kind: 'text',
+      title: 'Исходник',
+      content: 'Компания основана в 2010 году.',
+    });
+    generate.mockRejectedValueOnce(
+      new AiProviderError(
+        'DeepSeek вернул некорректный JSON. Новая версия не создана.',
       ),
-    ).toEqual([{ input_context: null }]);
+    );
+    const run = await service.start(workspace, admin, {
+      instruction: 'Подготовь документ',
+      withoutMaterials: false,
+    });
+    await service.processNext();
+    expect((await service.overview(workspace, admin)).run).toMatchObject({
+      id: run.id,
+      status: 'failed',
+      resumable: true,
+    });
+    expect((await service.overview(workspace, admin)).versions).toHaveLength(0);
+    await expect(
+      service.resume(otherWorkspace, run.id, employee),
+    ).rejects.toThrow();
+    await service.resume(workspace, run.id, employee);
+    await service.processNext();
+    expect((await service.overview(workspace, admin)).run.status).toBe(
+      'succeeded',
+    );
+    expect((await service.overview(workspace, admin)).versions).toHaveLength(1);
+    expect(generate).toHaveBeenCalledTimes(2);
+    const next = await service.start(workspace, admin, {
+      instruction: 'Новая версия',
+      withoutMaterials: false,
+    });
+    generate.mockRejectedValueOnce(new AiProviderError('Сбой'));
+    await service.processNext();
+    await service.saveMaterial(
+      workspace,
+      admin,
+      {
+        kind: 'text',
+        title: 'Изменён',
+        content: 'Новый факт',
+        revision: 1,
+      },
+      material.id,
+    );
+    await expect(service.resume(workspace, next.id, admin)).rejects.toThrow(
+      'Материалы изменились',
+    );
   });
 
   it('keeps the last result on failure and recovers abandoned jobs', async () => {

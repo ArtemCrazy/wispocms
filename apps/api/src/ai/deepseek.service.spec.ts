@@ -347,6 +347,39 @@ describe('DeepSeek adapter', () => {
       }),
     ).rejects.toThrow('некорректный');
   });
+  it('distinguishes malformed JSON from an invalid provider envelope without leaking text', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ choices: [] })),
+    );
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow('без ожидаемого варианта');
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { content: '{"content":"PRIVATE' },
+            },
+          ],
+        }),
+      ),
+    );
+    const error = await ai
+      .generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      })
+      .catch((reason: unknown) => reason);
+    expect(String(error)).toContain('некорректный JSON');
+    expect(String(error)).not.toContain('PRIVATE');
+  });
   it.each([401, 402, 403, 429, 500])(
     'sanitizes HTTP %s and never retries a paid operation',
     async (status) => {
