@@ -27,6 +27,11 @@ import type {
   CorrectionRow,
 } from './creation-model';
 import { articleDocumentMediaIds } from '../content/article-document';
+import { WorkspaceRole } from '../database/entities';
+import {
+  hasSitePermission,
+  SitePermission,
+} from '../content/content.permissions';
 
 export type CreationActor = NonNullable<AuthenticatedRequest['auth']>;
 
@@ -323,6 +328,10 @@ export class CreationService {
   }
   async details(w: string, a: CreationActor, id: string) {
     await this.access(w, a);
+    const [membership] = await this.db.query<Array<{ role: WorkspaceRole }>>(
+      'SELECT role FROM workspace_memberships WHERE workspace_id=$1 AND user_id=$2',
+      [w, a.userId],
+    );
     const article = await this.article(w, id);
     const settings = await this.settings(w);
     const siteIds = [
@@ -367,6 +376,11 @@ export class CreationService {
       ]);
     return {
       article,
+      canPublishDirectly: hasSitePermission(
+        a.platformRole,
+        membership?.role ?? null,
+        SitePermission.APPROVE,
+      ),
       version,
       versions,
       correction: correction[0] ?? null,

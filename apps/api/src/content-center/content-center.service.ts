@@ -10,7 +10,8 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { PlatformRole } from '../database/entities';
+import { WorkspaceRole } from '../database/entities';
+import { canAccessContentCenter } from './workspace-access';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import type {
   MaterialDto,
@@ -150,19 +151,31 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
   }
 
   async access(workspaceId: string, actor: Actor): Promise<string> {
-    const rows = await this.db.query<Array<{ full_name: string }>>(
+    const rows = await this.db.query<
+      Array<{
+        full_name: string;
+        role: WorkspaceRole | null;
+        site_ids: string[] | null;
+        workspace_site_ids: string[];
+      }>
+    >(
       `
-      SELECT u.full_name FROM workspaces w JOIN users u ON u.id = $2 AND u.is_active = true
-      WHERE w.id = $1 AND ($3::boolean OR EXISTS (
-        SELECT 1 FROM workspace_memberships m WHERE m.workspace_id = w.id AND m.user_id = u.id
-      ))`,
-      [
-        workspaceId,
-        actor.userId,
-        actor.platformRole === PlatformRole.WISPO_ADMIN,
-      ],
+      SELECT u.full_name, m.role, m.site_ids,
+        ARRAY(SELECT s.id FROM sites s WHERE s.workspace_id=w.id) AS workspace_site_ids
+      FROM workspaces w JOIN users u ON u.id = $2 AND u.is_active = true
+      LEFT JOIN workspace_memberships m ON m.workspace_id=w.id AND m.user_id=u.id
+      WHERE w.id = $1`,
+      [workspaceId, actor.userId],
     );
-    if (!rows[0])
+    const row = rows[0];
+    if (
+      !row ||
+      !canAccessContentCenter(
+        actor.platformRole,
+        row.role ? { role: row.role, siteIds: row.site_ids ?? [] } : null,
+        row.workspace_site_ids,
+      )
+    )
       throw new NotFoundException('Рабочее пространство недоступно');
     return rows[0].full_name;
   }

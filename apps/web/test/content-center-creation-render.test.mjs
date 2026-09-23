@@ -74,11 +74,12 @@ test("article exposes per-proposal decisions, unpublished current-version notice
     },
     changes: [],
   };
-  const html = renderToStaticMarkup(
+  const render = (canPublishDirectly) => renderToStaticMarkup(
     React.createElement(load("creation-article").CreationArticle, {
       base: "/api/test",
       parentBase: "/api/test",
       details: {
+        canPublishDirectly,
         article,
         version,
         versions: [],
@@ -106,6 +107,11 @@ test("article exposes per-proposal decisions, unpublished current-version notice
       onDirtyChange() {},
     }),
   );
+  const html = render(true);
+  const restricted = render(false);
+  assert.ok(!restricted.includes("Отправить в публикацию"));
+  assert.ok(!restricted.includes("Снять с публикации"));
+  assert.ok(restricted.includes("подтверждает владелец сайта"));
   for (const label of [
     "Есть изменения, не опубликованные на сайте",
     "Принять",

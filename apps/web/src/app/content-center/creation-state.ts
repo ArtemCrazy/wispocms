@@ -91,6 +91,7 @@ export type Overview = {
   ai: { connected: boolean; supportsFiles: boolean };
 };
 export type ArticleDetails = {
+  canPublishDirectly: boolean;
   article: CreatedArticle;
   version: Version;
   versions: Omit<Version, "snapshot" | "changes">[];

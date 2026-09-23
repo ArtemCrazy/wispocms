@@ -47,7 +47,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       extra: { options: `-c search_path=${schema}` },
     }).initialize();
     await db.query(
-      'CREATE TABLE workspaces(id uuid PRIMARY KEY); CREATE TABLE users(id uuid PRIMARY KEY,full_name varchar(160),is_active boolean); CREATE TABLE workspace_memberships(workspace_id uuid,user_id uuid);',
+      'CREATE TABLE workspaces(id uuid PRIMARY KEY); CREATE TABLE users(id uuid PRIMARY KEY,full_name varchar(160),is_active boolean); CREATE TABLE workspace_memberships(workspace_id uuid,user_id uuid,role text,site_ids uuid[]); CREATE TABLE sites(id uuid PRIMARY KEY,workspace_id uuid);',
     );
     const runner = db.createQueryRunner();
     try {
@@ -65,10 +65,14 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       "INSERT INTO users VALUES ($1,'Admin',true),($2,'Employee',true)",
       [admin.userId, employee.userId],
     );
-    await db.query('INSERT INTO workspace_memberships VALUES ($1,$2)', [
+    await db.query('INSERT INTO sites VALUES ($1,$1),($2,$2)', [
       workspace,
-      employee.userId,
+      other,
     ]);
+    await db.query(
+      "INSERT INTO workspace_memberships VALUES ($1,$2,'wispo_manager',ARRAY[$1::uuid])",
+      [workspace, employee.userId],
+    );
     access = new ContentCenterService(db, new PreparationAiService());
     service = new ResearchService(
       db,

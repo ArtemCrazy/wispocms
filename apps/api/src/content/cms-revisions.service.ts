@@ -247,6 +247,89 @@ export class CmsRevisionsService {
     return this.saveDraftInTransaction(db, input);
   }
 
+  /** Trusted publication adapter. Owner/admin intent is itself approval; never
+   * expose this as a generic route or let it overwrite an outstanding CMS draft.
+   * Caller must hold the article lock and include the live write in this transaction.
+   */
+  async recordOwnerPublicationUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      entityId: string;
+      snapshot: Record<string, unknown>;
+      previousSnapshot: Record<string, unknown> | null;
+      actor: RevisionActor;
+    },
+  ): Promise<void> {
+    await this.requireSite(input.siteId, input.actor, SitePermission.APPROVE);
+    await this.requireSite(
+      input.siteId,
+      input.actor,
+      SitePermission.PUBLISH_CONTENT,
+    );
+    let resource = await db.findOne(CmsRevisionResourceEntity, {
+      where: {
+        siteId: input.siteId,
+        resourceType: 'article',
+        entityId: input.entityId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (resource && resource.draftRevisionId !== resource.publishedRevisionId)
+      throw new ConflictException(
+        'В CMS уже есть отдельный черновик статьи. Завершите работу с ним перед публикацией из контент-центра.',
+      );
+    // Preserve the pre-integration public state in the new ledger as well.
+    if (!resource && input.previousSnapshot) {
+      const baseline = await this.saveDraftInTransaction(
+        db,
+        {
+          ...input,
+          snapshot: input.previousSnapshot,
+          resourceType: 'article',
+          expectedDraftRevisionId: null,
+        },
+        'baseline_imported',
+      );
+      resource = await this.lockedResource(
+        db,
+        input.siteId,
+        'article',
+        input.entityId,
+      );
+      Object.assign(resource, {
+        approvedRevisionId: baseline.id,
+        publishedRevisionId: baseline.id,
+        reviewState: 'approved',
+      });
+      await db.save(resource);
+    }
+    const next = await this.saveDraftInTransaction(db, {
+      ...input,
+      resourceType: 'article',
+      expectedDraftRevisionId: resource?.draftRevisionId ?? null,
+    });
+    resource = await this.lockedResource(
+      db,
+      input.siteId,
+      'article',
+      input.entityId,
+    );
+    Object.assign(resource, submitRevision(this.pointers(resource), next.id));
+    Object.assign(resource, approveRevision(this.pointers(resource), next.id));
+    await this.event(
+      db,
+      resource.id,
+      next.id,
+      'approved',
+      input.actor.userId,
+      'Публикация владельцем или администратором из контент-центра',
+    );
+    Object.assign(resource, publishRevision(this.pointers(resource), next.id));
+    await db.save(resource);
+    await this.event(db, resource.id, next.id, 'published', input.actor.userId);
+  }
+
   /**
    * Trusted adapter only: call after verifying that the supplied snapshot is
    * exactly what the public site currently renders. Never expose as an API route.

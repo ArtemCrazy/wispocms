@@ -19,6 +19,8 @@ import {
 } from '../database/entities';
 import { articleDocumentText } from '../content/article-document';
 import { ContentLifecycleService } from '../content/content-lifecycle.service';
+import { CmsRevisionsService } from '../content/cms-revisions.service';
+import { SitePermission } from '../content/content.permissions';
 import { CreationService } from './creation.service';
 import type { CreationActor } from './creation.service';
 import type { PublishCreatedArticleDto } from './creation.dto';
@@ -28,6 +30,7 @@ export class CreationPublicationService {
   constructor(
     private readonly service: CreationService,
     private readonly lifecycle: ContentLifecycleService,
+    private readonly revisions: CmsRevisionsService,
   ) {}
   private async hide(
     m: EntityManager,
@@ -40,6 +43,7 @@ export class CreationPublicationService {
     cms.revision++;
     cms.updatedByUserId = actor.userId;
     await m.save(cms);
+    await this.recordPublication(m, before, cms, actor);
     await this.lifecycle.recordArticleChange(
       before,
       cms,
@@ -61,6 +65,11 @@ export class CreationPublicationService {
     dto: PublishCreatedArticleDto,
   ) {
     return this.service.transaction(w, a, async (m, name) => {
+      await this.revisions.assertSitePermission(
+        dto.siteId,
+        a,
+        SitePermission.APPROVE,
+      );
       const item = await this.service.article(w, id, m);
       this.service.revision(item, dto.revision);
       const moving = dto.siteId !== item.site_id;
@@ -191,6 +200,7 @@ export class CreationPublicationService {
         revision: cms.revision + 1,
       });
       const saved = await m.save(cms);
+      await this.recordPublication(m, before, saved, a);
       await this.lifecycle.recordArticleChange(
         before,
         saved,
@@ -247,6 +257,11 @@ export class CreationPublicationService {
   async unpublish(w: string, a: CreationActor, id: string, revision: number) {
     return this.service.transaction(w, a, async (m, name) => {
       const item = await this.service.article(w, id, m);
+      await this.revisions.assertSitePermission(
+        item.site_id,
+        a,
+        SitePermission.APPROVE,
+      );
       this.service.revision(item, revision);
       if (item.status !== 'published' || !item.cms_article_id)
         throw new BadRequestException('Статья не опубликована');
@@ -281,6 +296,27 @@ export class CreationPublicationService {
         null,
       );
       return { ok: true };
+    });
+  }
+
+  private async recordPublication(
+    m: EntityManager,
+    before: ArticleEntity | null,
+    after: ArticleEntity,
+    actor: CreationActor,
+  ) {
+    await this.revisions.recordOwnerPublicationUsingManager(m, {
+      siteId: after.siteId,
+      entityId: after.id,
+      snapshot: JSON.parse(
+        JSON.stringify(this.lifecycle.articleSnapshot(after)),
+      ) as Record<string, unknown>,
+      previousSnapshot: before
+        ? (JSON.parse(
+            JSON.stringify(this.lifecycle.articleSnapshot(before)),
+          ) as Record<string, unknown>)
+        : null,
+      actor,
     });
   }
 }

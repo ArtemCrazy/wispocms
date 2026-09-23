@@ -173,6 +173,7 @@ describe('AuthService workspace access', () => {
     const session = await service.getSession('owner-id');
     expect(session.workspaces).toHaveLength(1);
     expect(session.workspaces[0].role).toBe('site_owner');
+    expect(session.workspaces[0].canUseContentCenter).toBe(false);
     expect(session.workspaces[0].sites.map((site) => site.id)).toEqual([
       'site-a',
     ]);

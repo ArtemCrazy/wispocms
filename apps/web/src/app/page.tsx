@@ -55,6 +55,7 @@ type SessionData = {
     name: string;
     slug: string;
     role: string | null;
+    canUseContentCenter: boolean;
     members: Array<{
       id: string;
       fullName: string;
@@ -354,7 +355,7 @@ function Dashboard({
       }
       if (view === "content-center") {
         const workspaceId = url.searchParams.get("workspace");
-        if (session.workspaces.some((item) => item.id === workspaceId)) {
+        if (session.workspaces.some((item) => item.id === workspaceId && item.canUseContentCenter)) {
           setSelectedWorkspaceId(workspaceId);
           setSelectedSiteId(null);
           setActiveView("content-center");
@@ -1467,6 +1468,7 @@ function Dashboard({
                             Сайтов пока нет
                           </p>
                         ) : null}
+                        {workspaceItem.canUseContentCenter && <>
                         <div className="workspace-tools-divider" aria-hidden="true" />
                         <button
                           className={`nav-item workspace-site-item ${contentCenterOpen && contentCenterScreen === "root" ? "active" : ""}`}
@@ -1494,6 +1496,7 @@ function Dashboard({
                             ))}
                           </div>
                         )}
+                        </>}
                       </div>
                     </div>
                   </section>
@@ -1909,7 +1912,7 @@ function Dashboard({
             onChanged={onSessionRefresh}
             canCreateSite={hasWorkspaceAccess}
           />
-        ) : activeView === "content-center" && workspace ? (
+        ) : activeView === "content-center" && workspace?.canUseContentCenter ? (
           <ContentCenterView
             key={workspace.id}
             workspaceId={workspace.id}

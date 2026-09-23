@@ -40,6 +40,7 @@ import request from 'supertest';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import { ContentCenterController } from './content-center.controller';
+import { YoutubeWhisperService } from './youtube-whisper.service';
 import { MaterialUploadGuard } from './material-upload.guard';
 import * as publicMaterial from './public-material';
 import { DataSource } from 'typeorm';
@@ -90,7 +91,7 @@ integration('Content Center / isolated PostgreSQL', () => {
     });
     await db.initialize();
     await db.query(
-      `CREATE TABLE workspaces(id uuid PRIMARY KEY); CREATE TABLE users(id uuid PRIMARY KEY, full_name varchar(160), is_active boolean); CREATE TABLE workspace_memberships(workspace_id uuid,user_id uuid);`,
+      `CREATE TABLE workspaces(id uuid PRIMARY KEY); CREATE TABLE users(id uuid PRIMARY KEY, full_name varchar(160), is_active boolean); CREATE TABLE workspace_memberships(workspace_id uuid,user_id uuid,role text,site_ids uuid[]); CREATE TABLE sites(id uuid PRIMARY KEY,workspace_id uuid);`,
     );
     const runner = db.createQueryRunner();
     try {
@@ -115,10 +116,14 @@ integration('Content Center / isolated PostgreSQL', () => {
       `INSERT INTO users VALUES ($1,'Администратор',true),($2,'Сотрудник',true)`,
       [admin.userId, employee.userId],
     );
-    await db.query(`INSERT INTO workspace_memberships VALUES ($1,$2)`, [
+    await db.query('INSERT INTO sites VALUES ($1,$1),($2,$2)', [
       workspace,
-      employee.userId,
+      otherWorkspace,
     ]);
+    await db.query(
+      `INSERT INTO workspace_memberships VALUES ($1,$2,'wispo_manager',ARRAY[$1::uuid])`,
+      [workspace, employee.userId],
+    );
     service = new ContentCenterService(
       db,
       new PreparationAiService({
@@ -1265,7 +1270,10 @@ integration('Content Center / isolated PostgreSQL', () => {
       prompt_title: 'Анализ компании',
       instruction: task.instruction,
     });
-    expect(generate.mock.calls[0][0].instruction).toBe(task.instruction);
+    expect(generate.mock.calls[0][0].instruction).toContain(task.instruction);
+    expect(generate.mock.calls[0][0].instruction).toContain(
+      'АРХИВНАЯ ПУБЛИКАЦИЯ',
+    );
     await service.start(workspace, employee, {
       ...task,
       promptTitle: 'Другой запрос',
@@ -1470,7 +1478,7 @@ integration('Content Center / isolated PostgreSQL', () => {
     expect(generate).toHaveBeenCalledTimes(1);
   });
 
-  it('migrates only exact generic starter texts once; retains private legacy data', async () => {
+  it('does not promote rewritten starter prompts or private legacy data through the old hash allowlist', async () => {
     const code = readFileSync(
       resolve(__dirname, '../../../../deploy/seed-content-center-prompts.cjs'),
       'utf8',
@@ -1503,12 +1511,12 @@ integration('Content Center / isolated PostgreSQL', () => {
       await runner.release();
     }
     const shared = await new PlatformPromptsService(db).list();
-    expect(shared.map(({ title, content }) => ({ title, content }))).toEqual(
-      prompts,
-    );
+    // The current seed texts have changed since this immutable migration.
+    // Matching titles alone must never promote their content across workspaces.
+    expect(shared).toEqual([]);
     expect(
       await db.query('SELECT count(*)::int AS total FROM cc_prompts'),
-    ).toEqual([{ total: 13 }]);
+    ).toEqual([{ total: prompts.length * 2 + 1 }]);
     expect(shared.some((p) => p.content.includes('Private changed'))).toBe(
       false,
     );
@@ -1565,6 +1573,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       controllers: [ContentCenterController],
       providers: [
         { provide: ContentCenterService, useValue: service },
+        { provide: YoutubeWhisperService, useValue: {} },
         MaterialUploadGuard,
       ],
     })
@@ -2101,7 +2110,10 @@ integration('Content Center / isolated PostgreSQL', () => {
     );
     const module = await Test.createTestingModule({
       controllers: [ContentCenterController],
-      providers: [{ provide: ContentCenterService, useValue: offline }],
+      providers: [
+        { provide: ContentCenterService, useValue: offline },
+        { provide: YoutubeWhisperService, useValue: {} },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({
@@ -2525,7 +2537,7 @@ integration('Content Center / isolated PostgreSQL', () => {
       withoutMaterials: true,
     });
     await service.processNext();
-    expect(generate.mock.calls[1][0].instruction).toBe(
+    expect(generate.mock.calls[1][0].instruction).toContain(
       'Используй только это сообщение',
     );
     expect(generate.mock.calls[1][0].context).toEqual({

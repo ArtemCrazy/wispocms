@@ -17,6 +17,7 @@ import {
   WorkspaceMembershipEntity,
 } from '../database/entities';
 import { SlidingWindowRateLimiter } from '../common/sliding-window-rate-limiter';
+import { canAccessContentCenter } from '../content-center/workspace-access';
 import {
   hasSitePermission,
   SitePermission,
@@ -128,6 +129,15 @@ export class AuthService {
         id: workspace.id,
         name: workspace.name,
         slug: workspace.slug,
+        canUseContentCenter: canAccessContentCenter(
+          user.platformRole,
+          ownMemberships.find(
+            (membership) => membership.workspaceId === workspace.id,
+          ),
+          sites
+            .filter((site) => site.workspaceId === workspace.id)
+            .map((site) => site.id),
+        ),
         role:
           ownMemberships.find(
             (membership) => membership.workspaceId === workspace.id,

@@ -343,6 +343,7 @@ export function CreationArticle({
               {article.rationale}
             </p>
             <div className={styles.actions}>
+              {details.canPublishDirectly ? <>
               <button
                 className={styles.primary}
                 disabled={busy}
@@ -355,6 +356,7 @@ export function CreationArticle({
                   Снять с публикации
                 </button>
               )}
+              </> : <p className={styles.muted}>Публикацию этой версии подтверждает владелец сайта или администратор Wispo.</p>}
               {article.publication_url && (
                 <a
                   className={styles.download}

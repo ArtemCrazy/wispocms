@@ -96,8 +96,71 @@ describe('CMS revision storage', () => {
       sites as never,
       memberships as never,
     );
-    return { service, resources, revisions, events };
+    return { service, resources, revisions, events, db };
   }
+
+  it('records owner publication atomically and preserves the prior baseline', async () => {
+    const { service, db, revisions, events, resources } = setup();
+    const input = {
+      siteId: 'site-1',
+      entityId: 'article-1',
+      actor: owner,
+      previousSnapshot: { title: 'Old' },
+      snapshot: { title: 'New' },
+    };
+    await service.recordOwnerPublicationUsingManager(db as never, input);
+    expect(revisions.map((revision) => revision.snapshot)).toEqual([
+      { title: 'Old' },
+      { title: 'New' },
+    ]);
+    expect(resources[0].draftRevisionId).toBe(resources[0].publishedRevisionId);
+    expect(resources[0].approvedRevisionId).toBe(
+      resources[0].publishedRevisionId,
+    );
+    expect(events.map((event) => event.eventType)).toContain('approved');
+    expect(
+      await service.published('site-1', 'article', 'article-1', owner),
+    ).toEqual({ title: 'New' });
+  });
+
+  it('prevents employees and outsiders from bypassing approval through direct publication', async () => {
+    const { service, db, revisions } = setup();
+    for (const actor of [manager, outsider]) {
+      await expect(
+        service.recordOwnerPublicationUsingManager(db as never, {
+          siteId: 'site-1',
+          entityId: 'article-1',
+          actor,
+          previousSnapshot: null,
+          snapshot: { title: 'Unapproved' },
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    }
+    expect(revisions).toHaveLength(0);
+  });
+
+  it('never overwrites an outstanding CMS draft, even for the owner', async () => {
+    const { service, db, revisions } = setup();
+    await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-1',
+      actor: manager,
+      expectedDraftRevisionId: null,
+      snapshot: { title: 'Work in progress' },
+    });
+    await expect(
+      service.recordOwnerPublicationUsingManager(db as never, {
+        siteId: 'site-1',
+        entityId: 'article-1',
+        actor: owner,
+        previousSnapshot: null,
+        snapshot: { title: 'Replacement' },
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(revisions).toHaveLength(1);
+    expect(revisions[0].snapshot).toEqual({ title: 'Work in progress' });
+  });
 
   it('keeps the published snapshot while a newer draft is reviewed', async () => {
     const { service } = setup();

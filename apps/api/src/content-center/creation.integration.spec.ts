@@ -26,6 +26,7 @@ import { CreationRunsService } from './creation-runs.service';
 import { CreationAiService } from './creation-ai.service';
 import type { CreationProvider } from './creation-ai.service';
 import { CreationPublicationService } from './creation-publication.service';
+import { CmsRevisionsService } from '../content/cms-revisions.service';
 import type { ClusterDto } from './creation.dto';
 import type {
   CreatedArticle,
@@ -106,8 +107,8 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         [workspace, other],
       );
       await db.query(
-        "INSERT INTO workspace_memberships(user_id,workspace_id,role) VALUES($1,$2,'editor')",
-        [actor.userId, workspace],
+        "INSERT INTO workspace_memberships(user_id,workspace_id,role,site_ids) VALUES($1,$2,'site_owner',$3)",
+        [actor.userId, workspace, [site, site2]],
       );
       await db.query(
         "INSERT INTO sites(id,workspace_id,name,slug,site_type) VALUES($1,$2,'Media','creation-media','media'),($3,$2,'Second','creation-second','media'),($4,$5,'Foreign','creation-foreign','media')",
@@ -144,7 +145,15 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         db.getRepository(SiteContentTemplateEntity),
         db.getRepository(ArticleSectionSettingsEntity),
       );
-      publication = new CreationPublicationService(service, lifecycle);
+      publication = new CreationPublicationService(
+        service,
+        lifecycle,
+        new CmsRevisionsService(
+          db,
+          db.getRepository(SiteEntity),
+          db.getRepository(WorkspaceMembershipEntity),
+        ),
+      );
     });
     afterAll(async () => {
       await db?.destroy();
@@ -176,6 +185,79 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         platforms: [{ siteId: site, rules: 'Обращение на вы' }],
       });
     });
+    it('denies shared materials to partial site grants and direct publication to employees', async () => {
+      const { article } = await create();
+      try {
+        await db.query(
+          'UPDATE workspace_memberships SET site_ids=$1 WHERE user_id=$2',
+          [[site], actor.userId],
+        );
+        await expect(
+          service.details(workspace, actor, article.id),
+        ).rejects.toThrow('недоступно');
+        await db.query(
+          "UPDATE workspace_memberships SET role='wispo_manager',site_ids=$1 WHERE user_id=$2",
+          [[site, site2], actor.userId],
+        );
+        expect(
+          (await service.details(workspace, actor, article.id))
+            .canPublishDirectly,
+        ).toBe(false);
+        await expect(
+          publication.publish(workspace, actor, article.id, publishDto(1)),
+        ).rejects.toThrow('прав');
+        expect(await db.getRepository(ArticleEntity).count()).toBe(0);
+      } finally {
+        await db.query(
+          "UPDATE workspace_memberships SET role='site_owner',site_ids=$1 WHERE user_id=$2",
+          [[site, site2], actor.userId],
+        );
+      }
+    });
+
+    it('records direct owner publication in the CMS ledger and preserves a concurrent CMS draft', async () => {
+      const { article } = await create();
+      await publication.publish(workspace, actor, article.id, publishDto(1));
+      const details = await service.details(workspace, actor, article.id);
+      const cmsId = details.article.cms_article_id!;
+      const revisions = new CmsRevisionsService(
+        db,
+        db.getRepository(SiteEntity),
+        db.getRepository(WorkspaceMembershipEntity),
+      );
+      const current = await revisions.current(site, 'article', cmsId, actor);
+      expect(current!.draft!.id).toBe(current!.publishedRevisionId);
+      const pending = await revisions.saveDraft({
+        siteId: site,
+        resourceType: 'article',
+        entityId: cmsId,
+        actor,
+        expectedDraftRevisionId: current!.draft!.id,
+        snapshot: {
+          ...current!.draft!.snapshot,
+          title: 'CMS draft not to overwrite',
+        },
+      });
+      await expect(
+        publication.unpublish(
+          workspace,
+          actor,
+          article.id,
+          details.article.revision,
+        ),
+      ).rejects.toThrow('черновик');
+      expect(
+        (await service.details(workspace, actor, article.id)).article.status,
+      ).toBe('published');
+      expect(
+        (await db.getRepository(ArticleEntity).findOneByOrFail({ id: cmsId }))
+          .publicationState,
+      ).toBe('published');
+      expect(
+        (await revisions.current(site, 'article', cmsId, actor))!.draft!.id,
+      ).toBe(pending.id);
+    });
+
     async function create() {
       const cluster = await service.saveCluster(workspace, actor, clusterDto());
       await runs.start(workspace, actor, {

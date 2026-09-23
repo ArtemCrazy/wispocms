@@ -86,6 +86,10 @@ import { ContentMetadataRevisionsService } from './content-metadata-revisions.se
     CodeResourcesService,
     ContentMetadataRevisionsService,
   ],
-  exports: [ContentLifecycleService, SiteResourceRevisionsService],
+  exports: [
+    ContentLifecycleService,
+    SiteResourceRevisionsService,
+    CmsRevisionsService,
+  ],
 })
 export class ContentModule {}
