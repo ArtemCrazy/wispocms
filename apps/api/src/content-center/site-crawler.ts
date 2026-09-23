@@ -21,6 +21,7 @@ export type SitePage = {
   content?: string;
   error?: string;
   checkedAt?: string;
+  publishedAt?: string;
   hash?: string;
   duplicateOf?: string;
   reason?: string;

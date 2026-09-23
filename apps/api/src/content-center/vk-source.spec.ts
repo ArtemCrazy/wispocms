@@ -125,7 +125,7 @@ describe('customer VK collection', () => {
       'некорректную',
     );
   });
-  it('keeps dated original texts and old pinned posts, excludes reposts, media-only posts and duplicates', async () => {
+  it('includes old own posts as dated archives, but excludes reposts, media-only posts and duplicates', async () => {
     const client = new VkSourceClient();
     const old = now.getTime() / 1000 - 200 * 86400;
     const posts = jest.spyOn(client, 'posts').mockResolvedValue({
@@ -149,10 +149,17 @@ describe('customer VK collection', () => {
       'found',
       'found',
       'found',
+      'loaded',
     ]);
     expect(result.pages[2].content).toContain('Вложения не прочитаны');
     expect(result.pages[1].content).toContain('Это дата сообщения');
-    expect(result.pages.filter((p) => p.recommended).length).toBe(3);
+    expect(result.pages[1].content).toContain('АРХИВНАЯ ПУБЛИКАЦИЯ');
+    expect(result.pages[7].content).toContain('АРХИВНАЯ ПУБЛИКАЦИЯ');
+    expect(result.pages[7].publishedAt).toBe(
+      new Date(old * 1000).toISOString(),
+    );
+    expect(result.pages.slice(1).every((page) => page.publishedAt)).toBe(true);
+    expect(result.pages.filter((p) => p.recommended).length).toBe(4);
     expect(posts).toHaveBeenCalledTimes(1);
   });
   it('paginates to the explicit cap and discloses incomplete coverage', async () => {
@@ -166,9 +173,10 @@ describe('customer VK collection', () => {
         }),
       );
     const result = await client.collect('key', group, signal(), now);
-    expect(posts.mock.calls.map((c) => c[2])).toEqual([0, 100, 200, 300, 400]);
-    expect(result.pages).toHaveLength(501);
-    expect(result.warnings.join(' ')).toContain('первые 500');
+    expect(posts.mock.calls.map((c) => c[2])).toEqual([0, 100]);
+    expect(result.pages).toHaveLength(201);
+    expect(result.warnings.join(' ')).toContain('первые 200');
+    expect(result.warnings.join(' ')).toContain('не менее 500');
   });
   it('preserves partial data on VK errors but respects cancellation', async () => {
     const client = new VkSourceClient();

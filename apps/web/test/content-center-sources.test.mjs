@@ -66,6 +66,23 @@ test('coverage distinguishes page statuses without exposing internal source iden
   assert.doesNotMatch(html, /<pre/);
 });
 
+test('VK collection shows received count and exclusion reasons', () => {
+  const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [{
+    sourceId: 'S1', title: 'VK', sourceUrl: 'https://vk.com/crazystudio', mode: 'social-feed',
+    checkedAt: '2026-09-23T12:00:00Z', warnings: ['Проверены первые 200 записей. За пределами лимита осталось не менее 30 более ранних записей.'],
+    pages: [
+      { title: 'О сообществе', group: 'О сообществе', url: 'https://vk.com/club77', status: 'loaded' },
+      { title: 'Пост', group: 'Публикации VK', url: 'https://vk.com/wall-77_1', status: 'loaded', publishedAt: '2025-03-21T00:00:00Z' },
+      { title: 'Репост', group: 'Публикации VK', url: 'https://vk.com/wall-77_2', status: 'found', reason: 'Репост или запись другого автора — не включены' },
+      { title: 'Вложение', group: 'Публикации VK', url: 'https://vk.com/wall-77_3', status: 'found', reason: 'Только вложения: текст отсутствует' },
+      { title: 'Повтор', group: 'Публикации VK', url: 'https://vk.com/wall-77_4', status: 'duplicate', reason: 'Повтор текста другой публикации' },
+    ],
+  }] }));
+  assert.match(html, /Получено записей: 4 · включено: 1 · не включено: 3/);
+  assert.match(html, /репосты и чужие записи — 1, без текста — 1, повторы — 1/);
+  assert.match(html, /За пределами лимита осталось не менее 30/);
+});
+
 test('source cards always remain open, including when a generation contains several sources', () => {
   const source = { title: 'Источник', checkedAt: '2026-09-19T12:00:00Z', warnings: [], pages: [] };
   const html = renderToStaticMarkup(React.createElement(target.exports.SourceRegistry, { sources: [

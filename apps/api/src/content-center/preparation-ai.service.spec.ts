@@ -40,6 +40,7 @@ describe('provider-neutral preparation', () => {
     ];
     expect(called[0].instruction).toMatch(/^Подготовь документ/);
     expect(called[0].instruction).toContain('не добавляй ссылки на источники');
+    expect(called[0].instruction).toContain('АРХИВНАЯ ПУБЛИКАЦИЯ');
     expect(called[0].instruction).not.toContain('Указывай источники');
     expect(called[0].context).toEqual(context);
     expect(called[0].signal).toBeInstanceOf(AbortSignal);
@@ -196,6 +197,16 @@ describe('provider-neutral preparation', () => {
     expect(
       extractions.every(([request]) =>
         request.instruction.includes('сохрани исходные идентификаторы [S…]'),
+      ),
+    ).toBe(true);
+    expect(
+      extractions.every(([request]) =>
+        request.instruction.includes('АРХИВНАЯ ПУБЛИКАЦИЯ'),
+      ),
+    ).toBe(true);
+    expect(
+      reviews.every(([request]) =>
+        request.instruction.includes('АРХИВНАЯ ПУБЛИКАЦИЯ'),
       ),
     ).toBe(true);
     expect(generate.mock.calls.at(-1)![0].instruction).toContain(

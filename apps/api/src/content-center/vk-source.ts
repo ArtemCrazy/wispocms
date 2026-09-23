@@ -10,8 +10,8 @@ const VK_HOSTS = new Set([
   'www.vk.ru',
   'm.vk.ru',
 ]);
-export const VK_POST_LIMIT = 500;
-export const VK_PERIOD_DAYS = 180;
+export const VK_POST_LIMIT = 200;
+export const VK_ARCHIVE_DAYS = 180;
 
 export function isVkUrl(value: string | null | undefined): boolean {
   try {
@@ -236,7 +236,7 @@ export class VkSourceClient {
     signal: AbortSignal,
     now = new Date(),
   ): Promise<{ pages: SitePage[]; warnings: string[] }> {
-    const cutoff = now.getTime() - VK_PERIOD_DAYS * 86_400_000;
+    const archiveBefore = now.getTime() - VK_ARCHIVE_DAYS * 86_400_000;
     const pages: SitePage[] = [
       {
         url: `https://vk.com/club${community.id}`,
@@ -257,26 +257,24 @@ export class VkSourceClient {
       },
     ];
     const warnings = [
-      `Текстовые публикации сообщества за последние ${VK_PERIOD_DAYS} дней и закреплённое сообщение. До ${VK_POST_LIMIT} записей за сбор. Комментарии, личные сообщения, изображения и содержимое видео не анализировались.`,
+      `До ${VK_POST_LIMIT} последних доступных записей стены без ограничения по дате. В AI передаются только собственные неповторяющиеся тексты; публикации старше ${VK_ARCHIVE_DAYS} дней помечены архивными. Комментарии, личные сообщения, изображения и содержимое видео не анализировались.`,
     ];
     const seen = new Set<number>();
     const texts = new Set<string>();
     let chars = pages[0].content!.length;
+    let totalCount = 0;
     try {
       for (let offset = 0; offset < VK_POST_LIMIT; offset += 100) {
         await delay(400, undefined, { signal });
         const batch = await this.posts(token, community.id, offset, signal);
-        let reachedPeriod = false;
+        totalCount = batch.count;
         for (const post of batch.items) {
           if (seen.has(post.id)) continue;
           seen.add(post.id);
           const date = new Date(post.date * 1000);
           if (!Number.isFinite(date.getTime()))
             throw new VkSourceError('В публикации VK некорректная дата.');
-          if (!post.is_pinned && date.getTime() < cutoff) {
-            reachedPeriod = true;
-            continue;
-          }
+          const archived = date.getTime() < archiveBefore;
           const content = post.text.trim();
           const owned =
             post.from_id === -community.id && !post.copy_history?.length;
@@ -292,15 +290,16 @@ export class VkSourceClient {
           if (recommended) texts.add(content);
           pages.push({
             url: `https://vk.com/wall-${community.id}_${post.id}`,
-            title: `${post.is_pinned ? 'Закреплённое · ' : ''}${date.toLocaleDateString('ru-RU', { timeZone: 'UTC' })} · ${content.slice(0, 90).replace(/\s+/g, ' ') || 'Публикация без текста'}`,
+            title: `${post.is_pinned ? 'Закреплённое · ' : ''}${archived ? 'Архив · ' : ''}${date.toLocaleDateString('ru-RU', { timeZone: 'UTC' })} · ${content.slice(0, 90).replace(/\s+/g, ' ') || 'Публикация без текста'}`,
             group: 'Публикации VK',
             recommended,
             status:
               !owned || !content ? 'found' : duplicate ? 'duplicate' : 'loaded',
             checkedAt: now.toISOString(),
+            publishedAt: date.toISOString(),
             content:
               owned && content
-                ? `Дата публикации: ${date.toISOString()}. Это дата сообщения, не подтверждение актуальности предложения.\n\n${content}${post.attachments?.length ? '\n\nВложения не прочитаны.' : ''}`
+                ? `${archived ? 'АРХИВНАЯ ПУБЛИКАЦИЯ. Это исторический материал: цены, предложения и условия нельзя считать действующими без нового подтверждения.\n' : ''}Дата публикации: ${date.toISOString()}. Это дата сообщения, не подтверждение актуальности предложения.\n\n${content}${post.attachments?.length ? '\n\nВложения не прочитаны.' : ''}`
                 : undefined,
             reason: !owned
               ? 'Репост или запись другого автора — не включены'
@@ -308,18 +307,19 @@ export class VkSourceClient {
                 ? 'Только вложения: текст отсутствует'
                 : duplicate
                   ? 'Повтор текста другой публикации'
-                  : 'Собственная текстовая публикация в выбранном периоде; актуальность условий нужно проверять по дате',
+                  : archived
+                    ? 'Собственная текстовая публикация; архив, условия требуют свежего подтверждения'
+                    : 'Собственная текстовая публикация; актуальность условий нужно проверять по дате',
           });
         }
         if (
-          reachedPeriod ||
           batch.items.length < 100 ||
           offset + batch.items.length >= batch.count
         )
           return { pages, warnings };
       }
       warnings.push(
-        `Проверены первые ${VK_POST_LIMIT} записей. Более старые публикации могли остаться за пределами выборки.`,
+        `Проверены первые ${VK_POST_LIMIT} записей. За пределами лимита осталось не менее ${Math.max(0, totalCount - VK_POST_LIMIT)} более ранних записей.`,
       );
     } catch (error) {
       signal.throwIfAborted();

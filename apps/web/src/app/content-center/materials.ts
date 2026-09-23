@@ -70,6 +70,7 @@ export type GoogleMapCard = Omit<YandexMapCard, "provider"> & {
 };
 export type MapCard = YandexMapCard | TwoGisMapCard | GoogleMapCard;
 export type SourceSnapshot = {
+  sourceUrl?: string | null;
   mode?:
     | "main-pages"
     | "single-page"
@@ -100,6 +101,9 @@ export type SourceSnapshot = {
   pages: Array<{
     url: string;
     title: string;
+    group?: string;
+    recommended?: boolean;
+    publishedAt?: string;
     status: "found" | "loaded" | "failed" | "duplicate" | "pending";
     content?: string;
     error?: string;

@@ -172,6 +172,17 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
         const hintOpen = Boolean(openHints[source.sourceId]);
         const panelId = `${hintId}-${source.sourceId}`;
         const selectionEntries = sourceSelectionEntries(source.pages);
+        const vk = social && /^https:\/\/(?:www\.|m\.)?vk\.(?:com|ru)\//i.test(source.sourceUrl ?? "");
+        const vkPosts = vk
+          ? source.pages.filter((page) => page.group === "Публикации VK" && page.status !== "failed")
+          : [];
+        const vkIncluded = vkPosts.filter((page) => page.status === "loaded").length;
+        const vkExcluded = vkPosts.length - vkIncluded;
+        const vkReposts = vkPosts.filter((page) => page.reason?.startsWith("Репост или запись другого автора")).length;
+        const vkWithoutText = vkPosts.filter((page) => page.reason?.startsWith("Только вложения")).length;
+        const vkDuplicates = vkPosts.filter((page) => page.status === "duplicate").length;
+        const vkOther = vkExcluded - vkReposts - vkWithoutText - vkDuplicates;
+        const vkLimitWarning = vk ? source.warnings.find((warning) => warning.startsWith("Проверены первые")) : undefined;
         return (
           <section className={styles.sourceCard} key={source.sourceId}>
             <header className={styles.sourceHeading}>
@@ -222,6 +233,20 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
             </header>
             <div className={styles.sourceBody}>
               {source.map && <MapCardSummary card={source.map} />}
+              {vk && (
+                <p className={styles.sourceFilterCount}>
+                  Получено записей: {vkPosts.length} · включено: {vkIncluded} · не включено: {vkExcluded}
+                  {vkExcluded > 0 && (
+                    <>. Причины: {[
+                      vkReposts > 0 && `репосты и чужие записи — ${vkReposts}`,
+                      vkWithoutText > 0 && `без текста — ${vkWithoutText}`,
+                      vkDuplicates > 0 && `повторы — ${vkDuplicates}`,
+                      vkOther > 0 && `другое — ${vkOther}`,
+                    ].filter(Boolean).join(", ")}.</>
+                  )}
+                  {vkLimitWarning && <> {vkLimitWarning}</>}
+                </p>
+              )}
               <div className={styles.sourceToolbar}>
                 <div
                   className={styles.sourceFilters}
@@ -269,7 +294,8 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                         Здесь описание источника и полученные публикации.
                         «Включено» — собственный текст для обработки; «Не
                         включено» — репосты и записи без текста. Вложения не
-                        прочитаны.
+                        прочитаны. {vk &&
+                          "В новых сборах VK даты постов сохранены, старые записи отмечены как архивные."}
                       </p>
                     ) : map ? (
                       <p>
@@ -339,7 +365,9 @@ export function SourceRegistry({ sources }: { sources: SourceSnapshot[] }) {
                       <p>
                         В этом снимке нет сохранённых решений AI. Ниже — данные
                         {social
-                          ? "сбора VK по правилам периода, авторства и наличия текста."
+                          ? vk
+                            ? "сбора VK по правилам авторства и наличия текста, без ограничения по дате."
+                            : "сбора социальной сети."
                           : map
                             ? `публичной карточки ${mapProviderLabel} без API и входа.`
                             : "сбора сайта."}

@@ -69,7 +69,8 @@ test('VK waits only for common-key readiness and has no manual connection step',
   const html = render({ kind: 'url', url_category: 'social', source_url: 'https://vk.com/club77', site_pages: null });
   assert.match(html, /ВКонтакте/);
   assert.doesNotMatch(html, /Подключить сообщество|type="checkbox"/);
-  assert.match(html, /180 дней/);
+  assert.match(html, /200 последних доступных публикаций без ограничения по дате/);
+  assert.match(html, /архивные/);
   assert.match(html, /disabled="">Обновить сбор/);
   assert.match(html, /Проверяем настройки VK/);
 });
