@@ -21,6 +21,8 @@ const TWO_GIS_HOSTS = new Set([
 ]);
 const FIRM_PATH =
   /^\/[^/]+\/firm\/\d+(?:\/tab\/(?:info|reviews|prices|questions))?\/?$/i;
+const SEARCH_FIRM_PATH =
+  /^\/([^/]+)\/search\/[^/]+\/firm\/(\d+)(?:\/tab\/(?:info|reviews|prices|questions))?\/?$/i;
 const TWO_GIS_COLLECTION_LIMIT = 90_000;
 const TWO_GIS_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
@@ -88,7 +90,7 @@ function isTwoGisHost(hostname: string): boolean {
 }
 
 function isTwoGisPagePath(pathname: string): boolean {
-  return FIRM_PATH.test(pathname);
+  return FIRM_PATH.test(pathname) || SEARCH_FIRM_PATH.test(pathname);
 }
 
 export function is2GisMapsUrl(value: string | null | undefined): boolean {
@@ -110,6 +112,8 @@ export function twoGisMapsAddress(value: string): string {
     throw new BadRequestException(
       'Укажите публичную HTTPS-ссылку на карточку организации в 2ГИС',
     );
+  const searchFirm = SEARCH_FIRM_PATH.exec(url.pathname);
+  if (searchFirm) url.pathname = `/${searchFirm[1]}/firm/${searchFirm[2]}`;
   url.search = '';
   url.hash = '';
   return url.href;

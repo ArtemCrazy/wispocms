@@ -132,10 +132,50 @@ describe('TwoGisMapSourceClient', () => {
     ).toBe(true);
     expect(is2GisMapsUrl('https://2gis.ru/khimki/search/студия')).toBe(false);
     expect(
+      is2GisMapsUrl(
+        'https://2gis.ru/khimki/search/Crazy%20Studio/firm/70000001080050161',
+      ),
+    ).toBe(true);
+    expect(
+      is2GisMapsUrl('https://2gis.ru/khimki/search/Crazy/firm/not-a-number'),
+    ).toBe(false);
+    expect(
       twoGisMapsAddress(
         'https://2gis.ru/khimki/firm/70000001080050161?utm_source=x',
       ),
     ).toBe('https://2gis.ru/khimki/firm/70000001080050161');
+    expect(
+      twoGisMapsAddress(
+        'https://2gis.ru/khimki/search/Crazy%20Studio/firm/70000001080050161',
+      ),
+    ).toBe('https://2gis.ru/khimki/firm/70000001080050161');
+  });
+
+  it('collects a saved search-card link from its canonical firm page', async () => {
+    const read = jest
+      .spyOn(publicMaterial, 'readPublicResource')
+      .mockImplementation((url) =>
+        Promise.resolve({
+          body: html,
+          html: true,
+          status: 200,
+          url: String(url),
+        }),
+      );
+
+    const collected = await new TwoGisMapSourceClient().collect(
+      'https://2gis.ru/khimki/search/Crazy%20Studio/firm/70000001080050161',
+      new AbortController().signal,
+    );
+
+    expect(read).toHaveBeenCalledWith(
+      'https://2gis.ru/khimki/firm/70000001080050161',
+      expect.any(Object),
+    );
+    expect(collected.map.organizationId).toBe('70000001080050161');
+    expect(collected.pages[0].url).toBe(
+      'https://2gis.ru/khimki/firm/70000001080050161',
+    );
   });
 
   it('collects the public card, reviews, prices and features', async () => {
