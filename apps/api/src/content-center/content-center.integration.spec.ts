@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import JSZip from 'jszip';
 import type { Server } from 'node:http';
 import { ContentCenterSiteImports1790572800000 } from '../database/migrations/1790572800000-ContentCenterSiteImports';
 import { SourceRefreshJobs1790832000000 } from '../database/migrations/1790832000000-SourceRefreshJobs';
@@ -1743,7 +1744,7 @@ integration('Content Center / isolated PostgreSQL', () => {
     );
   });
 
-  it('extracts UTF-8 text and refuses to silently drop binary attachments', async () => {
+  it('extracts text and DOCX for text-only AI and refuses unsupported images', async () => {
     await service.uploadFile(workspace, admin, {
       originalname: 'notes.txt',
       buffer: Buffer.from('Информация клиента'),
@@ -1761,6 +1762,33 @@ integration('Content Center / isolated PostgreSQL', () => {
       'Информация клиента',
     );
     expect(generate.mock.calls[0][0].context.files).toBeUndefined();
+    const docx = new JSZip();
+    docx.file(
+      '[Content_Types].xml',
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+    );
+    docx.file(
+      '_rels/.rels',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+    );
+    docx.file(
+      'word/document.xml',
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Сведения клиента</w:t></w:r></w:p></w:body></w:document>',
+    );
+    const { id: docxId } = await service.uploadFile(workspace, admin, {
+      originalname: 'brief.docx',
+      buffer: await docx.generateAsync({ type: 'nodebuffer' }),
+    });
+    await textOnly.start(workspace, admin, {
+      instruction: 'Read DOCX',
+      materialIds: [docxId],
+      withoutMaterials: false,
+    });
+    await textOnly.processNext();
+    expect(generate.mock.calls[1][0].context.materials[0].content).toBe(
+      'Сведения клиента',
+    );
+    expect(generate.mock.calls[1][0].context.files).toBeUndefined();
     await service.uploadFile(workspace, admin, {
       originalname: 'image.jpg',
       buffer: Buffer.from([255, 216, 255, 0]),
@@ -1770,7 +1798,7 @@ integration('Content Center / isolated PostgreSQL', () => {
         instruction: 'Read',
         withoutMaterials: false,
       }),
-    ).rejects.toThrow('не умеет');
+    ).rejects.toThrow('пока нельзя');
   });
 
   it('accepts parallel uploads above 50 MB total and preserves their original bytes', async () => {
