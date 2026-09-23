@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { AiProviderError as DeepseekError } from './ai-provider.error';
 import { DeepseekSettingsService } from './deepseek-settings.service';
 import { escapeJsonTextWhitespace } from './json-text-whitespace';
@@ -57,6 +58,7 @@ function object(value: unknown): Record<string, unknown> {
 export class DeepseekService implements PreparationProvider, CreationProvider {
   readonly name = 'deepseek';
   readonly supportsFiles = false;
+  private readonly logger = new Logger(DeepseekService.name);
   get configured() {
     return this.settings.configured;
   }
@@ -78,59 +80,95 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     signal: AbortSignal,
     body?: unknown,
   ): Promise<Record<string, unknown>> {
-    try {
-      const response = await fetch(`${BASE}${path}`, {
-        method: body ? 'POST' : 'GET',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: body ? JSON.stringify(body) : undefined,
-        signal,
-        redirect: 'error',
-      });
-      if (!response.ok) {
-        await response.body?.cancel();
-        const messages: Record<number, string> = {
-          401: 'DeepSeek отклонил ключ. Замените его в настройках.',
-          402: 'Недостаточно средств на аккаунте DeepSeek.',
-          403: 'DeepSeek запретил доступ для этого ключа.',
-          429: 'Достигнут лимит запросов DeepSeek. Повторите позже.',
-          400: 'DeepSeek не принял запрос. Проверьте модель и объём материалов.',
-          422: 'DeepSeek не принял формат запроса.',
-        };
+    const attempts = path === '/chat/completions' ? 2 : 1;
+    const retryableStatuses = new Set([429, 500, 502, 503, 504]);
+    const messages: Record<number, string> = {
+      400: 'DeepSeek не принял запрос. Проверьте модель и объём материалов.',
+      401: 'DeepSeek отклонил ключ. Замените его в настройках.',
+      402: 'Недостаточно средств на аккаунте DeepSeek.',
+      403: 'DeepSeek запретил доступ для этого ключа.',
+      422: 'DeepSeek не принял формат запроса.',
+      429: 'Достигнут лимит запросов DeepSeek. Повторите позже.',
+    };
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (signal.aborted)
         throw new DeepseekError(
-          messages[response.status] ??
-            'DeepSeek временно недоступен. Повторите позже.',
+          'DeepSeek не ответил вовремя. Результат не сохранён.',
+        );
+      const attemptSignal = AbortSignal.any([
+        signal,
+        AbortSignal.timeout(path === '/models' ? 15_000 : 120_000),
+      ]);
+      let phase = 'connection';
+      try {
+        const response = await fetch(`${BASE}${path}`, {
+          method: body ? 'POST' : 'GET',
+          headers: {
+            Authorization: `Bearer ${key}`,
+            'Content-Type': 'application/json',
+          },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: attemptSignal,
+          redirect: 'error',
+        });
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined);
+          if (retryableStatuses.has(response.status) && attempt < attempts) {
+            this.logger.warn(
+              `DeepSeek HTTP ${response.status}; retrying request once`,
+            );
+            await delay(1_500, undefined, { signal });
+            continue;
+          }
+          throw new DeepseekError(
+            messages[response.status] ??
+              'DeepSeek временно недоступен. Повторите позже.',
+          );
+        }
+        phase = 'body';
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('missing body');
+        const chunks: Uint8Array[] = [];
+        let length = 0;
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            length += value.byteLength;
+            if (length > 2_000_000)
+              throw new DeepseekError(
+                'DeepSeek вернул слишком большой ответ. Результат не сохранён.',
+              );
+            chunks.push(value);
+          }
+        } finally {
+          await reader.cancel().catch(() => undefined);
+        }
+        phase = 'envelope';
+        return object(
+          JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown,
+        );
+      } catch (error) {
+        // Never log a raw response, fetch error, prompt or credential.
+        if (error instanceof DeepseekError) throw error;
+        if (signal.aborted)
+          throw new DeepseekError(
+            'DeepSeek не ответил вовремя. Результат не сохранён.',
+          );
+        const reason = attemptSignal.aborted ? 'timeout' : phase;
+        this.logger.warn(`DeepSeek ${reason}; attempt ${attempt}/${attempts}`);
+        if (attempt < attempts) {
+          await delay(1_500, undefined, { signal }).catch(() => undefined);
+          continue;
+        }
+        throw new DeepseekError(
+          reason === 'timeout'
+            ? 'DeepSeek дважды не ответил вовремя. Продолжите обработку с сохранённого этапа.'
+            : 'Не удалось получить корректный ответ DeepSeek после повторной попытки. Продолжите обработку с сохранённого этапа.',
         );
       }
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error();
-      const chunks: Uint8Array[] = [];
-      let length = 0;
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          length += value.byteLength;
-          if (length > 2_000_000) throw new Error();
-          chunks.push(value);
-        }
-      } finally {
-        await reader.cancel().catch(() => undefined);
-      }
-      return object(
-        JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown,
-      );
-    } catch (error) {
-      // Never expose a provider response, fetch error, prompt or credential in logs/API errors.
-      if (error instanceof DeepseekError) throw error;
-      throw new DeepseekError(
-        signal.aborted
-          ? 'DeepSeek не ответил вовремя. Результат не сохранён.'
-          : 'Не удалось получить корректный ответ DeepSeek. Результат не сохранён.',
-      );
     }
+    throw new DeepseekError('DeepSeek не ответил. Результат не сохранён.');
   }
 
   async checkConnection() {
@@ -168,7 +206,7 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
     const response = await this.request(
       '/chat/completions',
       credentials.apiKey,
-      AbortSignal.any([signal, AbortSignal.timeout(80_000)]),
+      signal,
       {
         model: credentials.model,
         messages: [

@@ -132,6 +132,49 @@ describe('provider-neutral preparation', () => {
     ).resolves.toContain('Проверенный факт');
     expect(generate.mock.calls.length).toBe(firstCalls + 1);
   });
+  it('saves other in-flight parts before reporting a failed concurrent part', async () => {
+    const saved = new Map<string, string>();
+    const checkpoints = {
+      get: (key: string) => Promise.resolve(saved.get(key) ?? null),
+      put: (key: string, content: string) => {
+        saved.set(key, content);
+        return Promise.resolve();
+      },
+    };
+    let failFirst = true;
+    const generate = jest.fn<
+      ReturnType<PreparationProvider['generate']>,
+      Parameters<PreparationProvider['generate']>
+    >((request) => {
+      if (request.context.processingStage === 'register' && failFirst) {
+        failFirst = false;
+        return Promise.reject(new Error('one part failed'));
+      }
+      return new Promise((resolve) =>
+        setTimeout(() => resolve({ content: '[S1.1] Проверенный факт.' }), 10),
+      );
+    });
+    const ai = new PreparationAiService({ name: 'test-only', generate });
+    const large = {
+      materials: [
+        {
+          title: '[S1.1] Источник',
+          content: 'Факт компании.\n'.repeat(9000),
+          sourceUrl: null,
+        },
+      ],
+      previousResult: null,
+    };
+    await expect(
+      ai.generate('Сводка', large, undefined, checkpoints),
+    ).rejects.toThrow('one part failed');
+    expect(saved.size).toBeGreaterThan(0);
+    const callsBeforeResume = generate.mock.calls.length;
+    await expect(
+      ai.generate('Сводка', large, undefined, checkpoints),
+    ).resolves.toContain('Проверенный факт');
+    expect(generate.mock.calls.length).toBeGreaterThan(callsBeforeResume);
+  });
   it.each(['', ' '.repeat(5), 'x'.repeat(80001), 'bad\0text'])(
     'rejects an invalid result',
     async (content) => {
@@ -154,7 +197,7 @@ describe('provider-neutral preparation', () => {
       const promise = expect(ai.generate('Задача', context)).rejects.toThrow(
         'Истекло время ожидания AI',
       );
-      await jest.advanceTimersByTimeAsync(900001);
+      await jest.advanceTimersByTimeAsync(45 * 60_000 + 1);
       await promise;
     } finally {
       jest.useRealTimers();

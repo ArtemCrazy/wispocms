@@ -380,8 +380,8 @@ describe('DeepSeek adapter', () => {
     expect(String(error)).toContain('некорректный JSON');
     expect(String(error)).not.toContain('PRIVATE');
   });
-  it.each([401, 402, 403, 429, 500])(
-    'sanitizes HTTP %s and never retries a paid operation',
+  it.each([400, 401, 402, 403, 422])(
+    'sanitizes non-transient HTTP %s without retrying',
     async (status) => {
       fetchMock.mockResolvedValue(new Response(TEST_KEY, { status }));
       const error = await ai
@@ -392,6 +392,57 @@ describe('DeepSeek adapter', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     },
   );
+  it.each([429, 500, 503])(
+    'retries transient HTTP %s once and returns a complete response',
+    async (status) => {
+      fetchMock.mockResolvedValueOnce(new Response(TEST_KEY, { status }));
+      respond({ content: 'Проверенный ответ' });
+      await expect(
+        ai.generate({
+          instruction: 'Подготовь',
+          context: { materials: [], previousResult: null },
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ content: 'Проверенный ответ' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+  it('retries a broken transport or provider envelope once without exposing it', async () => {
+    fetchMock.mockRejectedValueOnce(new Error(TEST_KEY));
+    respond({ content: 'Первый ответ восстановлен' });
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ content: 'Первый ответ восстановлен' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(new Response('<html>PRIVATE</html>'));
+    respond({ content: 'Второй ответ восстановлен' });
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ content: 'Второй ответ восстановлен' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('stops after two transport failures and keeps provider details private', async () => {
+    fetchMock.mockRejectedValue(new Error(TEST_KEY));
+    const error = await ai
+      .generate({
+        instruction: 'Подготовь',
+        context: { materials: [], previousResult: null },
+        signal: new AbortController().signal,
+      })
+      .catch((reason: unknown) => reason);
+    expect(String(error)).toContain('после повторной попытки');
+    expect(String(error)).not.toContain(TEST_KEY);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it('rejects truncated, empty and malformed output without creating a result', async () => {
     respond(production, 'length');
     await expect(
