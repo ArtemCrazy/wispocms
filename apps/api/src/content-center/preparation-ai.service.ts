@@ -157,7 +157,7 @@ export class PreparationAiService {
                 'Истекло время ожидания AI. Новая версия не создана. Повторите запуск позже.',
               ),
             );
-          }, 15 * 60_000);
+          }, 45 * 60_000);
         }),
       ]);
       const content = result.content?.trim();
@@ -273,9 +273,9 @@ export class PreparationAiService {
       const summaries = new Array<PreparationInput['materials']>(
         batches.length,
       );
-      // Bounded concurrency: no paid retry and no unbounded Promise.all over pages.
+      // Bounded concurrency and checkpointing; the provider may retry one transient call.
       for (let start = 0; start < batches.length; start += 3) {
-        await Promise.all(
+        const settled = await Promise.allSettled(
           batches.slice(start, start + 3).map(async (batch, offset) => {
             signal.throwIfAborted();
             const result = await call(stageTask, {
@@ -331,6 +331,13 @@ export class PreparationAiService {
             });
           }),
         );
+        // Let the other in-flight paid calls finish and save their checkpoints
+        // before reporting one failed part. A manual continuation then reuses them.
+        const failed = settled.find(
+          (result): result is PromiseRejectedResult =>
+            result.status === 'rejected',
+        );
+        if (failed) throw failed.reason;
       }
       return summaries.flat();
     };
