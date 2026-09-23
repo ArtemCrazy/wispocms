@@ -765,7 +765,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         );
       const [queued] = await manager.query<RunSummary[]>(
         `UPDATE cc_preparation_runs SET status='queued',actor_name=$2,error=NULL,progress=NULL,
-         started_at=NULL,heartbeat_at=NULL,finished_at=NULL,resume_count=resume_count+1
+         started_at=NULL,heartbeat_at=now(),finished_at=NULL,resume_count=resume_count+1
          WHERE id=$1 RETURNING ${RUN_FIELDS}`,
         [id, actorName],
       );
@@ -879,7 +879,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         `UPDATE cc_preparation_runs SET status='failed', error='Обработка прервалась. Продолжите запуск.', finished_at=now() WHERE status='processing' AND COALESCE(heartbeat_at,started_at) < now()-interval '5 minutes'`,
       );
       await this.db.query(
-        `UPDATE cc_preparation_runs SET status='failed', error='Истекло время ожидания обработки. Продолжите запуск.', finished_at=now() WHERE status='queued' AND created_at < now()-interval '30 minutes'`,
+        `UPDATE cc_preparation_runs SET status='failed', error='Истекло время ожидания обработки. Продолжите запуск.', finished_at=now() WHERE status='queued' AND COALESCE(heartbeat_at,created_at) < now()-interval '30 minutes'`,
       );
       const [run] = await this.db.query<Run[]>(
         `WITH claimed AS (UPDATE cc_preparation_runs SET status='processing',started_at=now(),heartbeat_at=now() WHERE id=(SELECT id FROM cc_preparation_runs WHERE status='queued' AND (operation='collect' OR ($2::boolean AND provider=$1)) ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *) SELECT * FROM claimed`,
