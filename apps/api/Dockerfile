@@ -30,6 +30,7 @@ ENV NODE_ENV=production
 # sent to Groq Whisper. Both tools are installed in the runtime image only;
 # they are never exposed to the browser or accepted as user-supplied commands.
 RUN apk add --no-cache ffmpeg yt-dlp
+RUN apk add --no-cache chromium
 
 RUN mkdir -p /data/media && chown node:node /data/media
 

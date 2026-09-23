@@ -110,8 +110,20 @@ function MapCardSummary({
       <div className={styles.sourceMapFacts}>
         {card.ratingCount !== null && <span>{card.ratingCount} оценок</span>}
         {card.reviewCount !== null && <span>{card.reviewCount} отзывов</span>}
-        <span>{card.reviews.length} отзывов собрано</span>
-        <span>{card.products.length} товаров и услуг собрано</span>
+        {card.provider === "google" ? (
+          <span>
+            {card.reviews.length
+              ? `${card.reviews.length} отзывов собрано · публичный фрагмент`
+              : "Отзывы не получены"}
+          </span>
+        ) : (
+          <span>{card.reviews.length} отзывов собрано</span>
+        )}
+        {card.provider === "google" && card.products.length === 0 ? (
+          <span>Товары и услуги не проверены</span>
+        ) : (
+          <span>{card.products.length} товаров и услуг собрано</span>
+        )}
       </div>
       {card.categories.length > 0 && (
         <div className={styles.sourceMapCategories}>

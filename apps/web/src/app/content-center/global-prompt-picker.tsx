@@ -36,8 +36,7 @@ export function GlobalPromptPicker({ close, onSelect }: {
         {selected && <div className={styles.promptPreview}>
           <h3>{selected.title}</h3>
           <div className={styles.promptText}>{selected.content}</div>
-          <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => onSelect(selected.content, selected.title)}>Использовать в задаче</button></div>
-          <p className={styles.muted}>Текст скопируется в вашу инструкцию. Его можно изменить для этой задачи — общий промпт и другие проекты не изменятся.</p>
+          <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => onSelect(selected.content, selected.title)}>Выбрать</button></div>
         </div>}
       </div>}
     </div>

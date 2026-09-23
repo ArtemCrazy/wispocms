@@ -22,6 +22,9 @@ describe('Google Maps public source', () => {
     expect(isGoogleMapsUrl('https://www.google.com/search?q=Googleplex')).toBe(
       false,
     );
+    expect(isGoogleMapsUrl('https://google.evil/maps/place/Example')).toBe(
+      false,
+    );
     expect(() => googleMapsAddress('https://example.com/company')).toThrow(
       'Google Maps',
     );

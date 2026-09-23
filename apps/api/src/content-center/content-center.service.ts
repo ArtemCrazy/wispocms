@@ -47,6 +47,7 @@ import {
 import { isYandexMapsUrl } from './yandex-map-source';
 import { is2GisMapsUrl } from './2gis-map-source';
 import { isGoogleMapsUrl } from './google-maps-source';
+import { wouldLoseGoogleReviews } from './google-maps-refresh';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
 type Material = {
@@ -914,6 +915,20 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             const snapshot = resolved.sources?.[0];
             if (!snapshot)
               throw new AiProviderError('Не удалось получить результат сбора');
+            if (snapshot.map?.provider === 'google') {
+              const [material] = await manager.query<
+                Array<{ site_pages: SourceSnapshot | null }>
+              >(
+                `SELECT site_pages FROM cc_materials WHERE workspace_id=$1 AND id=$2 FOR UPDATE`,
+                [run.workspace_id, run.source_material_id],
+              );
+              if (
+                wouldLoseGoogleReviews(material?.site_pages ?? null, snapshot)
+              )
+                throw new AiProviderError(
+                  'Google Maps временно не показал отзывы. Предыдущий сбор сохранён; повторите обновление позже.',
+                );
+            }
             await manager.query(
               `UPDATE cc_materials SET site_pages=$3::jsonb,site_checked_at=now() WHERE workspace_id=$1 AND id=$2`,
               [

@@ -2,6 +2,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { readPublicResource, publicMaterialUrl } from './public-material';
 import type { SitePage } from './site-crawler';
+import { collectVisibleGoogleReviews } from './google-maps-reviews';
 
 const GOOGLE_MAPS_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
@@ -98,11 +99,7 @@ function numberValue(value: unknown): number | null {
 }
 
 function isGoogleHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  return (
-    GOOGLE_HOSTS.has(host) ||
-    /^(?:www\.|maps\.)?google\.[a-z]{2,}(?:\.[a-z]{2,})?$/.test(host)
-  );
+  return GOOGLE_HOSTS.has(hostname.toLowerCase());
 }
 
 function isGoogleMapsPage(url: URL): boolean {
@@ -419,6 +416,20 @@ function overviewContent(card: GoogleMapCard): string {
     .join('\n');
 }
 
+function reviewsContent(reviews: GoogleMapReview[]): string {
+  return reviews
+    .map((review, index) =>
+      [
+        `${index + 1}. ${review.author}${review.date ? ` · ${review.date}` : ''}`,
+        review.rating !== null ? `Оценка: ${review.rating} из 5` : '',
+        review.text,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    .join('\n\n');
+}
+
 function page(
   url: string,
   title: string,
@@ -518,12 +529,39 @@ export class GoogleMapSourceClient {
         ),
       );
     const warnings = [
-      'Сбор выполнен из общедоступного ответа Google Maps без входа, OAuth и API-ключа. Получены только данные, которые Google отдаёт этому публичному запросу.',
+      'Сбор выполнен из публичной карточки Google Maps без входа, OAuth и API-ключа. Доступны только сведения, которые Google показывает без авторизации.',
     ];
+    try {
+      const visible = await collectVisibleGoogleReviews(resolvedUrl, deadline);
+      map.reviews = visible.reviews;
+      map.reviewCount ??= visible.reviewCount;
+      if (map.reviews.length)
+        pages.push(
+          page(
+            address,
+            `Отзывы · ${map.title}`,
+            'Google Maps · Отзывы',
+            reviewsContent(map.reviews),
+            now.toISOString(),
+          ),
+        );
+    } catch (error) {
+      deadline.throwIfAborted();
+      warnings.push(
+        `Не удалось получить публичный раздел отзывов Google Maps: ${error instanceof Error ? error.message : 'неизвестная ошибка'}. Обзор карточки сохранён.`,
+      );
+    }
     if (!map.reviews.length)
       warnings.push(
-        'Google Maps не отдал текст отдельных отзывов в публичном ответе; скрытые JS-запросы и полный архив отзывов не считаются собранными.',
+        'Тексты отзывов Google Maps не получены; это не означает, что у организации нет отзывов.',
       );
+    else if (map.reviewCount !== null && map.reviewCount > map.reviews.length)
+      warnings.push(
+        `Google Maps показывает ${map.reviewCount} отзывов, но без входа удалось собрать только ${map.reviews.length}. Полный архив не считается собранным.`,
+      );
+    warnings.push(
+      'Товары и услуги Google Maps этим сбором не извлечены; пустой список не означает, что их нет у организации.',
+    );
     if (map.reviewCount === null)
       warnings.push(
         'Количество отзывов не пришло в общедоступном ответе Google Maps.',
