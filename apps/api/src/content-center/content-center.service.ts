@@ -38,6 +38,7 @@ import {
 } from './public-material';
 import { validateMaterialFile } from './material-file';
 import type { MaterialUpload } from './material-file';
+import { extractDocumentText } from './material-document';
 import { isVkUrl, vkCommunityAddress } from './vk-source';
 import { isTelegramUrl, telegramChannel } from './telegram-source';
 import {
@@ -624,21 +625,33 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         `SELECT id,content,prompt_title FROM cc_preparation_versions WHERE workspace_id=$1 ORDER BY number DESC LIMIT 1`,
         [workspaceId],
       );
+      const inputMaterials: PreparationInput['materials'] = [];
+      for (const material of materials) {
+        const content =
+          material.file_data && !material.content && !this.ai.supportsFiles
+            ? await extractDocumentText({
+                fileName: material.file_name ?? material.title,
+                mediaType: material.media_type ?? '',
+                data: material.file_data,
+              })
+            : material.content;
+        inputMaterials.push({
+          id: material.id,
+          revision: material.revision,
+          urlCategory: material.url_category,
+          sourceError: material.source_error,
+          title: material.title,
+          content,
+          sourceUrl: material.source_url,
+        });
+      }
       const input: PreparationInput = {
         resumeGuard: {
           materialRevisions: materialRevisions(allMaterials),
           baseVersionId: previous?.id ?? null,
           selectedMaterialIds: materials.map((material) => material.id),
         },
-        materials: materials.map((m) => ({
-          id: m.id,
-          revision: m.revision,
-          urlCategory: m.url_category,
-          sourceError: m.source_error,
-          title: m.title,
-          content: m.content,
-          sourceUrl: m.source_url,
-        })),
+        materials: inputMaterials,
         // Explicit launch selection starts a self-contained task: a result from
         // another investigation must never be imported as source evidence.
         previousResult:
@@ -654,19 +667,15 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         throw new BadRequestException(
           'Материалы превышают безопасный объём запуска (2,2 млн символов). Сократите материалы перед запуском.',
         );
-      const files = materials
-        .filter((m) => m.file_data && !m.content)
-        .map((m) => ({
-          fileName: m.file_name!,
-          mediaType: m.media_type!,
-          dataBase64: m.file_data!.toString('base64'),
-        }));
-      if (files.length) {
-        if (!this.ai.supportsFiles)
-          throw new BadRequestException(
-            'Подключённый AI пока не умеет обрабатывать документы и изображения. Файлы сохранены, запуск не выполнен.',
-          );
-        input.files = files;
+      if (this.ai.supportsFiles) {
+        const files = materials
+          .filter((m) => m.file_data && !m.content)
+          .map((m) => ({
+            fileName: m.file_name!,
+            mediaType: m.media_type!,
+            dataBase64: m.file_data!.toString('base64'),
+          }));
+        if (files.length) input.files = files;
       }
       const [row] = await manager.query<RunSummary[]>(
         `INSERT INTO cc_preparation_runs (workspace_id,status,actor_name,instruction,input_context,provider,prompt_title) VALUES ($1,'queued',$2,$3,$4::jsonb,$5,$6) RETURNING ${RUN_FIELDS}`,
