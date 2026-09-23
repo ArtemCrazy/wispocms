@@ -56,6 +56,16 @@ describe('ContentService category lifecycle', () => {
       create: jest.fn((value) => value),
       save: jest.fn(async (value) => value),
     };
+    const revisions = {
+      current: jest.fn().mockResolvedValue(null),
+      importPublishedBaseline: jest.fn(),
+      saveDraft: jest
+        .fn()
+        .mockResolvedValue({ id: 'draft-id', versionNumber: 1 }),
+      saveDraftUsingManager: jest
+        .fn()
+        .mockResolvedValue({ id: 'draft-id', versionNumber: 1 }),
+    };
     const service = new ContentService(
       { findOne: jest.fn().mockResolvedValue(site) } as never,
       {} as never,
@@ -71,6 +81,11 @@ describe('ContentService category lifecycle', () => {
       redirects as never,
       categoryActivities as never,
       lifecycle as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      revisions as never,
     );
     return { service, categories, articles, redirects, manager };
   }
@@ -102,6 +117,7 @@ describe('ContentService category lifecycle', () => {
       service.updateCategory('site-id', 'category-id', actor, {
         name: 'New',
         slug: 'new',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(manager.update).not.toHaveBeenCalled();

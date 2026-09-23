@@ -13,12 +13,17 @@ type Page = {
   id: string;
   kind: "homepage" | "page";
   bannerSlots?: BannerSlotDefinition[];
+  draftRevisionId?: string | null;
 };
 type Assignment = {
   id: string;
   zone: string;
   bannerId: string;
   banner: MediaBanner;
+};
+type AssignmentUpdate = {
+  assignments: Assignment[];
+  draftRevisionId: string | null;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -53,6 +58,8 @@ export function PageBannerAssignmentsView({
   const [slots, setSlots] = useState<BannerSlotDefinition[]>([]);
   const [banners, setBanners] = useState<MediaBanner[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [draftRevisionId, setDraftRevisionId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
@@ -63,6 +70,7 @@ export function PageBannerAssignmentsView({
     const homepage = pages.find((item) => item.kind === "homepage");
     const homepageId = homepage?.id ?? "";
     setPageId(homepageId);
+    setDraftRevisionId(homepage?.draftRevisionId ?? null);
     setSlots(homepage?.bannerSlots ?? []);
     setBanners(bannerRows.filter((item) => item.isActive));
     setAssignments(
@@ -83,28 +91,38 @@ export function PageBannerAssignmentsView({
   }, [load]);
 
   async function assign(zone: string, bannerId: string) {
-    if (!pageId || !canEdit) return;
+    if (!pageId || !canEdit || saving) return;
+    setSaving(true);
+    setMessage("Сохраняем новую версию страницы…");
     try {
       if (bannerId) {
-        setAssignments(
-          await request(
-            `/api/sites/${siteId}/content/pages/${pageId}/banner-assignments`,
-            {
-              method: "PUT",
-              body: JSON.stringify({ zone, bannerId }),
-            },
-          ),
+        const updated = await request<AssignmentUpdate>(
+          `/api/sites/${siteId}/content/pages/${pageId}/banner-assignments`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              zone,
+              bannerId,
+              expectedDraftRevisionId: draftRevisionId,
+            }),
+          },
         );
-        setMessage("Баннер назначен");
+        setAssignments(updated.assignments);
+        setDraftRevisionId(updated.draftRevisionId);
+        setMessage("Новая версия страницы с баннером сохранена");
       } else {
-        await request(
+        const updated = await request<AssignmentUpdate>(
           `/api/sites/${siteId}/content/pages/${pageId}/banner-assignments/${encodeURIComponent(zone)}`,
-          { method: "DELETE" },
+          {
+            method: "DELETE",
+            body: JSON.stringify({
+              expectedDraftRevisionId: draftRevisionId,
+            }),
+          },
         );
-        setAssignments((current) =>
-          current.filter((item) => item.zone !== zone),
-        );
-        setMessage("Назначение снято");
+        setAssignments(updated.assignments);
+        setDraftRevisionId(updated.draftRevisionId);
+        setMessage("Новая версия страницы без баннера сохранена");
       }
     } catch (error) {
       setMessage(
@@ -112,6 +130,8 @@ export function PageBannerAssignmentsView({
           ? error.message
           : "Не удалось изменить назначение",
       );
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -188,7 +208,7 @@ export function PageBannerAssignmentsView({
                   Выбрать или заменить
                   <select
                     value={assigned?.bannerId ?? ""}
-                    disabled={!canEdit}
+                    disabled={!canEdit || saving}
                     onChange={(event) =>
                       void assign(zone.id, event.target.value)
                     }

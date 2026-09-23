@@ -12,6 +12,7 @@ import { PlatformAdminGuard } from './platform-admin.guard';
 import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 import { WorkspaceController } from './workspace.controller';
+import { SiteUsersController } from './site-users.controller';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { WorkspaceController } from './workspace.controller';
     ]),
     AuthModule,
   ],
-  controllers: [PlatformController, WorkspaceController],
+  controllers: [PlatformController, WorkspaceController, SiteUsersController],
   providers: [PlatformService, PlatformAdminGuard],
 })
 export class PlatformModule {}

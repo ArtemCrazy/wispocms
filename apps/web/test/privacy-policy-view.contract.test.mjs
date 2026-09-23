@@ -7,24 +7,18 @@ const source = await readFile(
   "utf8",
 );
 
-test("privacy publication uses the canonical page-status POST route", () => {
-  assert.match(
-    source,
-    /content\/pages\/\$\{state\.pageId\}\/status`,\s*\{ method: "POST", body: JSON\.stringify\(\{ status \}\) \}/,
-  );
+test("privacy publication uses the shared approved-revision workflow", () => {
+  assert.match(source, /content\/versioned\/privacy/);
+  assert.match(source, /resource="privacy"/);
   assert.doesNotMatch(
     source,
-    /content\/pages\/\$\{state\.pageId\}\/status`,\s*\{ method: "PATCH"/,
+    /content\/pages\/\$\{state\.pageId\}\/status/,
   );
 });
 
-test("privacy publication reloads state and only accepts canonical statuses", () => {
-  assert.match(
-    source,
-    /changePublication\(status: "draft" \| "published"\)/,
-  );
-  assert.match(
-    source,
-    /return request\(`\/api\/sites\/\$\{siteId\}\/content\/privacy`\);/,
-  );
+test("privacy commands send CAS and receive the server-side draft checkpoint", () => {
+  assert.match(source, /expectedDraftRevisionId: draftRevisionId/);
+  assert.match(source, /setDraftRevisionId\(next\.draftRevisionId\)/);
+  assert.doesNotMatch(source, /snapshot: next/);
+  assert.match(source, /Создана новая версия черновика/);
 });

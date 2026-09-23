@@ -15,9 +15,12 @@ import {
   UserEntity,
   WorkspaceEntity,
   WorkspaceMembershipEntity,
-  WorkspaceRole,
 } from '../database/entities';
 import { SlidingWindowRateLimiter } from '../common/sliding-window-rate-limiter';
+import {
+  hasSitePermission,
+  SitePermission,
+} from '../content/content.permissions';
 
 @Injectable()
 export class AuthService {
@@ -75,9 +78,21 @@ export class AuthService {
       where: { userId },
       relations: { workspace: true },
     });
+    const grantedMemberships = ownMemberships.filter(
+      (membership) =>
+        membership.siteIds?.length &&
+        hasSitePermission(
+          user.platformRole,
+          membership.role,
+          SitePermission.READ,
+        ),
+    );
     const workspaceRows = isAdministrator
       ? await this.workspaces.find({ order: { name: 'ASC' } })
-      : ownMemberships.map((row) => row.workspace);
+      : grantedMemberships.map((row) => row.workspace);
+    const allowedSiteIds = new Set(
+      grantedMemberships.flatMap((membership) => membership.siteIds),
+    );
 
     const workspaceIds = workspaceRows.map((workspace) => workspace.id);
     const projectMemberships = workspaceIds.length
@@ -113,16 +128,19 @@ export class AuthService {
         id: workspace.id,
         name: workspace.name,
         slug: workspace.slug,
-        role: ownMemberships.some(
-          (membership) => membership.workspaceId === workspace.id,
-        )
-          ? WorkspaceRole.EMPLOYEE
-          : null,
+        role:
+          ownMemberships.find(
+            (membership) => membership.workspaceId === workspace.id,
+          )?.role ?? null,
         members: projectMemberships
           .filter(
             (membership) =>
               membership.workspaceId === workspace.id &&
-              membership.user?.isActive,
+              membership.user?.isActive &&
+              (isAdministrator ||
+                membership.siteIds?.some((siteId) =>
+                  allowedSiteIds.has(siteId),
+                )),
           )
           .map((membership) => ({
             id: membership.user.id,
@@ -131,7 +149,11 @@ export class AuthService {
             role: membership.role,
           })),
         sites: sites
-          .filter((site) => site.workspaceId === workspace.id)
+          .filter(
+            (site) =>
+              site.workspaceId === workspace.id &&
+              (isAdministrator || allowedSiteIds.has(site.id)),
+          )
           .map((site) => ({
             id: site.id,
             name: site.name,

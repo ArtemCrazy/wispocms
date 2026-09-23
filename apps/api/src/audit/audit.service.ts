@@ -13,6 +13,10 @@ import {
   UserEntity,
   WorkspaceMembershipEntity,
 } from '../database/entities';
+import {
+  hasSitePermission,
+  SitePermission,
+} from '../content/content.permissions';
 
 const secretKey = /password|passphrase|token|secret|authorization|cookie|hash/i;
 
@@ -143,9 +147,16 @@ export class AuditService {
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
       const membership = await this.memberships.findOne({
         where: { userId: actor.userId, workspaceId: site.workspaceId },
-        select: { id: true },
+        select: { role: true, siteIds: true },
       });
-      if (!membership)
+      if (
+        !membership?.siteIds?.includes(siteId) ||
+        !hasSitePermission(
+          actor.platformRole,
+          membership.role,
+          SitePermission.READ,
+        )
+      )
         throw new ForbiddenException('Нет доступа к этому сайту');
     }
     return this.auditLogs.find({

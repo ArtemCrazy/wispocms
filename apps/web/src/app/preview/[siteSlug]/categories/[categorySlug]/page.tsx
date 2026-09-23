@@ -120,16 +120,21 @@ export default async function PublicCategoryPage({
   searchParams: Promise<{
     cmsSiteId?: string | string[];
     cmsCategoryId?: string | string[];
+    cmsRevisionId?: string | string[];
   }>;
 }) {
   const { siteSlug, categorySlug } = await params;
   const query = await searchParams;
   const siteId = queryValue(query.cmsSiteId);
   const categoryId = queryValue(query.cmsCategoryId);
-  const cmsPreview = siteId && categoryId ? { siteId, categoryId } : null;
+  const revisionId = queryValue(query.cmsRevisionId);
+  const cmsPreview =
+    siteId && categoryId && revisionId
+      ? { siteId, categoryId, revisionId }
+      : null;
   const result = cmsPreview
     ? await loadPublicData<CategoryData>(
-        `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/categories/${encodeURIComponent(cmsPreview.categoryId)}/preview`,
+        `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/categories/${encodeURIComponent(cmsPreview.categoryId)}/revisions/${encodeURIComponent(cmsPreview.revisionId)}/preview`,
         (await cookies()).toString(),
       )
     : await loadCategory(siteSlug, categorySlug);

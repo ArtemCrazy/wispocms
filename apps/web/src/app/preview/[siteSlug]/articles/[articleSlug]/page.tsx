@@ -102,6 +102,7 @@ type PublicArticlePageProps = {
   searchParams: Promise<{
     cmsSiteId?: string | string[];
     cmsArticleId?: string | string[];
+    cmsRevisionId?: string | string[];
   }>;
 };
 
@@ -170,10 +171,11 @@ export default async function PublicArticlePage({
   const query = await searchParams;
   const siteId = queryValue(query.cmsSiteId);
   const articleId = queryValue(query.cmsArticleId);
-  const cmsPreview = siteId && articleId ? { siteId, articleId } : null;
+  const revisionId = queryValue(query.cmsRevisionId);
+  const cmsPreview = siteId && articleId ? { siteId, articleId, revisionId } : null;
   const result = cmsPreview
     ? await loadPublicData<ArticleData>(
-        `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/articles/${encodeURIComponent(cmsPreview.articleId)}/preview`,
+        `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/articles/${encodeURIComponent(cmsPreview.articleId)}${cmsPreview.revisionId ? `/revisions/${encodeURIComponent(cmsPreview.revisionId)}` : ''}/preview`,
         (await cookies()).toString(),
       )
     : await loadArticle(siteSlug, articleSlug);

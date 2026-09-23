@@ -18,6 +18,7 @@ import {
   PrivacyPolicyStateEntity,
   type PrivacySettings,
   SiteEntity,
+  type SiteGlobalData,
   WorkspaceMembershipEntity,
 } from '../database/entities';
 import {
@@ -200,10 +201,11 @@ export class PrivacyService {
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
       const membership = await this.memberships.findOne({
-        select: { role: true },
+        select: { role: true, siteIds: true },
         where: { userId: actor.userId, workspaceId: site.workspaceId },
       });
       if (
+        !membership?.siteIds?.includes(siteId) ||
         !hasSitePermission(
           actor.platformRole,
           membership?.role ?? null,
@@ -298,18 +300,28 @@ export class PrivacyService {
     };
   }
 
+  private companyData(
+    site: SiteEntity,
+    state: PrivacyPolicyStateEntity,
+  ): SiteGlobalData {
+    const value = state.settings?.companyDraft;
+    const draft =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as SiteGlobalData)
+        : {};
+    return { ...(site.globalData ?? {}), ...draft };
+  }
+
   private async serialize(site: SiteEntity, state: PrivacyPolicyStateEntity) {
     const latestApproved = await this.latestApprovedModel();
+    const company = this.companyData(site, state);
     const fingerprint = privacyFingerprint(
-      site.globalData ?? {},
+      company,
       state.settings ?? {},
       state.legalModel.version,
       templateFingerprint(state),
     );
-    const missingFields = privacyMissingFields(
-      site.globalData ?? {},
-      state.settings ?? {},
-    );
+    const missingFields = privacyMissingFields(company, state.settings ?? {});
     const stale = Boolean(
       state.legacyContentPreserved ||
       state.modelReviewSourceVersion ||
@@ -356,13 +368,11 @@ export class PrivacyService {
       pageId: state.pageId,
       pageStatus: state.page.status,
       company: {
-        organizationType: site.globalData?.organizationType ?? '',
-        legalName:
-          site.globalData?.legalName ?? site.globalData?.companyName ?? '',
-        inn: site.globalData?.inn ?? '',
-        ogrn: site.globalData?.ogrn ?? '',
-        legalAddress:
-          site.globalData?.legalAddress ?? site.globalData?.address ?? '',
+        organizationType: company.organizationType ?? '',
+        legalName: company.legalName ?? company.companyName ?? '',
+        inn: company.inn ?? '',
+        ogrn: company.ogrn ?? '',
+        legalAddress: company.legalAddress ?? company.address ?? '',
       },
       settings: state.settings ?? {},
       legalModel: {
@@ -446,9 +456,15 @@ export class PrivacyService {
       actor,
       SitePermission.EDIT_CONTENT,
     );
+    const state = await this.ensureState(site);
+    const current = this.companyData(site, state);
     const clean = (value?: string) => value?.trim() || undefined;
-    site.globalData = {
-      ...(site.globalData ?? {}),
+    const companyDraft = {
+      organizationType: current.organizationType,
+      legalName: current.legalName ?? current.companyName,
+      inn: current.inn,
+      ogrn: current.ogrn,
+      legalAddress: current.legalAddress ?? current.address,
       ...(dto.organizationType !== undefined && {
         organizationType: dto.organizationType || undefined,
       }),
@@ -459,8 +475,9 @@ export class PrivacyService {
         legalAddress: clean(dto.legalAddress),
       }),
     };
-    await this.sites.save(site);
-    return this.serialize(site, await this.ensureState(site));
+    state.settings = { ...(state.settings ?? {}), companyDraft };
+    await this.policyStates.save(state);
+    return this.serialize(site, state);
   }
 
   async updateSettings(
@@ -490,6 +507,7 @@ export class PrivacyService {
       SitePermission.EDIT_CONTENT,
     );
     const state = await this.ensureState(site);
+    const company = this.companyData(site, state);
     if (
       state.mode === 'manual' &&
       state.manualSnapshot &&
@@ -498,23 +516,20 @@ export class PrivacyService {
       throw new ConflictException(
         'В документ внесены ручные изменения. Подтвердите их замену при перегенерации',
       );
-    const missing = privacyMissingFields(
-      site.globalData ?? {},
-      state.settings ?? {},
-    );
+    const missing = privacyMissingFields(company, state.settings ?? {});
     if (missing.length)
       throw new BadRequestException(
         `Заполните обязательные данные: ${missing.join(', ')}`,
       );
     state.automaticSnapshot = generatePrivacyDraft(
-      site.globalData ?? {},
+      company,
       state.settings ?? {},
       state.legalModel,
     );
     state.manualSnapshot = null;
     state.mode = 'automatic';
     state.inputFingerprint = privacyFingerprint(
-      site.globalData ?? {},
+      company,
       state.settings ?? {},
       state.legalModel.version,
       templateFingerprint(state),
@@ -548,7 +563,7 @@ export class PrivacyService {
     state.manualSnapshot = manualSnapshot;
     state.mode = 'manual';
     state.inputFingerprint = privacyFingerprint(
-      site.globalData ?? {},
+      this.companyData(site, state),
       state.settings ?? {},
       state.legalModel.version,
       templateFingerprint(state),
@@ -566,23 +581,21 @@ export class PrivacyService {
       SitePermission.EDIT_CONTENT,
     );
     const state = await this.ensureState(site);
-    const missing = privacyMissingFields(
-      site.globalData ?? {},
-      state.settings ?? {},
-    );
+    const company = this.companyData(site, state);
+    const missing = privacyMissingFields(company, state.settings ?? {});
     if (missing.length)
       throw new BadRequestException(
         `Заполните обязательные данные: ${missing.join(', ')}`,
       );
     state.automaticSnapshot = generatePrivacyDraft(
-      site.globalData ?? {},
+      company,
       state.settings ?? {},
       state.legalModel,
     );
     state.manualSnapshot = null;
     state.mode = 'automatic';
     state.inputFingerprint = privacyFingerprint(
-      site.globalData ?? {},
+      company,
       state.settings ?? {},
       state.legalModel.version,
       templateFingerprint(state),
@@ -643,9 +656,10 @@ export class PrivacyService {
     const comparison = compareLegalModels(state.legalModel, target);
     const sourceVersion = state.legalModel.version;
     const keepsManual = state.mode === 'manual' && state.manualSnapshot;
+    const company = this.companyData(site, state);
     const missing = keepsManual
       ? []
-      : privacyMissingFields(site.globalData ?? {}, state.settings ?? {});
+      : privacyMissingFields(company, state.settings ?? {});
     if (missing.length)
       throw new BadRequestException(
         `Заполните обязательные данные перед принятием модели: ${missing.join(', ')}`,
@@ -659,12 +673,12 @@ export class PrivacyService {
       state.modelReviewComparison = comparison;
     } else {
       state.automaticSnapshot = generatePrivacyDraft(
-        site.globalData ?? {},
+        company,
         state.settings ?? {},
         target,
       );
       state.inputFingerprint = privacyFingerprint(
-        site.globalData ?? {},
+        company,
         state.settings ?? {},
         target.version,
         templateFingerprint(state),

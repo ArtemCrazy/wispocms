@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type MediaItem = {
   id: string;
@@ -16,6 +17,8 @@ type MediaItem = {
   mimeType: string;
   size: number;
   altText: string | null;
+  isDecorative: boolean;
+  draftRevisionId?: string | null;
   createdAt: string;
   site: { id: string; name: string; slug: string } | null;
 };
@@ -46,11 +49,13 @@ export function MediaView({
   siteName,
   workspaceName,
   canEdit = true,
+  canApprove = false,
 }: {
   siteId?: string;
   siteName?: string;
   workspaceName?: string;
   canEdit?: boolean;
+  canApprove?: boolean;
 }) {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -58,6 +63,7 @@ export function MediaView({
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [altDraft, setAltDraft] = useState("");
+  const [decorativeDraft, setDecorativeDraft] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
@@ -171,7 +177,11 @@ export function MediaView({
           method: "PATCH",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ altText: altDraft.trim() || null }),
+          body: JSON.stringify({
+            altText: altDraft.trim() || null,
+            isDecorative: decorativeDraft,
+            expectedDraftRevisionId: item.draftRevisionId ?? null,
+          }),
         },
       );
       if (!response.ok) {
@@ -394,6 +404,16 @@ export function MediaView({
                         maxLength={300}
                       />
                     </label>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={decorativeDraft}
+                        onChange={(event) =>
+                          setDecorativeDraft(event.target.checked)
+                        }
+                      />
+                      Декоративное изображение — alt не требуется
+                    </label>
                     <div>
                       <button
                         type="button"
@@ -414,6 +434,7 @@ export function MediaView({
                 ) : (
                   <>
                     <strong>{item.altText || "Описание не задано"}</strong>
+                    {item.isDecorative ? <small>Декоративное изображение</small> : null}
                     <span>{item.originalName}</span>
                     <small>
                       Источник: {item.site?.name ?? "исходный сайт удалён"}
@@ -429,6 +450,7 @@ export function MediaView({
                           onClick={() => {
                             setEditingId(item.id);
                             setAltDraft(item.altText ?? "");
+                            setDecorativeDraft(item.isDecorative);
                           }}
                         >
                           Изменить alt
@@ -445,6 +467,22 @@ export function MediaView({
                     ) : null}
                   </>
                 )}
+                {item.draftRevisionId ? (
+                  <SiteSettingsRevisionPanel
+                    siteId={siteId ?? ""}
+                    basePath={`metadata/media-alt/${item.id}`}
+                    label={`Alt: ${item.originalName}`}
+                    canEdit={canEdit}
+                    canApprove={canApprove}
+                    dirty={
+                      editingId === item.id &&
+                      (altDraft.trim() !== (item.altText ?? "") ||
+                        decorativeDraft !== item.isDecorative)
+                    }
+                    refreshToken={item.draftRevisionId}
+                    onChanged={load}
+                  />
+                ) : null}
               </div>
             </article>
           ))}

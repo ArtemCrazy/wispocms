@@ -22,6 +22,7 @@ import {
   UpdateSiteDto,
   UpdateUserStatusDto,
   UpdateUserProfileDto,
+  UpdateUserSitesDto,
   UpdateUserWorkspacesDto,
   UpdateWorkspaceDto,
 } from './platform.dto';
@@ -108,6 +109,14 @@ export class PlatformController {
     @Body() dto: UpdateUserWorkspacesDto,
   ) {
     return this.platformService.updateUserWorkspaces(userId, dto.workspaceIds);
+  }
+
+  @Put('users/:userId/sites')
+  updateUserSites(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: UpdateUserSitesDto,
+  ) {
+    return this.platformService.updateUserSites(userId, dto.siteIds);
   }
 
   @Post('workspaces/:workspaceId/members/:userId')

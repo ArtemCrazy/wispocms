@@ -3,6 +3,11 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArmaturexHomeEditor } from "./armaturex-home-editor";
+import {
+  revisionActions,
+  type ArticleRevisionCurrent as PageRevisionCurrent,
+} from "./article-revision-actions";
+import { parseApiBody } from "./api-response";
 import type { BannerSlotDefinition } from "./banner-slot";
 import { isArmaturexHomepage } from "./homepage-templates";
 
@@ -32,6 +37,7 @@ type PageItem = {
   systemTemplateKey: string | null;
   systemTemplateVersion: string | null;
   bannerSlots?: BannerSlotDefinition[];
+  draftRevisionId?: string | null;
 };
 type MediaItem = { id: string; originalName: string; altText: string | null };
 
@@ -54,7 +60,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
         : (payload?.message ?? "Ошибка запроса"),
     );
   }
-  return response.json();
+  return parseApiBody<T>(await response.text());
 }
 
 export function PagesView({
@@ -96,6 +102,8 @@ export function PagesView({
   const [pages, setPages] = useState<PageItem[]>([]);
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [editor, setEditor] = useState<PageItem | null>(null);
+  const [revisionCurrent, setRevisionCurrent] =
+    useState<PageRevisionCurrent | null | undefined>(undefined);
   const [blocks, setBlocks] = useState<PageBlock[]>([]);
   const [message, setMessage] = useState("");
   const [statusBusy, setStatusBusy] = useState(false);
@@ -106,11 +114,22 @@ export function PagesView({
   >("all");
   const [sortNewest, setSortNewest] = useState(true);
   const handledOpenRequest = useRef<number | undefined>(undefined);
-  const editorCanEdit =
-    canEdit && (!editor || editor.status !== "published" || canEditPublished);
+  const openedPageId = useRef<string | null>(null);
   const isSystemPage =
     editor?.kind === "page" &&
     (editor.slug === "privacy-policy" || editor.slug === "404");
+  const isVersionedPage = Boolean(
+    editor &&
+      (editor.kind === "homepage" ||
+        (mode === "pages" && editor.kind === "page" && !isSystemPage)),
+  );
+  const editorCanEdit =
+    canEdit &&
+    (isVersionedPage || !editor || editor.status !== "published" || canEditPublished);
+  const currentRevisionActions =
+    isVersionedPage && revisionCurrent
+      ? revisionActions(revisionCurrent, { canEdit, canApprove })
+      : null;
   const isArmaturexEditor = Boolean(
     editor &&
     isArmaturexHomepage({
@@ -140,6 +159,15 @@ export function PagesView({
     );
   }, [onPagesChange, siteId]);
 
+  const reloadRevision = useCallback(async (pageId: string) => {
+    if (!siteId) return null;
+    const current = (await api<PageRevisionCurrent | null>(
+      `/api/sites/${siteId}/content/pages/${pageId}/revisions/current`,
+    )) ?? null;
+    if (openedPageId.current === pageId) setRevisionCurrent(current);
+    return current;
+  }, [siteId]);
+
   useEffect(() => {
     const timer = window.setTimeout(
       () => void load().catch((error) => setMessage(error.message)),
@@ -159,13 +187,19 @@ export function PagesView({
     if (!page || page.slug === "404" || page.slug === "privacy-policy") return;
     const timer = window.setTimeout(() => {
       handledOpenRequest.current = openRequestId;
+      openedPageId.current = page.id;
       setEditor(page);
+      setRevisionCurrent(undefined);
       setBlocks(page.blocks);
       setDirty(false);
       setMessage("");
+      if (page.kind === "homepage" || mode === "pages")
+        void reloadRevision(page.id).catch((reason) =>
+          setMessage(reason instanceof Error ? reason.message : "Не удалось загрузить версию страницы"),
+        );
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [openPageId, openRequestId, pages]);
+  }, [openPageId, openRequestId, pages, reloadRevision, mode]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -221,10 +255,16 @@ export function PagesView({
           : "Медиа";
 
   function openEditor(page: PageItem) {
+    openedPageId.current = page.id;
     setEditor(page);
+    setRevisionCurrent(undefined);
     setBlocks(page.blocks);
     setDirty(false);
     setMessage("");
+    if (page.kind === "homepage" || mode === "pages")
+      void reloadRevision(page.id).catch((reason) =>
+        setMessage(reason instanceof Error ? reason.message : "Не удалось загрузить версию страницы"),
+      );
   }
 
   function closeEditor() {
@@ -235,6 +275,8 @@ export function PagesView({
     )
       return;
     setDirty(false);
+    openedPageId.current = null;
+    setRevisionCurrent(undefined);
     setEditor(null);
   }
 
@@ -260,11 +302,18 @@ export function PagesView({
       seoDescription: data.get("seoDescription"),
       canonicalUrl: data.get("canonicalUrl"),
       noIndex: data.get("noIndex") === "on",
+      ...(isVersionedPage
+        ? { expectedDraftRevisionId: revisionCurrent?.draft?.id ?? null }
+        : {}),
     };
   }
 
   async function savePage(form: HTMLFormElement) {
     if (!siteId || !editor || !editorCanEdit) return;
+    if (isVersionedPage && revisionCurrent === undefined) {
+      setMessage("Подождите загрузки версии страницы.");
+      return;
+    }
     const payload = pagePayload(form);
     try {
       await api(`/api/sites/${siteId}/content/pages/${editor.id}`, {
@@ -272,6 +321,8 @@ export function PagesView({
         body: JSON.stringify(payload),
       });
       setDirty(false);
+      openedPageId.current = null;
+      setRevisionCurrent(undefined);
       setEditor(null);
       setMessage("Страница сохранена");
       await load();
@@ -281,6 +332,65 @@ export function PagesView({
           ? reason.message
           : "Не удалось сохранить страницу",
       );
+    }
+  }
+
+  async function changePageRevision(
+    action: "submit" | "approve" | "request-changes" | "publish",
+  ) {
+    if (!siteId || !editor || !isVersionedPage || !revisionCurrent) return;
+    if (dirty) {
+      setMessage("Сначала сохраните изменения страницы.");
+      return;
+    }
+    let reason: string | undefined;
+    if (action === "request-changes") {
+      reason = window.prompt("Что нужно исправить в этой версии?")?.trim();
+      if (!reason) return;
+    }
+    if (action === "publish" && !window.confirm("Опубликовать именно одобренную версию страницы?"))
+      return;
+    setStatusBusy(true);
+    try {
+      const openedRevisionId = revisionCurrent.draft?.id;
+      const latest = (await api<PageRevisionCurrent | null>(
+        `/api/sites/${siteId}/content/pages/${editor.id}/revisions/current`,
+      )) ?? null;
+      if (!openedRevisionId || latest?.draft?.id !== openedRevisionId) {
+        setMessage("Версия страницы изменилась после открытия. Проверьте новую версию перед действием.");
+        return;
+      }
+      const available = revisionActions(latest, { canEdit, canApprove });
+      const permission = action === "request-changes" ? "requestChanges" : action;
+      if (!available[permission]) {
+        setMessage("Состояние версии изменилось. Обновите страницу и проверьте действия.");
+        return;
+      }
+      await api(`/api/sites/${siteId}/content/pages/${editor.id}/revisions/${openedRevisionId}/${action}`, {
+        method: "POST",
+        ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+      });
+      if (action === "publish") {
+        openedPageId.current = null;
+        setRevisionCurrent(undefined);
+        setEditor(null);
+      } else {
+        await reloadRevision(editor.id);
+      }
+      await load();
+      setMessage(
+        action === "submit"
+          ? "Версия страницы отправлена владельцу на проверку"
+          : action === "approve"
+            ? "Версия страницы одобрена"
+            : action === "request-changes"
+              ? "Версия страницы возвращена на доработку"
+              : "Одобренная версия страницы опубликована",
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Не удалось изменить состояние версии страницы");
+    } finally {
+      setStatusBusy(false);
     }
   }
 
@@ -418,8 +528,8 @@ export function PagesView({
                     <button type="button" onClick={() => openEditor(page)}>
                       <span aria-hidden="true">◇</span>
                       {canEdit || canApprove
-                        ? "Изменить шаблон"
-                        : "Открыть шаблон"}
+                        ? "Редактировать содержимое"
+                        : "Открыть содержимое"}
                     </button>
                     {siteSlug ? (
                       <a href={previewHref} target="_blank" rel="noreferrer">
@@ -434,8 +544,8 @@ export function PagesView({
           })}
           <div className="homepage-template-note">
             <span aria-hidden="true">i</span>
-            Шаблон определяет структуру и визуальное представление главной
-            страницы сайта.
+            Здесь редактируются данные существующей главной страницы. Код и
+            структура шаблона на этом этапе не изменяются.
           </div>
         </div>
       ) : visiblePages.length ? (
@@ -607,11 +717,41 @@ export function PagesView({
                   </em>
                 </header>
                 <p className="publication-hint">
-                  {editorCanEdit
+                  {isVersionedPage
+                    ? revisionCurrent === undefined
+                      ? "Загружаем состояние версии страницы…"
+                      : revisionCurrent?.draft
+                      ? `Черновик №${revisionCurrent.draft.versionNumber} · ${revisionCurrent.reviewState}. Публичная страница не меняется до выпуска одобренной версии.`
+                      : "Сохраните страницу, чтобы создать первую версию для согласования."
+                    : editorCanEdit
                     ? "Перед публикацией текущие изменения сохранятся автоматически. Статус нельзя изменить случайно через обычное сохранение."
                     : "Доступные действия зависят от вашей роли в рабочем пространстве."}
                 </p>
-                {canApprove ? (
+                {isVersionedPage ? (
+                  <div className="workflow-actions">
+                    {currentRevisionActions?.submit ? (
+                      <button type="button" disabled={statusBusy || dirty} onClick={() => void changePageRevision("submit")}>
+                        Отправить владельцу на проверку
+                      </button>
+                    ) : null}
+                    {currentRevisionActions?.requestChanges ? (
+                      <button type="button" className="changes" disabled={statusBusy || dirty} onClick={() => void changePageRevision("request-changes")}>
+                        Вернуть на доработку
+                      </button>
+                    ) : null}
+                    {currentRevisionActions?.approve ? (
+                      <button type="button" className="publish" disabled={statusBusy || dirty} onClick={() => void changePageRevision("approve")}>
+                        Одобрить версию
+                      </button>
+                    ) : null}
+                    {currentRevisionActions?.publish ? (
+                      <button type="button" className="publish" disabled={statusBusy || dirty} onClick={() => void changePageRevision("publish")}>
+                        Опубликовать одобренную версию
+                      </button>
+                    ) : null}
+                    {dirty ? <small>Сначала сохраните изменения страницы.</small> : null}
+                  </div>
+                ) : canApprove ? (
                   <div className="workflow-actions">
                     <button
                       type="button"
@@ -649,7 +789,7 @@ export function PagesView({
                       Открыть страницу ↗
                     </a>
                   </div>
-                ) : siteId && siteSlug ? (
+                ) : !isVersionedPage && siteId && siteSlug ? (
                   <div className="cms-preview-action">
                     <span>Последняя сохранённая версия</span>
                     <a
@@ -658,6 +798,18 @@ export function PagesView({
                       rel="noreferrer"
                     >
                       Предпросмотр ↗
+                    </a>
+                  </div>
+                ) : null}
+                {isVersionedPage && revisionCurrent?.draft && siteId && siteSlug ? (
+                  <div className="cms-preview-action">
+                    <span>Сохранённая версия №{revisionCurrent.draft.versionNumber}</span>
+                    <a
+                      href={`${editor.kind === "homepage" ? `/preview/${siteSlug}` : `/preview/${siteSlug}/pages/${editor.slug}`}?cmsSiteId=${siteId}&cmsPageId=${editor.id}&cmsRevisionId=${revisionCurrent.draft.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Посмотреть черновик ↗
                     </a>
                   </div>
                 ) : null}
@@ -766,7 +918,7 @@ export function PagesView({
                   {isArmaturexEditor && siteId && siteSlug ? (
                     <iframe
                       title="Предпросмотр шаблона Armaturex"
-                      src={`/preview/${siteSlug}?cmsSiteId=${siteId}&cmsPageId=${editor.id}`}
+                      src={`/preview/${siteSlug}?cmsSiteId=${siteId}&cmsPageId=${editor.id}${revisionCurrent?.draft?.id ? `&cmsRevisionId=${revisionCurrent.draft.id}` : ""}`}
                     />
                   ) : (
                     <div>
@@ -810,7 +962,15 @@ export function PagesView({
                   {editorCanEdit ? "Отмена" : "Закрыть"}
                 </button>
                 {editorCanEdit ? (
-                  <button type="submit">Сохранить страницу</button>
+                  <button
+                    type="submit"
+                    disabled={
+                      statusBusy ||
+                      (isVersionedPage && revisionCurrent === undefined)
+                    }
+                  >
+                    Сохранить страницу
+                  </button>
                 ) : null}
               </footer>
             </form>

@@ -7,12 +7,14 @@ import {
   Param,
   ParseIntPipe,
   ParseUUIDPipe,
+  Optional,
   Patch,
   Post,
   Put,
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   StreamableFile,
   UploadedFile,
   UseGuards,
@@ -36,6 +38,9 @@ import {
   ConfirmRecommendedSearchDto,
   DuplicateContentDto,
   RestoreArticleVersionDto,
+  RequestArticleRevisionChangesDto,
+  RestoreArticleRevisionDto,
+  RestorePageRevisionDto,
   SchedulePublicationDto,
   UpdateArticleDto,
   UpdateArticleBodyDto,
@@ -56,11 +61,15 @@ import {
   UpdateSiteSeoDto,
   UpdateSearchSettingsDto,
   UpdateSiteVariableDto,
+  UnassignPageBannerDto,
   UploadMediaDto,
 } from './content.dto';
 import { ContentEntityType, ContentEventType } from '../database/entities';
 import { ContentLifecycleService } from './content-lifecycle.service';
 import { ContentService } from './content.service';
+import { CmsRevisionsService } from './cms-revisions.service';
+import { SiteResourceRevisionsService } from './site-resource-revisions.service';
+import { ContentMetadataRevisionsService } from './content-metadata-revisions.service';
 
 @Controller('sites/:siteId/content')
 @UseGuards(JwtAuthGuard)
@@ -68,7 +77,34 @@ export class ContentController {
   constructor(
     private readonly contentService: ContentService,
     private readonly lifecycleService: ContentLifecycleService,
+    private readonly revisions: CmsRevisionsService,
+    @Optional()
+    private readonly versionedSiteResources?: SiteResourceRevisionsService,
+    @Optional()
+    private readonly metadataRevisions?: ContentMetadataRevisionsService,
   ) {}
+
+  private metadata() {
+    if (!this.metadataRevisions)
+      throw new ServiceUnavailableException(
+        'Сервис версий metadata-ресурсов недоступен',
+      );
+    return this.metadataRevisions;
+  }
+
+  private rejectLegacyVersionedMutation() {
+    if (this.versionedSiteResources)
+      throw new BadRequestException(
+        'Этот раздел изменяется только через версионный черновик',
+      );
+  }
+
+  private siteSettingsResource(scope?: string) {
+    if (!scope) return 'site_globals' as const;
+    if (scope === 'header') return 'site_header' as const;
+    if (scope === 'footer') return 'site_footer' as const;
+    throw new BadRequestException('Неизвестный раздел настроек сайта');
+  }
 
   @Get('settings')
   settings(
@@ -128,12 +164,159 @@ export class ContentController {
     return this.contentService.updateSiteGlobals(siteId, request.auth!, dto);
   }
 
+  @Get(['globals/revisions/current', 'layout/:scope/revisions/current'])
+  siteSettingsRevisionCurrent(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.revisions.current(
+      siteId,
+      this.siteSettingsResource(scope),
+      siteId,
+      request.auth!,
+    );
+  }
+
+  @Get(['globals/revisions', 'layout/:scope/revisions'])
+  siteSettingsRevisionHistory(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.revisions.listVersions(
+      siteId,
+      this.siteSettingsResource(scope),
+      siteId,
+      request.auth!,
+    );
+  }
+
+  @Get([
+    'globals/revisions/:revisionId/preview',
+    'layout/:scope/revisions/:revisionId/preview',
+  ])
+  siteSettingsRevisionPreview(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getSiteSettingsRevisionPreview(
+      siteId,
+      this.siteSettingsResource(scope),
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post([
+    'globals/revisions/:revisionId/submit',
+    'layout/:scope/revisions/:revisionId/submit',
+  ])
+  async submitSiteSettingsRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.revisions.submit(
+      siteId,
+      this.siteSettingsResource(scope),
+      siteId,
+      revisionId,
+      request.auth!,
+    );
+    return { revisionId };
+  }
+
+  @Post([
+    'globals/revisions/:revisionId/approve',
+    'layout/:scope/revisions/:revisionId/approve',
+  ])
+  async approveSiteSettingsRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.revisions.approve(
+      siteId,
+      this.siteSettingsResource(scope),
+      siteId,
+      revisionId,
+      request.auth!,
+    );
+    return { revisionId };
+  }
+
+  @Post([
+    'globals/revisions/:revisionId/request-changes',
+    'layout/:scope/revisions/:revisionId/request-changes',
+  ])
+  async requestSiteSettingsRevisionChanges(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestArticleRevisionChangesDto,
+  ) {
+    await this.revisions.requestChanges(
+      siteId,
+      this.siteSettingsResource(scope),
+      siteId,
+      revisionId,
+      request.auth!,
+      dto.reason,
+    );
+    return { revisionId };
+  }
+
+  @Post([
+    'globals/revisions/:revisionId/publish',
+    'layout/:scope/revisions/:revisionId/publish',
+  ])
+  publishSiteSettingsRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.publishSiteSettingsRevision(
+      siteId,
+      this.siteSettingsResource(scope),
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post([
+    'globals/revisions/:revisionId/restore',
+    'layout/:scope/revisions/:revisionId/restore',
+  ])
+  restoreSiteSettingsRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string | undefined,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestoreArticleRevisionDto,
+  ) {
+    return this.revisions.restore(
+      siteId,
+      this.siteSettingsResource(scope),
+      siteId,
+      revisionId,
+      dto.expectedDraftRevisionId ?? null,
+      request.auth!,
+    );
+  }
+
   @Get('layout')
   layout(
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.contentService.getSiteLayout(siteId, request.auth!);
+    return this.metadata().getLayoutBindings(siteId, request.auth!);
   }
 
   @Patch('layout')
@@ -142,7 +325,47 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateSiteLayoutDto,
   ) {
-    return this.contentService.updateSiteLayout(siteId, request.auth!, dto);
+    if (dto.expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    return this.metadata().saveLayoutBindings(siteId, request.auth!, {
+      headerTemplateKey: dto.headerTemplateKey ?? '',
+      headerTemplateVersion: dto.headerTemplateVersion ?? '',
+      headerTemplateConfig: dto.headerTemplateConfig ?? {},
+      footerTemplateKey: dto.footerTemplateKey ?? '',
+      footerTemplateVersion: dto.footerTemplateVersion ?? '',
+      footerTemplateConfig: dto.footerTemplateConfig ?? {},
+      expectedDraftRevisionId: dto.expectedDraftRevisionId,
+    });
+  }
+
+  @Get('layout/:scope')
+  layoutSection(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    const resourceType = this.siteSettingsResource(scope);
+    return this.contentService.getSiteLayoutSection(
+      siteId,
+      resourceType === 'site_header' ? 'header' : 'footer',
+      request.auth!,
+    );
+  }
+
+  @Patch('layout/:scope')
+  updateLayoutSection(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('scope') scope: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateSiteLayoutDto,
+  ) {
+    const resourceType = this.siteSettingsResource(scope);
+    return this.contentService.updateSiteLayoutSection(
+      siteId,
+      resourceType === 'site_header' ? 'header' : 'footer',
+      request.auth!,
+      dto,
+    );
   }
 
   @Get('seo')
@@ -159,6 +382,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateSiteSeoDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.updateSiteSeo(siteId, request.auth!, dto);
   }
 
@@ -194,6 +418,157 @@ export class ContentController {
     );
   }
 
+  @Get('banners/:bannerId/revisions/current')
+  async currentBannerRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedBanner(
+      siteId,
+      bannerId,
+      request.auth!,
+    );
+    return this.revisions.current(siteId, 'banner', bannerId, request.auth!);
+  }
+
+  @Get('banners/:bannerId/revisions')
+  async bannerRevisions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedBanner(
+      siteId,
+      bannerId,
+      request.auth!,
+    );
+    return this.revisions.listVersions(
+      siteId,
+      'banner',
+      bannerId,
+      request.auth!,
+    );
+  }
+
+  @Get('banners/:bannerId/revisions/:revisionId/preview')
+  previewBannerRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getBannerRevisionPreview(
+      siteId,
+      bannerId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('banners/:bannerId/revisions/:revisionId/submit')
+  async submitBannerRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedBanner(
+      siteId,
+      bannerId,
+      request.auth!,
+    );
+    return this.revisions.submit(
+      siteId,
+      'banner',
+      bannerId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('banners/:bannerId/revisions/:revisionId/approve')
+  async approveBannerRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedBanner(
+      siteId,
+      bannerId,
+      request.auth!,
+    );
+    return this.revisions.approve(
+      siteId,
+      'banner',
+      bannerId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('banners/:bannerId/revisions/:revisionId/request-changes')
+  async requestBannerRevisionChanges(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestArticleRevisionChangesDto,
+  ) {
+    await this.contentService.assertVersionedBanner(
+      siteId,
+      bannerId,
+      request.auth!,
+    );
+    return this.revisions.requestChanges(
+      siteId,
+      'banner',
+      bannerId,
+      revisionId,
+      request.auth!,
+      dto.reason,
+    );
+  }
+
+  @Post('banners/:bannerId/revisions/:revisionId/publish')
+  publishBannerRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.publishBannerRevision(
+      siteId,
+      bannerId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('banners/:bannerId/revisions/:revisionId/restore')
+  async restoreBannerRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('bannerId', ParseUUIDPipe) bannerId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestorePageRevisionDto,
+  ) {
+    await this.contentService.assertVersionedBanner(
+      siteId,
+      bannerId,
+      request.auth!,
+    );
+    return this.revisions.restore(
+      siteId,
+      'banner',
+      bannerId,
+      revisionId,
+      dto.expectedDraftRevisionId,
+      request.auth!,
+    );
+  }
+
   @Delete('banners/:bannerId')
   deleteBanner(
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -217,6 +592,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: CreateSiteVariableDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.createSiteVariable(siteId, request.auth!, dto);
   }
 
@@ -227,6 +603,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateSiteVariableDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.updateSiteVariable(
       siteId,
       variableId,
@@ -241,6 +618,7 @@ export class ContentController {
     @Param('variableId', ParseUUIDPipe) variableId: string,
     @Req() request: AuthenticatedRequest,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.deleteSiteVariable(
       siteId,
       variableId,
@@ -262,6 +640,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateSearchSettingsDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.updateSearchSettings(siteId, request.auth!, dto);
   }
 
@@ -271,6 +650,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: ConfirmRecommendedSearchDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.confirmRecommendedSearch(
       siteId,
       request.auth!,
@@ -299,10 +679,7 @@ export class ContentController {
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.lifecycleService.getArticleSectionSettings(
-      siteId,
-      request.auth!,
-    );
+    return this.metadata().getArticleListSettings(siteId, request.auth!);
   }
 
   @Patch('articles/settings')
@@ -311,11 +688,12 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateArticleSectionSettingsDto,
   ) {
-    return this.lifecycleService.updateArticleSectionSettings(
-      siteId,
-      request.auth!,
-      dto,
-    );
+    return this.metadata().saveArticleListSettings(siteId, request.auth!, {
+      templateKey: dto.templateKey,
+      templateVersion: dto.templateVersion,
+      config: dto.config,
+      expectedDraftRevisionId: dto.expectedDraftRevisionId,
+    });
   }
 
   @Get('trash')
@@ -335,6 +713,127 @@ export class ContentController {
     return this.contentService.getArticlePreview(
       siteId,
       articleId,
+      request.auth!,
+    );
+  }
+
+  @Get('articles/:articleId/revisions/:revisionId/preview')
+  previewArticleRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getArticlePreview(
+      siteId,
+      articleId,
+      request.auth!,
+      revisionId,
+    );
+  }
+
+  @Get('articles/:articleId/revisions/current')
+  currentArticleRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.revisions.current(siteId, 'article', articleId, request.auth!);
+  }
+
+  @Get('articles/:articleId/revisions')
+  articleRevisions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.revisions.listVersions(
+      siteId,
+      'article',
+      articleId,
+      request.auth!,
+    );
+  }
+
+  @Post('articles/:articleId/revisions/:revisionId/submit')
+  submitArticleRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.revisions.submit(
+      siteId,
+      'article',
+      articleId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('articles/:articleId/revisions/:revisionId/approve')
+  approveArticleRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.revisions.approve(
+      siteId,
+      'article',
+      articleId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('articles/:articleId/revisions/:revisionId/request-changes')
+  requestArticleRevisionChanges(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestArticleRevisionChangesDto,
+  ) {
+    return this.revisions.requestChanges(
+      siteId,
+      'article',
+      articleId,
+      revisionId,
+      request.auth!,
+      dto.reason,
+    );
+  }
+
+  @Post('articles/:articleId/revisions/:revisionId/publish')
+  publishArticleRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.lifecycleService.publishArticleRevision(
+      siteId,
+      articleId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('articles/:articleId/revisions/:revisionId/restore')
+  restoreArticleRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('articleId', ParseUUIDPipe) articleId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestoreArticleRevisionDto,
+  ) {
+    return this.revisions.restore(
+      siteId,
+      'article',
+      articleId,
+      revisionId,
+      dto.expectedDraftRevisionId,
       request.auth!,
     );
   }
@@ -575,11 +1074,7 @@ export class ContentController {
     @Param('articleId', ParseUUIDPipe) articleId: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.lifecycleService.getRelatedArticles(
-      siteId,
-      articleId,
-      request.auth!,
-    );
+    return this.metadata().getRelatedArticles(siteId, articleId, request.auth!);
   }
 
   @Patch('articles/:articleId/related')
@@ -589,7 +1084,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateRelatedArticlesDto,
   ) {
-    return this.lifecycleService.updateRelatedArticles(
+    return this.metadata().saveRelatedArticles(
       siteId,
       articleId,
       request.auth!,
@@ -804,6 +1299,162 @@ export class ContentController {
     );
   }
 
+  @Get('categories/:categoryId/revisions/current')
+  async currentCategoryRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+    return this.revisions.current(
+      siteId,
+      'category',
+      categoryId,
+      request.auth!,
+    );
+  }
+
+  @Get('categories/:categoryId/revisions')
+  async categoryRevisions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+    return this.revisions.listVersions(
+      siteId,
+      'category',
+      categoryId,
+      request.auth!,
+    );
+  }
+
+  @Get('categories/:categoryId/revisions/:revisionId/preview')
+  previewCategoryRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getCategoryRevisionPreview(
+      siteId,
+      categoryId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('categories/:categoryId/revisions/:revisionId/submit')
+  async submitCategoryRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+    return this.revisions.submit(
+      siteId,
+      'category',
+      categoryId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('categories/:categoryId/revisions/:revisionId/approve')
+  async approveCategoryRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+    return this.revisions.approve(
+      siteId,
+      'category',
+      categoryId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('categories/:categoryId/revisions/:revisionId/request-changes')
+  async requestCategoryRevisionChanges(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestArticleRevisionChangesDto,
+  ) {
+    await this.contentService.assertVersionedCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+    return this.revisions.requestChanges(
+      siteId,
+      'category',
+      categoryId,
+      revisionId,
+      request.auth!,
+      dto.reason,
+    );
+  }
+
+  @Post('categories/:categoryId/revisions/:revisionId/publish')
+  publishCategoryRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.publishCategoryRevision(
+      siteId,
+      categoryId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('categories/:categoryId/revisions/:revisionId/restore')
+  async restoreCategoryRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('categoryId', ParseUUIDPipe) categoryId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestorePageRevisionDto,
+  ) {
+    await this.contentService.assertVersionedCategory(
+      siteId,
+      categoryId,
+      request.auth!,
+    );
+    return this.revisions.restore(
+      siteId,
+      'category',
+      categoryId,
+      revisionId,
+      dto.expectedDraftRevisionId,
+      request.auth!,
+    );
+  }
+
   @Get('categories/:categoryId/activity')
   categoryActivity(
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -864,6 +1515,157 @@ export class ContentController {
     );
   }
 
+  @Get('authors/:authorId/revisions/current')
+  async currentAuthorRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedAuthor(
+      siteId,
+      authorId,
+      request.auth!,
+    );
+    return this.revisions.current(siteId, 'author', authorId, request.auth!);
+  }
+
+  @Get('authors/:authorId/revisions')
+  async authorRevisions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedAuthor(
+      siteId,
+      authorId,
+      request.auth!,
+    );
+    return this.revisions.listVersions(
+      siteId,
+      'author',
+      authorId,
+      request.auth!,
+    );
+  }
+
+  @Get('authors/:authorId/revisions/:revisionId/preview')
+  previewAuthorRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getAuthorRevisionPreview(
+      siteId,
+      authorId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('authors/:authorId/revisions/:revisionId/submit')
+  async submitAuthorRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedAuthor(
+      siteId,
+      authorId,
+      request.auth!,
+    );
+    return this.revisions.submit(
+      siteId,
+      'author',
+      authorId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('authors/:authorId/revisions/:revisionId/approve')
+  async approveAuthorRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedAuthor(
+      siteId,
+      authorId,
+      request.auth!,
+    );
+    return this.revisions.approve(
+      siteId,
+      'author',
+      authorId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('authors/:authorId/revisions/:revisionId/request-changes')
+  async requestAuthorRevisionChanges(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestArticleRevisionChangesDto,
+  ) {
+    await this.contentService.assertVersionedAuthor(
+      siteId,
+      authorId,
+      request.auth!,
+    );
+    return this.revisions.requestChanges(
+      siteId,
+      'author',
+      authorId,
+      revisionId,
+      request.auth!,
+      dto.reason,
+    );
+  }
+
+  @Post('authors/:authorId/revisions/:revisionId/publish')
+  publishAuthorRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.publishAuthorRevision(
+      siteId,
+      authorId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('authors/:authorId/revisions/:revisionId/restore')
+  async restoreAuthorRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('authorId', ParseUUIDPipe) authorId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestorePageRevisionDto,
+  ) {
+    await this.contentService.assertVersionedAuthor(
+      siteId,
+      authorId,
+      request.auth!,
+    );
+    return this.revisions.restore(
+      siteId,
+      'author',
+      authorId,
+      revisionId,
+      dto.expectedDraftRevisionId,
+      request.auth!,
+    );
+  }
+
   @Delete('authors/:authorId')
   deleteAuthor(
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -874,11 +1676,12 @@ export class ContentController {
   }
 
   @Get('media')
-  media(
+  async media(
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Req() request: AuthenticatedRequest,
   ) {
-    return this.contentService.listMedia(siteId, request.auth!);
+    const items = await this.contentService.listMedia(siteId, request.auth!);
+    return this.metadata().applyDraftAlt(siteId, request.auth!, items);
   }
 
   @Post('media')
@@ -929,7 +1732,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateMediaDto,
   ) {
-    return this.contentService.updateMedia(siteId, mediaId, request.auth!, dto);
+    return this.metadata().saveMediaAlt(siteId, mediaId, request.auth!, dto);
   }
 
   @Delete('media/:mediaId')
@@ -963,6 +1766,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateNotFoundTemplateDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.updateNotFoundTemplate(
       siteId,
       request.auth!,
@@ -976,6 +1780,7 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdateNotFoundSeoDto,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.updateNotFoundSeo(siteId, request.auth!, dto);
   }
 
@@ -984,6 +1789,7 @@ export class ContentController {
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Req() request: AuthenticatedRequest,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.activateNotFoundPage(siteId, request.auth!);
   }
 
@@ -992,6 +1798,7 @@ export class ContentController {
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Req() request: AuthenticatedRequest,
   ) {
+    this.rejectLegacyVersionedMutation();
     return this.contentService.deactivateNotFoundPage(siteId, request.auth!);
   }
 
@@ -1002,6 +1809,152 @@ export class ContentController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.contentService.getPagePreview(siteId, pageId, request.auth!);
+  }
+
+  @Get('pages/:pageId/revisions/current')
+  async currentPageRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedPage(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+    return this.revisions.current(siteId, 'page', pageId, request.auth!);
+  }
+
+  @Get('pages/:pageId/revisions')
+  async pageRevisions(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedPage(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+    return this.revisions.listVersions(siteId, 'page', pageId, request.auth!);
+  }
+
+  @Get('pages/:pageId/revisions/:revisionId/preview')
+  previewPageRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.getPageRevisionPreview(
+      siteId,
+      pageId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('pages/:pageId/revisions/:revisionId/submit')
+  async submitPageRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedPage(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+    return this.revisions.submit(
+      siteId,
+      'page',
+      pageId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('pages/:pageId/revisions/:revisionId/approve')
+  async approvePageRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    await this.contentService.assertVersionedPage(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+    return this.revisions.approve(
+      siteId,
+      'page',
+      pageId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('pages/:pageId/revisions/:revisionId/request-changes')
+  async requestPageRevisionChanges(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RequestArticleRevisionChangesDto,
+  ) {
+    await this.contentService.assertVersionedPage(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+    return this.revisions.requestChanges(
+      siteId,
+      'page',
+      pageId,
+      revisionId,
+      request.auth!,
+      dto.reason,
+    );
+  }
+
+  @Post('pages/:pageId/revisions/:revisionId/publish')
+  publishPageRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.contentService.publishPageRevision(
+      siteId,
+      pageId,
+      revisionId,
+      request.auth!,
+    );
+  }
+
+  @Post('pages/:pageId/revisions/:revisionId/restore')
+  async restorePageRevision(
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Param('pageId', ParseUUIDPipe) pageId: string,
+    @Param('revisionId', ParseUUIDPipe) revisionId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: RestorePageRevisionDto,
+  ) {
+    await this.contentService.assertVersionedPage(
+      siteId,
+      pageId,
+      request.auth!,
+    );
+    return this.revisions.restore(
+      siteId,
+      'page',
+      pageId,
+      revisionId,
+      dto.expectedDraftRevisionId,
+      request.auth!,
+    );
   }
 
   @Patch('pages/:pageId')
@@ -1048,12 +2001,14 @@ export class ContentController {
     @Param('pageId', ParseUUIDPipe) pageId: string,
     @Param('zone') zone: string,
     @Req() request: AuthenticatedRequest,
+    @Body() dto: UnassignPageBannerDto,
   ) {
     return this.contentService.unassignPageBanner(
       siteId,
       pageId,
       zone,
       request.auth!,
+      dto,
     );
   }
 

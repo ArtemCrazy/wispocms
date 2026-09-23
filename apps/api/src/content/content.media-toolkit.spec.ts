@@ -29,6 +29,7 @@ describe('ContentService Media site toolkit', () => {
     };
     const banners = {
       existsBy: jest.fn().mockResolvedValue(true),
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue({
         id: 'banner-id',
         siteId: 'site-id',
@@ -77,6 +78,20 @@ describe('ContentService Media site toolkit', () => {
       save: jest.fn().mockResolvedValue(undefined),
       find: jest.fn().mockResolvedValue(activityRows),
     };
+    const revisions = {
+      current: jest.fn().mockResolvedValue(null),
+      importPublishedBaseline: jest
+        .fn()
+        .mockResolvedValue({ id: 'baseline-id', versionNumber: 1 }),
+      saveDraft: jest
+        .fn()
+        .mockResolvedValue({ id: 'draft-id', versionNumber: 2 }),
+      saveDraftUsingManager: jest
+        .fn()
+        .mockResolvedValue({ id: 'created-draft-id', versionNumber: 1 }),
+      publish: jest.fn(),
+      getVersion: jest.fn(),
+    };
     const service = new ContentService(
       sites as never,
       {} as never,
@@ -96,6 +111,7 @@ describe('ContentService Media site toolkit', () => {
       variables as never,
       undefined,
       pageActivities as never,
+      revisions as never,
     );
     return {
       service,
@@ -105,27 +121,21 @@ describe('ContentService Media site toolkit', () => {
       banners,
       media,
       pages,
+      revisions,
     };
   }
 
-  it('upserts one banner per page zone and records page history', async () => {
-    const { service, assignments, pageActivities } = setup();
+  it('stages one banner per page zone without changing public assignments', async () => {
+    const { service, assignments, revisions } = setup();
     await expect(
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'homepage_top',
         bannerId: 'banner-id',
+        expectedDraftRevisionId: null,
       }),
-    ).resolves.toEqual([]);
-    expect(assignments.upsert).toHaveBeenCalledWith(
-      {
-        siteId: 'site-id',
-        pageId: 'page-id',
-        bannerId: 'banner-id',
-        zone: 'homepage_top',
-      },
-      ['pageId', 'zone'],
-    );
-    expect(pageActivities.save).toHaveBeenCalled();
+    ).resolves.toEqual({ assignments: [], draftRevisionId: 'draft-id' });
+    expect(assignments.upsert).not.toHaveBeenCalled();
+    expect(revisions.saveDraft).toHaveBeenCalled();
   });
 
   it('returns developer-owned slots with the bound homepage', async () => {
@@ -152,6 +162,7 @@ describe('ContentService Media site toolkit', () => {
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'invented_zone',
         bannerId: 'banner-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toThrow('Шаблон страницы не содержит такой зоны баннера');
     expect(assignments.upsert).not.toHaveBeenCalled();
@@ -189,6 +200,7 @@ describe('ContentService Media site toolkit', () => {
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'homepage_top',
         bannerId: 'banner-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toBeInstanceOf(Error);
     expect(assignments.upsert).not.toHaveBeenCalled();
@@ -201,6 +213,7 @@ describe('ContentService Media site toolkit', () => {
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'homepage_middle',
         bannerId: 'foreign-banner-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toThrow('Баннер этого сайта не найден');
     expect(assignments.upsert).not.toHaveBeenCalled();
@@ -221,13 +234,14 @@ describe('ContentService Media site toolkit', () => {
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'homepage_middle',
         bannerId: 'banner-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toThrow('Для этой зоны требуется изображение для компьютера');
     expect(assignments.upsert).not.toHaveBeenCalled();
   });
 
   it('accepts a compatible banner with exact slot geometry', async () => {
-    const { service, assignments, banners } = setup();
+    const { service, assignments, banners, revisions } = setup();
     banners.findOne.mockResolvedValue({
       id: 'banner-id',
       siteId: 'site-id',
@@ -241,9 +255,11 @@ describe('ContentService Media site toolkit', () => {
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'homepage_middle',
         bannerId: 'banner-id',
+        expectedDraftRevisionId: null,
       }),
-    ).resolves.toEqual([]);
-    expect(assignments.upsert).toHaveBeenCalled();
+    ).resolves.toEqual({ assignments: [], draftRevisionId: 'draft-id' });
+    expect(assignments.upsert).not.toHaveBeenCalled();
+    expect(revisions.saveDraft).toHaveBeenCalled();
   });
 
   it('rejects an image whose actual geometry misses the slot contract', async () => {
@@ -267,6 +283,7 @@ describe('ContentService Media site toolkit', () => {
       service.assignPageBanner('site-id', 'page-id', actor, {
         zone: 'homepage_middle',
         bannerId: 'banner-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toThrow(
       'ожидается не меньше 1800 × 480 px, формат 15:4, получено 1200 × 400 px',
@@ -306,7 +323,10 @@ describe('ContentService Media site toolkit', () => {
     ]);
 
     await expect(
-      service.updateBanner('site-id', 'banner-id', actor, { mediaId: null }),
+      service.updateBanner('site-id', 'banner-id', actor, {
+        mediaId: null,
+        expectedDraftRevisionId: null,
+      }),
     ).rejects.toThrow('Для этой зоны требуется изображение для компьютера');
     expect(banners.save).not.toHaveBeenCalled();
   });
@@ -351,6 +371,7 @@ describe('ContentService Media site toolkit', () => {
     await expect(
       service.updateBanner('site-id', 'banner-id', actor, {
         mediaId: 'bad-media-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toThrow(
       'ожидается не меньше 1800 × 480 px, формат 15:4, получено 1200 × 400 px',
@@ -380,13 +401,16 @@ describe('ContentService Media site toolkit', () => {
     ]);
 
     await expect(
-      service.updateBanner('site-id', 'banner-id', actor, update),
+      service.updateBanner('site-id', 'banner-id', actor, {
+        ...update,
+        expectedDraftRevisionId: null,
+      }),
     ).rejects.toBeInstanceOf(Error);
     expect(banners.save).not.toHaveBeenCalled();
   });
 
   it('accepts a compatible update to an assigned active banner', async () => {
-    const { service, assignments, banners } = setup();
+    const { service, assignments, banners, revisions } = setup();
     assignments.find.mockResolvedValue([
       {
         siteId: 'site-id',
@@ -406,13 +430,23 @@ describe('ContentService Media site toolkit', () => {
     await expect(
       service.updateBanner('site-id', 'banner-id', actor, {
         title: 'Новая акция',
+        expectedDraftRevisionId: null,
       }),
     ).resolves.toEqual(expect.objectContaining({ title: 'Новая акция' }));
-    expect(banners.save).toHaveBeenCalledTimes(1);
+    expect(banners.save).not.toHaveBeenCalled();
+    const snapshotMatcher: unknown = expect.objectContaining({
+      title: 'Новая акция',
+    });
+    expect(revisions.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceType: 'banner',
+        snapshot: snapshotMatcher,
+      }),
+    );
   });
 
   it('allows an invalid assigned draft only while inactive and validates reactivation', async () => {
-    const { service, assignments, banners } = setup();
+    const { service, assignments, banners, revisions } = setup();
     const existing = {
       id: 'banner-id',
       siteId: 'site-id',
@@ -447,20 +481,34 @@ describe('ContentService Media site toolkit', () => {
       service.updateBanner('site-id', 'banner-id', actor, {
         title: null,
         isActive: false,
+        expectedDraftRevisionId: null,
       }),
     ).resolves.toEqual(
       expect.objectContaining({ isActive: false, title: null }),
     );
-    banners.save.mockClear();
+    revisions.saveDraft.mockClear();
+    revisions.current.mockResolvedValue({
+      draft: {
+        id: 'draft-id',
+        versionNumber: 2,
+        snapshot: { ...existing, title: null, isActive: false },
+      },
+      approvedRevisionId: null,
+      publishedRevisionId: 'baseline-id',
+      reviewState: 'draft',
+    });
 
     await expect(
-      service.updateBanner('site-id', 'banner-id', actor, { isActive: true }),
+      service.updateBanner('site-id', 'banner-id', actor, {
+        isActive: true,
+        expectedDraftRevisionId: 'draft-id',
+      }),
     ).rejects.toBeInstanceOf(Error);
-    expect(banners.save).not.toHaveBeenCalled();
+    expect(revisions.saveDraft).not.toHaveBeenCalled();
   });
 
   it('keeps the legacy article sidebar placement while editing its content', async () => {
-    const { service, banners } = setup();
+    const { service, banners, revisions } = setup();
     const existing = {
       id: 'sidebar-banner-id',
       siteId: 'site-id',
@@ -477,12 +525,17 @@ describe('ContentService Media site toolkit', () => {
     banners.findOne.mockResolvedValue(existing);
     await service.updateBanner('site-id', 'sidebar-banner-id', actor, {
       title: 'После изменения',
+      expectedDraftRevisionId: null,
     });
     expect(existing.placement).toBe(BannerPlacement.ARTICLE_SIDEBAR);
-    expect(banners.save).toHaveBeenCalledWith(
+    expect(banners.save).not.toHaveBeenCalled();
+    const snapshotMatcher: unknown = expect.objectContaining({
+      title: 'После изменения',
+      placement: BannerPlacement.ARTICLE_SIDEBAR,
+    });
+    expect(revisions.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'После изменения',
-        placement: BannerPlacement.ARTICLE_SIDEBAR,
+        snapshot: snapshotMatcher,
       }),
     );
   });

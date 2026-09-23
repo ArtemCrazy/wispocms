@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { SiteLayoutView } from "./site-layout-view";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type SearchSettings = {
   searchableSections: string[];
   popularQueries: Array<{ id: string; query: string }>;
   recommendedQueries: Array<{ id: string; query: string }>;
-  analyticsAvailable: boolean;
+  analyticsAvailable?: boolean;
+  draftRevisionId: string | null;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -30,16 +32,20 @@ function SearchSettingsView({
   siteId,
   siteSlug,
   canEdit,
+  canApprove,
 }: {
   siteId: string;
   siteSlug: string;
   canEdit: boolean;
+  canApprove: boolean;
 }) {
   const [settings, setSettings] = useState<SearchSettings | null>(null);
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
-    setSettings(await request(`/api/sites/${siteId}/content/search-settings`));
+    setSettings(
+      await request(`/api/sites/${siteId}/content/versioned/search`),
+    );
   }, [siteId]);
 
   useEffect(() => {
@@ -54,15 +60,19 @@ function SearchSettingsView({
     if (!canEdit) return;
     try {
       setSettings(
-        await request(`/api/sites/${siteId}/content/search-settings`, {
-          method: "PATCH",
+        await request(`/api/sites/${siteId}/content/versioned/search`, {
+          method: "PUT",
           body: JSON.stringify({
-            searchableSections: next.searchableSections,
-            popularQueries: next.popularQueries,
+            expectedDraftRevisionId: settings?.draftRevisionId ?? null,
+            snapshot: {
+              searchableSections: next.searchableSections,
+              popularQueries: next.popularQueries,
+              recommendedQueries: next.recommendedQueries,
+            },
           }),
         }),
       );
-      setMessage("Настройки поиска сохранены");
+      setMessage("Настройки поиска сохранены как новая версия");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -237,17 +247,15 @@ function SearchSettingsView({
             <button
               type="button"
               disabled={!canEdit}
-              onClick={async () => {
-                setSettings(
-                  await request(
-                    `/api/sites/${siteId}/content/search-settings/recommendations/confirm`,
-                    {
-                      method: "POST",
-                      body: JSON.stringify({ recommendationId: item.id }),
-                    },
+              onClick={() =>
+                void persist({
+                  ...settings,
+                  popularQueries: [...settings.popularQueries, item],
+                  recommendedQueries: settings.recommendedQueries.filter(
+                    (candidate) => candidate.id !== item.id,
                   ),
-                );
-              }}
+                })
+              }
             >
               Добавить
             </button>
@@ -262,6 +270,16 @@ function SearchSettingsView({
           состояние.
         </p>
       </article>
+      <SiteSettingsRevisionPanel
+        siteId={siteId}
+        resource="search"
+        label="Поиск"
+        canEdit={canEdit}
+        canApprove={canApprove}
+        dirty={false}
+        refreshToken={settings.draftRevisionId}
+        onChanged={load}
+      />
     </section>
   );
 }
@@ -271,12 +289,14 @@ export function MediaLayoutView({
   siteName,
   siteSlug,
   canEdit,
+  canApprove,
   onDirtyChange,
 }: {
   siteId?: string;
   siteName?: string;
   siteSlug?: string;
   canEdit: boolean;
+  canApprove: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [tab, setTab] = useState<"header" | "footer" | "search">("header");
@@ -314,6 +334,7 @@ export function MediaLayoutView({
           siteName={siteName}
           mode={tab}
           canEdit={canEdit}
+          canApprove={canApprove}
           onDirtyChange={onDirtyChange}
         />
       ) : null}
@@ -322,6 +343,7 @@ export function MediaLayoutView({
           siteId={siteId}
           siteSlug={siteSlug}
           canEdit={canEdit}
+          canApprove={canApprove}
         />
       ) : null}
     </section>

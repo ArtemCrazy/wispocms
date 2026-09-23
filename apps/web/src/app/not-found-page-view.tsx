@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { NotFoundTemplateData } from "./not-found-template";
+import {
+  NotFoundTemplate,
+  type NotFoundTemplateData,
+} from "./not-found-template";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type NotFoundState = {
   site: { id: string; name: string; slug: string };
@@ -18,6 +22,16 @@ type NotFoundState = {
   publishedTemplate: NotFoundTemplateData | null;
   hasPendingTemplateChanges: boolean;
   templates: NotFoundTemplateData[];
+  draftRevisionId: string | null;
+};
+
+type NotFoundDraft = {
+  status: "draft" | "published";
+  seoTitle: string | null;
+  seoDescription: string | null;
+  templateKey: string;
+  templateVersion: string;
+  draftRevisionId: string | null;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -39,10 +53,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function NotFoundPageView({
   siteId,
   canEdit = true,
+  canEditCode = true,
   canApprove = true,
 }: {
   siteId?: string;
   canEdit?: boolean;
+  canEditCode?: boolean;
   canApprove?: boolean;
 }) {
   const [state, setState] = useState<NotFoundState | null>(null);
@@ -54,9 +70,32 @@ export function NotFoundPageView({
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    const next = await request<NotFoundState>(
-      `/api/sites/${siteId}/content/not-found`,
-    );
+    const [catalog, draft] = await Promise.all([
+      request<NotFoundState>(`/api/sites/${siteId}/content/not-found`),
+      request<NotFoundDraft>(
+        `/api/sites/${siteId}/content/versioned/not-found`,
+      ),
+    ]);
+    const template =
+      catalog.templates.find(
+        (candidate) =>
+          candidate.key === draft.templateKey &&
+          candidate.version === draft.templateVersion,
+      ) ?? catalog.template;
+    const next: NotFoundState = {
+      ...catalog,
+      page: {
+        ...catalog.page,
+        status: draft.status,
+        seoTitle: draft.seoTitle,
+        seoDescription: draft.seoDescription,
+      },
+      template,
+      hasPendingTemplateChanges:
+        template.key !== catalog.publishedTemplate?.key ||
+        template.version !== catalog.publishedTemplate?.version,
+      draftRevisionId: draft.draftRevisionId,
+    };
     setState(next);
     setSelectedKey(next.template.key);
     setSeoTitle(next.page.seoTitle ?? "");
@@ -71,17 +110,31 @@ export function NotFoundPageView({
     return () => window.clearTimeout(timer);
   }, [load]);
 
-  async function perform(url: string, init?: RequestInit) {
-    if (!siteId) return;
+  async function saveDraft(patch: Partial<NotFoundDraft>) {
+    if (!siteId || !state) return;
     setBusy(true);
     setMessage("");
     try {
-      const next = await request<NotFoundState>(url, init);
-      setState(next);
-      setSelectedKey(next.template.key);
-      setSeoTitle(next.page.seoTitle ?? "");
-      setSeoDescription(next.page.seoDescription ?? "");
-      setMessage("Изменения сохранены");
+      await request<NotFoundDraft>(
+        `/api/sites/${siteId}/content/versioned/not-found`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            expectedDraftRevisionId: state.draftRevisionId,
+            snapshot: {
+              status: patch.status ?? state.page.status,
+              seoTitle: patch.seoTitle ?? state.page.seoTitle,
+              seoDescription:
+                patch.seoDescription ?? state.page.seoDescription,
+              templateKey: patch.templateKey ?? state.template.key,
+              templateVersion:
+                patch.templateVersion ?? state.template.version,
+            },
+          }),
+        },
+      );
+      await load();
+      setMessage("Изменения сохранены как новая версия черновика");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка запроса");
     } finally {
@@ -125,7 +178,7 @@ export function NotFoundPageView({
             <small>Версия {state.template.version}</small>
           </div>
 
-          <fieldset disabled={!canEdit || busy}>
+          <fieldset disabled={!canEditCode || busy}>
             <legend>Сменить шаблон</legend>
             {state.templates.map((template) => (
               <label
@@ -150,15 +203,15 @@ export function NotFoundPageView({
             {dirty ? (
               <button
                 type="button"
-                disabled={!canEdit || busy}
+                disabled={!canEditCode || busy}
                 onClick={() =>
-                  void perform(
-                    `/api/sites/${siteId}/content/not-found/template`,
-                    {
-                      method: "PATCH",
-                      body: JSON.stringify({ templateKey: selectedKey }),
-                    },
-                  )
+                  void saveDraft({
+                    templateKey: selectedKey,
+                    templateVersion:
+                      state.templates.find(
+                        (template) => template.key === selectedKey,
+                      )?.version ?? "1",
+                  })
                 }
               >
                 Подключить шаблон
@@ -170,12 +223,7 @@ export function NotFoundPageView({
                 className="secondary"
                 disabled={!canApprove || busy}
                 onClick={() =>
-                  void perform(
-                    `/api/sites/${siteId}/content/not-found/deactivate`,
-                    {
-                      method: "POST",
-                    },
-                  )
+                  void saveDraft({ status: "draft" })
                 }
               >
                 Отключить
@@ -187,12 +235,7 @@ export function NotFoundPageView({
                 type="button"
                 disabled={!canApprove || busy || dirty}
                 onClick={() =>
-                  void perform(
-                    `/api/sites/${siteId}/content/not-found/activate`,
-                    {
-                      method: "POST",
-                    },
-                  )
+                  void saveDraft({ status: "published" })
                 }
               >
                 Активировать
@@ -212,10 +255,7 @@ export function NotFoundPageView({
             className="not-found-seo"
             onSubmit={(event) => {
               event.preventDefault();
-              void perform(`/api/sites/${siteId}/content/not-found/seo`, {
-                method: "PATCH",
-                body: JSON.stringify({ seoTitle, seoDescription }),
-              });
+              void saveDraft({ seoTitle, seoDescription });
             }}
           >
             <div>
@@ -252,13 +292,27 @@ export function NotFoundPageView({
             <span>Предпросмотр</span>
             <small>{previewTemplate.name}</small>
           </div>
-          <iframe
-            key={`${state.template.key}-${state.template.version}`}
-            title={`Предпросмотр шаблона ${previewTemplate.name}`}
-            src={`/preview/${state.site.slug}/pages/404?cmsSiteId=${siteId}&cmsPageId=${state.page.id}`}
-          />
+          <div className="not-found-preview-wrap">
+            <NotFoundTemplate
+              key={`${previewTemplate.key}-${previewTemplate.version}`}
+              template={previewTemplate}
+              siteName={state.site.name}
+              homeHref={`/preview/${state.site.slug}?cmsSiteId=${siteId}`}
+              preview
+            />
+          </div>
         </div>
       </div>
+      <SiteSettingsRevisionPanel
+        siteId={siteId}
+        resource="not-found"
+        label="Страница 404"
+        canEdit={canEdit || canEditCode}
+        canApprove={canApprove}
+        dirty={dirty}
+        refreshToken={state.draftRevisionId}
+        onChanged={load}
+      />
     </section>
   );
 }

@@ -27,6 +27,11 @@ export enum WorkspaceRole {
   DEVELOPER = 'developer',
   CONTENT_MANAGER = 'content_manager',
   CLIENT_APPROVER = 'client_approver',
+  SITE_OWNER = 'site_owner',
+  WISPO_MANAGER = 'wispo_manager',
+  SITE_CONTENT_MANAGER = 'site_content_manager',
+  WISPO_DEVELOPER = 'wispo_developer',
+  SITE_DEVELOPER = 'site_developer',
 }
 
 export enum SiteType {
@@ -257,6 +262,17 @@ export class UserEntity {
   })
   platformRole!: PlatformRole;
 
+  @Column({
+    name: 'account_kind',
+    type: 'varchar',
+    length: 20,
+    default: 'legacy',
+  })
+  accountKind!: 'legacy' | 'wispo' | 'site';
+
+  @Column({ name: 'home_site_id', type: 'uuid', nullable: true })
+  homeSiteId!: string | null;
+
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 
@@ -470,6 +486,14 @@ export class WorkspaceMembershipEntity {
 
   @Column({ type: 'varchar', length: 40 })
   role!: WorkspaceRole;
+
+  @Column({
+    name: 'site_ids',
+    type: 'uuid',
+    array: true,
+    default: () => "'{}'::uuid[]",
+  })
+  siteIds!: string[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
@@ -821,6 +845,9 @@ export class MediaEntity {
 
   @Column({ name: 'alt_text', type: 'varchar', length: 300, nullable: true })
   altText!: string | null;
+
+  @Column({ name: 'is_decorative', type: 'boolean', default: false })
+  isDecorative!: boolean;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
@@ -1813,6 +1840,90 @@ export class PageActivityEntity {
   createdAt!: Date;
 }
 
+@Entity('cms_revision_resources')
+@Unique(['siteId', 'resourceType', 'entityId'])
+export class CmsRevisionResourceEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @Column({ name: 'resource_type', type: 'varchar', length: 32 })
+  resourceType!: string;
+
+  @Column({ name: 'entity_id', type: 'uuid' })
+  entityId!: string;
+
+  @Column({ name: 'latest_version_number', type: 'integer', default: 0 })
+  latestVersionNumber!: number;
+
+  @Column({ name: 'draft_revision_id', type: 'uuid', nullable: true })
+  draftRevisionId!: string | null;
+
+  @Column({ name: 'approved_revision_id', type: 'uuid', nullable: true })
+  approvedRevisionId!: string | null;
+
+  @Column({ name: 'published_revision_id', type: 'uuid', nullable: true })
+  publishedRevisionId!: string | null;
+
+  @Column({
+    name: 'review_state',
+    type: 'varchar',
+    length: 24,
+    default: 'draft',
+  })
+  reviewState!: 'draft' | 'in_review' | 'changes_requested' | 'approved';
+}
+
+@Entity('cms_revisions')
+@Unique(['resourceId', 'versionNumber'])
+@Index(['resourceId', 'createdAt'])
+export class CmsRevisionEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'resource_id', type: 'uuid' })
+  resourceId!: string;
+
+  @Column({ name: 'version_number', type: 'integer' })
+  versionNumber!: number;
+
+  @Column({ type: 'jsonb' })
+  snapshot!: Record<string, unknown>;
+
+  @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
+  actorUserId!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('cms_revision_events')
+@Index(['resourceId', 'createdAt'])
+export class CmsRevisionEventEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'resource_id', type: 'uuid' })
+  resourceId!: string;
+
+  @Column({ name: 'revision_id', type: 'uuid' })
+  revisionId!: string;
+
+  @Column({ name: 'event_type', type: 'varchar', length: 32 })
+  eventType!: string;
+
+  @Column({ name: 'actor_user_id', type: 'uuid', nullable: true })
+  actorUserId!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  reason!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
 export const databaseEntities = [
   UserEntity,
   WorkspaceEntity,
@@ -1841,4 +1952,7 @@ export const databaseEntities = [
   SiteSearchSettingsEntity,
   PageActivityEntity,
   AuditLogEntity,
+  CmsRevisionResourceEntity,
+  CmsRevisionEntity,
+  CmsRevisionEventEntity,
 ];

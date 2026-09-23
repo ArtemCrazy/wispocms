@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import {
   ArticleStatus,
+  PublicationState,
   PageStatus,
   PlatformRole,
   SiteType,
@@ -78,6 +79,46 @@ describe('ContentService safe deletion', () => {
       id: 'article-id',
       siteId: 'site-id',
       status: ArticleStatus.PUBLISHED,
+    });
+
+    await expect(
+      service.deleteArticle('site-id', 'article-id', admin),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(articles.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not hard-delete a hidden article that remains publicly reachable', async () => {
+    const { service, articles } = setup();
+    articles.findOne.mockResolvedValue({
+      id: 'article-id',
+      siteId: 'site-id',
+      status: ArticleStatus.HIDDEN,
+      publicationState: PublicationState.HIDDEN,
+    });
+
+    await expect(
+      service.deleteArticle('site-id', 'article-id', admin),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(articles.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not hard-delete a revision-managed draft article', async () => {
+    const { service, articles } = setup();
+    articles.findOne.mockResolvedValue({
+      id: 'article-id',
+      siteId: 'site-id',
+      status: ArticleStatus.DRAFT,
+      publicationState: PublicationState.DRAFT,
+    });
+    Object.assign(service, {
+      revisions: {
+        current: jest.fn().mockResolvedValue({
+          draft: { id: 'revision-id' },
+          approvedRevisionId: null,
+          publishedRevisionId: null,
+          reviewState: 'draft',
+        }),
+      },
     });
 
     await expect(

@@ -28,8 +28,15 @@ import {
 } from '../database/entities';
 import { ContentController } from './content.controller';
 import { ContentLifecycleService } from './content-lifecycle.service';
+import { CmsRevisionsService } from './cms-revisions.service';
 import { ContentService } from './content.service';
 import { PublicSiteController } from './public-site.controller';
+import { SiteResourceAdapterRegistryService } from './site-resource-adapter-registry';
+import { SiteResourceRevisionsController } from './site-resource-revisions.controller';
+import { SiteResourceRevisionsService } from './site-resource-revisions.service';
+import { CodeResourcesService } from './code-resources.service';
+import { ContentMetadataRevisionsController } from './content-metadata-revisions.controller';
+import { ContentMetadataRevisionsService } from './content-metadata-revisions.service';
 
 @Module({
   imports: [
@@ -60,7 +67,25 @@ import { PublicSiteController } from './public-site.controller';
     ]),
     AuthModule,
   ],
-  controllers: [ContentController, PublicSiteController],
-  providers: [ContentService, ContentLifecycleService],
+  controllers: [
+    ContentController,
+    PublicSiteController,
+    SiteResourceRevisionsController,
+    ContentMetadataRevisionsController,
+  ],
+  providers: [
+    ContentService,
+    ContentLifecycleService,
+    CmsRevisionsService,
+    SiteResourceAdapterRegistryService,
+    {
+      provide: 'SiteResourceAdapterRegistry',
+      useExisting: SiteResourceAdapterRegistryService,
+    },
+    SiteResourceRevisionsService,
+    CodeResourcesService,
+    ContentMetadataRevisionsService,
+  ],
+  exports: [SiteResourceRevisionsService],
 })
 export class ContentModule {}

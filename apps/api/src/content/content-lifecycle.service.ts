@@ -7,9 +7,11 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
   DataSource,
   EntityManager,
@@ -25,6 +27,8 @@ import {
   ArticleSectionSettingsEntity,
   ArticleStatus,
   ArticleVersionEntity,
+  CmsRevisionEntity,
+  CmsRevisionResourceEntity,
   AuthorEntity,
   CategoryEntity,
   CategoryRedirectEntity,
@@ -50,6 +54,7 @@ import {
   normalizeArticleDocument,
 } from './article-document';
 import { hasSitePermission, SitePermission } from './content.permissions';
+import { CmsRevisionsService } from './cms-revisions.service';
 import {
   DuplicateContentDto,
   SchedulePublicationDto,
@@ -97,6 +102,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     private readonly templates: Repository<SiteContentTemplateEntity>,
     @InjectRepository(ArticleSectionSettingsEntity)
     private readonly articleSectionSettings: Repository<ArticleSectionSettingsEntity>,
+    private readonly cmsRevisions?: CmsRevisionsService,
   ) {}
 
   onModuleInit() {
@@ -130,10 +136,11 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
       const membership = await this.memberships.findOne({
-        select: { role: true },
+        select: { role: true, siteIds: true },
         where: { userId: actor.userId, workspaceId: site.workspaceId },
       });
       if (
+        !membership?.siteIds?.includes(siteId) ||
         !hasSitePermission(
           actor.platformRole,
           membership?.role ?? null,
@@ -159,6 +166,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       previewMediaId: article.previewMediaId,
       sortOrder: article.sortOrder,
       publicationState: article.publicationState,
+      publishedAt: article.publishedAt,
       editorialState: article.editorialState,
       displayTemplateKey: article.displayTemplateKey,
       displayTemplateVersion: article.displayTemplateVersion,
@@ -167,6 +175,10 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       seoDescription: article.seoDescription,
       canonicalUrl: article.canonicalUrl,
       noIndex: article.noIndex,
+      ogTitle: article.ogTitle,
+      ogDescription: article.ogDescription,
+      ogImageMediaId: article.ogImageMediaId,
+      structuredData: article.structuredData,
       revision: article.revision,
     };
   }
@@ -433,6 +445,36 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     if (failure) throw new BadRequestException(failure.message);
   }
 
+  private async assertLegacyArticleFlowAvailable(
+    manager: EntityManager,
+    siteId: string,
+    articleId: string,
+  ) {
+    if (
+      await manager.exists(CmsRevisionResourceEntity, {
+        where: { siteId, resourceType: 'article', entityId: articleId },
+      })
+    )
+      throw new ConflictException(
+        'Статья использует ревизии: измените статус через согласование версии',
+      );
+  }
+
+  private async assertLegacyCategoryFlowAvailable(
+    manager: EntityManager,
+    siteId: string,
+    categoryId: string,
+  ) {
+    if (
+      await manager.exists(CmsRevisionResourceEntity, {
+        where: { siteId, resourceType: 'category', entityId: categoryId },
+      })
+    )
+      throw new ConflictException(
+        'Рубрика использует ревизии: измените её через согласование версии',
+      );
+  }
+
   private async restoredArticleValues(
     manager: EntityManager,
     site: SiteEntity,
@@ -488,6 +530,17 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       }))
     )
       throw new NotFoundException('Автор этого сайта не найден');
+    if (authorId) {
+      const authorResource = await manager.findOne(CmsRevisionResourceEntity, {
+        where: {
+          siteId: site.id,
+          resourceType: 'author',
+          entityId: authorId,
+        },
+      });
+      if (authorResource && !authorResource.publishedRevisionId)
+        throw new BadRequestException('Сначала опубликуйте выбранного автора');
+    }
 
     const body = stringValue('body', article.body);
     const bodyDocument = normalizeArticleDocument(snapshot.bodyDocument, body);
@@ -572,6 +625,207 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async activateArticleRevision(
+    manager: EntityManager,
+    siteId: string,
+    articleId: string,
+    actorUserId: string,
+    snapshot: Record<string, unknown>,
+    publishedSnapshot: Record<string, unknown>,
+  ): Promise<ArticleEntity> {
+    const site = await manager.findOne(SiteEntity, {
+      where: { id: siteId },
+    });
+    const article = await manager.findOne(ArticleEntity, {
+      where: { id: articleId, siteId, deletedAt: IsNull() },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!site || !article) throw new NotFoundException('Статья не найдена');
+    const liveSnapshot = JSON.parse(
+      JSON.stringify(this.articleSnapshot(article)),
+    ) as Record<string, unknown>;
+    if (
+      Object.prototype.hasOwnProperty.call(
+        publishedSnapshot,
+        'relatedArticleIds',
+      )
+    ) {
+      const relatedRows = await manager.find(ArticleRelatedItemEntity, {
+        where: { articleId },
+        order: { sortOrder: 'ASC' },
+      });
+      liveSnapshot.relatedArticleIds = relatedRows.map(
+        (row) => row.relatedArticleId,
+      );
+    }
+    const storedBaseline = JSON.parse(
+      JSON.stringify(publishedSnapshot),
+    ) as Record<string, unknown>;
+    const comparableLive = Object.fromEntries(
+      Object.keys(storedBaseline).map((key) => [key, liveSnapshot[key]]),
+    );
+    if (!isDeepStrictEqual(comparableLive, storedBaseline))
+      throw new ConflictException(
+        'Опубликованная статья изменилась после создания черновика',
+      );
+    const restored = await this.restoredArticleValues(
+      manager,
+      site,
+      article,
+      snapshot,
+    );
+    const revision = snapshot.revision;
+    if (
+      typeof revision !== 'number' ||
+      !Number.isInteger(revision) ||
+      revision <= article.revision
+    )
+      throw new BadRequestException('Повреждён номер версии статьи');
+    const ogImageMediaId =
+      snapshot.ogImageMediaId === null ||
+      typeof snapshot.ogImageMediaId === 'string'
+        ? snapshot.ogImageMediaId
+        : article.ogImageMediaId;
+    if (
+      ogImageMediaId &&
+      !(await manager.exists(MediaEntity, {
+        where: { id: ogImageMediaId, workspaceId: site.workspaceId },
+      }))
+    )
+      throw new NotFoundException('OG-изображение статьи не найдено');
+    let publishedAt = article.publishedAt;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'publishedAt')) {
+      if (snapshot.publishedAt === null) publishedAt = null;
+      else if (
+        typeof snapshot.publishedAt === 'string' ||
+        snapshot.publishedAt instanceof Date
+      ) {
+        publishedAt = new Date(snapshot.publishedAt);
+        if (Number.isNaN(publishedAt.getTime()))
+          throw new BadRequestException('Повреждена дата публикации статьи');
+      } else throw new BadRequestException('Повреждена дата публикации статьи');
+    }
+    const before = Object.assign(new ArticleEntity(), article);
+    const slugChanged = restored.slug !== article.slug;
+    if (slugChanged) {
+      await manager.delete(ArticleRedirectEntity, {
+        siteId,
+        articleId,
+        fromSlug: restored.slug,
+      });
+      await manager.upsert(
+        ArticleRedirectEntity,
+        { siteId, articleId, fromSlug: article.slug },
+        ['siteId', 'fromSlug'],
+      );
+    }
+    Object.assign(article, restored, {
+      ogTitle:
+        snapshot.ogTitle === null || typeof snapshot.ogTitle === 'string'
+          ? snapshot.ogTitle
+          : article.ogTitle,
+      ogDescription:
+        snapshot.ogDescription === null ||
+        typeof snapshot.ogDescription === 'string'
+          ? snapshot.ogDescription
+          : article.ogDescription,
+      ogImageMediaId,
+      structuredData:
+        snapshot.structuredData === null ||
+        (typeof snapshot.structuredData === 'object' &&
+          !Array.isArray(snapshot.structuredData))
+          ? snapshot.structuredData
+          : article.structuredData,
+      publishedAt,
+      revision,
+      updatedByUserId: actorUserId,
+    });
+    const saved = await manager.save(article);
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'relatedArticleIds')) {
+      if (
+        !Array.isArray(snapshot.relatedArticleIds) ||
+        !snapshot.relatedArticleIds.every((id) => typeof id === 'string') ||
+        new Set(snapshot.relatedArticleIds).size !==
+          snapshot.relatedArticleIds.length ||
+        snapshot.relatedArticleIds.includes(articleId)
+      )
+        throw new BadRequestException('Повреждён список связанных материалов');
+      const relatedArticleIds = snapshot.relatedArticleIds;
+      if (relatedArticleIds.length) {
+        const targets = await manager.find(ArticleEntity, {
+          where: { id: In(relatedArticleIds), siteId, deletedAt: IsNull() },
+          select: { id: true },
+        });
+        if (targets.length !== relatedArticleIds.length)
+          throw new BadRequestException(
+            'Один из связанных материалов не найден',
+          );
+      }
+      await manager.delete(ArticleRelatedItemEntity, { articleId });
+      if (relatedArticleIds.length)
+        await manager.insert(
+          ArticleRelatedItemEntity,
+          relatedArticleIds.map((relatedArticleId, sortOrder) => ({
+            articleId,
+            relatedArticleId,
+            sortOrder,
+          })),
+        );
+    }
+    await this.recordArticleChange(
+      before,
+      saved,
+      actorUserId,
+      ContentEventType.CONTENT_UPDATED,
+      'approved article revision published',
+      true,
+      manager,
+    );
+    return saved;
+  }
+
+  async publishArticleRevision(
+    siteId: string,
+    articleId: string,
+    revisionId: string,
+    actor: ContentActor,
+  ): Promise<ArticleEntity> {
+    if (!this.cmsRevisions)
+      throw new ServiceUnavailableException('Сервис ревизий недоступен');
+    let saved!: ArticleEntity;
+    await this.cmsRevisions.publish(
+      siteId,
+      'article',
+      articleId,
+      revisionId,
+      actor,
+      async (manager, snapshot) => {
+        const resource = await manager.findOne(CmsRevisionResourceEntity, {
+          where: { siteId, resourceType: 'article', entityId: articleId },
+        });
+        if (!resource?.publishedRevisionId)
+          throw new ConflictException('У статьи нет исходной публикации');
+        const baseline = await manager.findOne(CmsRevisionEntity, {
+          where: {
+            id: resource.publishedRevisionId,
+            resourceId: resource.id,
+          },
+        });
+        if (!baseline)
+          throw new NotFoundException('Исходная версия не найдена');
+        saved = await this.activateArticleRevision(
+          manager,
+          siteId,
+          articleId,
+          actor.userId,
+          snapshot,
+          baseline.snapshot,
+        );
+      },
+    );
+    return saved;
+  }
+
   async setArticlePublicationState(
     siteId: string,
     articleId: string,
@@ -591,6 +845,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         lock: { mode: 'pessimistic_write' },
       });
       if (!article) throw new NotFoundException('Статья не найдена');
+      await this.assertLegacyArticleFlowAvailable(manager, siteId, articleId);
       if (dto.state === PublicationState.PUBLISHED)
         this.assertArticleCanPublish(article);
       const before = Object.assign(new ArticleEntity(), article);
@@ -639,6 +894,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         lock: { mode: 'pessimistic_write' },
       });
       if (!article) throw new NotFoundException('Статья не найдена');
+      await this.assertLegacyArticleFlowAvailable(manager, siteId, articleId);
       const allowed: Record<EditorialState, EditorialState[]> = {
         [EditorialState.DRAFT]: [EditorialState.REVIEW],
         [EditorialState.REVIEW]: [
@@ -693,6 +949,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         lock: { mode: 'pessimistic_write' },
       });
       if (!category) throw new NotFoundException('Рубрика не найдена');
+      await this.assertLegacyCategoryFlowAvailable(manager, siteId, categoryId);
       const before = Object.assign(new CategoryEntity(), category);
       category.publicationState = dto.state;
       category.status = this.legacyCategoryStatus(dto.state);
@@ -747,6 +1004,10 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           });
     if (!exists) throw new NotFoundException('Материал не найден');
     return this.dataSource.transaction(async (manager) => {
+      if (entityType === ContentEntityType.ARTICLE)
+        await this.assertLegacyArticleFlowAvailable(manager, siteId, entityId);
+      else
+        await this.assertLegacyCategoryFlowAvailable(manager, siteId, entityId);
       await manager.update(
         ContentStatusScheduleEntity,
         { entityType, entityId, status: ContentScheduleStatus.PENDING },
@@ -889,6 +1150,37 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           });
           continue;
         }
+        if (
+          await manager.exists(CmsRevisionResourceEntity, {
+            where: {
+              siteId: schedule.siteId,
+              resourceType:
+                schedule.entityType === ContentEntityType.ARTICLE
+                  ? 'article'
+                  : 'category',
+              entityId: schedule.entityId,
+            },
+          })
+        ) {
+          schedule.status = ContentScheduleStatus.FAILED;
+          schedule.lastError = 'revision_workflow_required';
+          await manager.save(schedule);
+          await manager.insert(ContentEventEntity, {
+            siteId: schedule.siteId,
+            entityType: schedule.entityType,
+            entityId: schedule.entityId,
+            eventType: ContentEventType.SCHEDULE_FAILED,
+            actorKind: ContentActorKind.SYSTEM,
+            actorUserId: null,
+            reason: schedule.lastError,
+            before: { publicationState: entity.publicationState },
+            after: null,
+            changes: null,
+            versionId: null,
+            groupId: schedule.id,
+          });
+          continue;
+        }
         const publishFailure =
           schedule.entityType === ContentEntityType.ARTICLE &&
           schedule.targetPublicationState === PublicationState.PUBLISHED
@@ -1024,6 +1316,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       });
       if (!article || !version)
         throw new NotFoundException('Версия не найдена');
+      await this.assertLegacyArticleFlowAvailable(manager, siteId, articleId);
       if (article.revision !== expectedRevision)
         throw new ConflictException(
           'Материал уже изменён. Обновите данные и повторите восстановление',
@@ -1290,6 +1583,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         where: { id: categoryId, siteId, deletedAt: IsNull() },
       });
       if (!source) throw new NotFoundException('Рубрика не найдена');
+      await this.assertLegacyCategoryFlowAvailable(manager, siteId, categoryId);
       if (
         await manager.exists(CategoryEntity, {
           where: { siteId, slug: dto.slug },
@@ -1344,6 +1638,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         lock: { mode: 'pessimistic_write' },
       });
       if (!article) throw new NotFoundException('Статья не найдена');
+      await this.assertLegacyArticleFlowAvailable(manager, siteId, articleId);
       const before = Object.assign(new ArticleEntity(), article);
       article.deletedAt = new Date();
       article.deletedByUserId = actor.userId;
@@ -1372,6 +1667,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       });
       if (!article?.deletedAt)
         throw new NotFoundException('Удалённая статья не найдена');
+      await this.assertLegacyArticleFlowAvailable(manager, siteId, articleId);
       const before = Object.assign(new ArticleEntity(), article);
       article.deletedAt = null;
       article.deletedByUserId = null;
@@ -1408,6 +1704,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     const deletedAt = new Date();
     const groupId = randomUUID();
     await this.dataSource.transaction(async (manager) => {
+      await this.assertLegacyCategoryFlowAvailable(manager, siteId, categoryId);
       const rows = await manager.query<Array<{ id: string }>>(
         `WITH RECURSIVE branch AS (
           SELECT id FROM categories WHERE id = $1 AND site_id = $2
@@ -1493,6 +1790,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     const deletedAt = root.deletedAt;
     const groupId = randomUUID();
     await this.dataSource.transaction(async (manager) => {
+      await this.assertLegacyCategoryFlowAvailable(manager, siteId, categoryId);
       const rows = await manager.query<Array<{ id: string }>>(
         `WITH RECURSIVE branch AS (
           SELECT id FROM categories WHERE id = $1 AND site_id = $2

@@ -23,6 +23,12 @@ import { SetArmaturexEcommerceSiteType1789675200000 } from './migrations/1789675
 import { ExpandMediaSiteToolkit1789761600000 } from './migrations/1789761600000-ExpandMediaSiteToolkit';
 import { ImportSkinovaMediaSite1789848000000 } from './migrations/1789848000000-ImportSkinovaMediaSite';
 import { CanonicalBannerSlots1789934400000 } from './migrations/1789934400000-CanonicalBannerSlots';
+import { SiteScopedRoles1790017200000 } from './migrations/1790017200000-SiteScopedRoles';
+import { CmsRevisionLedger1790103600000 } from './migrations/1790103600000-CmsRevisionLedger';
+import { ProtectCmsRevisionHistory1790107200000 } from './migrations/1790107200000-ProtectCmsRevisionHistory';
+import { ExpandCmsRevisionResourceTypes1790190000000 } from './migrations/1790190000000-ExpandCmsRevisionResourceTypes';
+import { CompleteCmsRevisionResourceTypes1790200000000 } from './migrations/1790200000000-CompleteCmsRevisionResourceTypes';
+import { RemainingMetadataRevisionTypes1790210000000 } from './migrations/1790210000000-RemainingMetadataRevisionTypes';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -52,6 +58,12 @@ export function createDataSourceOptions(): DataSourceOptions {
       ExpandMediaSiteToolkit1789761600000,
       ImportSkinovaMediaSite1789848000000,
       CanonicalBannerSlots1789934400000,
+      SiteScopedRoles1790017200000,
+      CmsRevisionLedger1790103600000,
+      ProtectCmsRevisionHistory1790107200000,
+      ExpandCmsRevisionResourceTypes1790190000000,
+      CompleteCmsRevisionResourceTypes1790200000000,
+      RemainingMetadataRevisionTypes1790210000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

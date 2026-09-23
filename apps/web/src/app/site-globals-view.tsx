@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type SiteGlobals = {
   siteId: string;
@@ -15,8 +16,21 @@ type SiteGlobals = {
   address?: string;
   telegramUrl?: string;
   vkUrl?: string;
+  draftRevisionId?: string | null;
+  draftVersionNumber?: number | null;
+  approvedRevisionId?: string | null;
+  publishedRevisionId?: string | null;
+  reviewState?: "draft" | "in_review" | "changes_requested" | "approved";
 };
-type GlobalsDraft = Omit<SiteGlobals, "siteId">;
+type GlobalsDraft = Omit<
+  SiteGlobals,
+  | "siteId"
+  | "draftRevisionId"
+  | "draftVersionNumber"
+  | "approvedRevisionId"
+  | "publishedRevisionId"
+  | "reviewState"
+>;
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -38,12 +52,16 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function SiteGlobalsView({
   siteId,
   siteName,
+  siteSlug,
   canEdit = true,
+  canApprove = false,
   onDirtyChange,
 }: {
   siteId?: string;
   siteName?: string;
+  siteSlug?: string;
   canEdit?: boolean;
+  canApprove?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [data, setData] = useState<SiteGlobals | null>(null);
@@ -119,12 +137,20 @@ export function SiteGlobalsView({
       "telegramUrl",
       "vkUrl",
     ];
-    const payload = Object.fromEntries(
+    const payload = {
+      ...Object.fromEntries(
       fields.map((field) => {
         const value = String(draft[field as keyof GlobalsDraft] ?? "").trim();
-        return [field, value];
+        return [
+          field,
+          !value && ["email", "telegramUrl", "vkUrl"].includes(field)
+            ? null
+            : value,
+        ];
       }),
-    );
+      ),
+      expectedDraftRevisionId: data?.draftRevisionId ?? null,
+    };
     setSaving(true);
     setMessage("");
     try {
@@ -150,7 +176,9 @@ export function SiteGlobalsView({
         vkUrl: updated.vkUrl ?? "",
       });
       setDirty(false);
-      setMessage("Общие данные сохранены и будут использоваться на всём сайте");
+      setMessage(
+        "Новая версия общих данных сохранена. Публичный сайт не изменён.",
+      );
     } catch (reason) {
       setMessage(
         reason instanceof Error
@@ -381,6 +409,19 @@ export function SiteGlobalsView({
           </div>
         ) : null}
       </form>
+      {siteId ? (
+        <SiteSettingsRevisionPanel
+          siteId={siteId}
+          siteSlug={siteSlug}
+          resource="globals"
+          label="Общие данные"
+          canEdit={canEdit}
+          canApprove={canApprove}
+          dirty={dirty}
+          refreshToken={data.draftRevisionId}
+          onChanged={load}
+        />
+      ) : null}
     </section>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type SiteVariable = {
   id: string;
@@ -8,7 +9,12 @@ type SiteVariable = {
   identifier: string;
   value: string;
   usageCount: number;
-  updatedAt: string;
+  updatedAt?: string;
+};
+
+type VariablesDraft = {
+  items: SiteVariable[];
+  draftRevisionId: string | null;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -78,12 +84,15 @@ export function SiteVariablesView({
   siteId,
   siteName,
   canEdit = true,
+  canApprove = false,
 }: {
   siteId?: string;
   siteName?: string;
   canEdit?: boolean;
+  canApprove?: boolean;
 }) {
   const [items, setItems] = useState<SiteVariable[]>([]);
+  const [draftRevisionId, setDraftRevisionId] = useState<string | null>(null);
   const [editing, setEditing] = useState<SiteVariable | null>(null);
   const [creating, setCreating] = useState(false);
   const [generatedIdentifier, setGeneratedIdentifier] = useState("");
@@ -93,8 +102,39 @@ export function SiteVariablesView({
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    setItems(await request(`/api/sites/${siteId}/content/variables`));
+    const draft = await request<VariablesDraft>(
+      `/api/sites/${siteId}/content/versioned/variables`,
+    );
+    setItems(
+      draft.items.map((item) => ({ ...item, usageCount: item.usageCount ?? 0 })),
+    );
+    setDraftRevisionId(draft.draftRevisionId);
   }, [siteId]);
+
+  async function persist(nextItems: SiteVariable[]) {
+    if (!siteId) return;
+    const result = await request<VariablesDraft>(
+      `/api/sites/${siteId}/content/versioned/variables`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          expectedDraftRevisionId: draftRevisionId,
+          snapshot: {
+            items: nextItems.map(({ id, name, identifier, value }) => ({
+              id,
+              name,
+              identifier,
+              value,
+            })),
+          },
+        }),
+      },
+    );
+    setItems(
+      result.items.map((item) => ({ ...item, usageCount: item.usageCount ?? 0 })),
+    );
+    setDraftRevisionId(result.draftRevisionId);
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -111,23 +151,25 @@ export function SiteVariablesView({
     setBusy(true);
     setMessage("");
     try {
-      await request(
+      const next: SiteVariable = {
+        id: editing?.id ?? crypto.randomUUID(),
+        name: String(data.get("name") ?? ""),
+        identifier: String(data.get("identifier") ?? ""),
+        value: String(data.get("value") ?? ""),
+        usageCount: editing?.usageCount ?? 0,
+      };
+      await persist(
         editing
-          ? `/api/sites/${siteId}/content/variables/${editing.id}`
-          : `/api/sites/${siteId}/content/variables`,
-        {
-          method: editing ? "PATCH" : "POST",
-          body: JSON.stringify({
-            name: data.get("name"),
-            identifier: data.get("identifier"),
-            value: data.get("value"),
-          }),
-        },
+          ? items.map((item) => (item.id === editing.id ? next : item))
+          : [...items, next],
       );
       setCreating(false);
       setEditing(null);
-      setMessage(editing ? "Переменная обновлена" : "Переменная создана");
-      await load();
+      setMessage(
+        editing
+          ? "Изменение переменной сохранено в черновик"
+          : "Переменная добавлена в черновик",
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка запроса");
     } finally {
@@ -146,11 +188,8 @@ export function SiteVariablesView({
     }
     if (!window.confirm(warning)) return;
     try {
-      await request(`/api/sites/${siteId}/content/variables/${item.id}`, {
-        method: "DELETE",
-      });
-      setMessage("Переменная удалена");
-      await load();
+      await persist(items.filter((candidate) => candidate.id !== item.id));
+      setMessage("Удаление переменной сохранено в черновик");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Ошибка запроса");
     }
@@ -255,7 +294,9 @@ export function SiteVariablesView({
               <code>{`{{${item.identifier}}}`}</code>
               <p>{item.value}</p>
               <small>
-                Обновлено {new Date(item.updatedAt).toLocaleString("ru-RU")} ·
+                {item.updatedAt
+                  ? `Обновлено ${new Date(item.updatedAt).toLocaleString("ru-RU")} · `
+                  : ""}
                 Использований: {item.usageCount}
               </small>
             </div>
@@ -289,6 +330,18 @@ export function SiteVariablesView({
           </div>
         ) : null}
       </div>
+      {siteId ? (
+        <SiteSettingsRevisionPanel
+          siteId={siteId}
+          resource="variables"
+          label="Переменные"
+          canEdit={canEdit}
+          canApprove={canApprove}
+          dirty={false}
+          refreshToken={draftRevisionId}
+          onChanged={load}
+        />
+      ) : null}
     </section>
   );
 }

@@ -16,7 +16,13 @@ import { resolve4, resolve6, resolveCname } from 'node:dns/promises';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
-import { In, IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import {
+  EntityManager,
+  In,
+  IsNull,
+  LessThanOrEqual,
+  Repository,
+} from 'typeorm';
 import { SlidingWindowRateLimiter } from '../common/sliding-window-rate-limiter';
 import {
   ArticleEntity,
@@ -46,6 +52,8 @@ import {
   EditorialState,
   PrivacyPolicyStateEntity,
   SiteEntity,
+  type SiteGlobalData,
+  type SiteLayoutSettings,
   SiteSearchSettingsEntity,
   SiteType,
   SiteVariableEntity,
@@ -99,8 +107,10 @@ import {
   UpdateNotFoundSeoDto,
   UpdateSearchSettingsDto,
   UpdateSiteVariableDto,
+  UnassignPageBannerDto,
 } from './content.dto';
 import { ContentLifecycleService } from './content-lifecycle.service';
+import { CmsRevisionsService } from './cms-revisions.service';
 import {
   articleDocumentMediaIds,
   articleDocumentText,
@@ -122,6 +132,9 @@ import {
 } from './armaturex-home-validation';
 
 type Actor = { userId: string; platformRole: PlatformRole };
+type PageBannerAssignmentSnapshot = { zone: string; bannerId: string };
+type SiteSettingsRevisionType = 'site_globals' | 'site_header' | 'site_footer';
+type SiteLayoutRevisionScope = 'header' | 'footer';
 
 const fixedSystemPageTitles = new Map([
   ['privacy-policy', 'Политика конфиденциальности'],
@@ -181,6 +194,7 @@ export class ContentService {
     @Optional()
     @InjectRepository(PageActivityEntity)
     private readonly pageActivities?: Repository<PageActivityEntity>,
+    private readonly revisions?: CmsRevisionsService,
   ) {}
 
   private categoryIsPublic(
@@ -207,6 +221,80 @@ export class ContentService {
         !article.publishedAt ||
         article.publishedAt <= new Date())
     );
+  }
+
+  private async articleForCms(
+    siteId: string,
+    article: ArticleEntity,
+    actor: Actor,
+    revisionId?: string,
+  ) {
+    if (
+      !this.revisions ||
+      (!revisionId &&
+        article.publicationState !== PublicationState.PUBLISHED &&
+        article.publicationState !== PublicationState.HIDDEN)
+    )
+      return article;
+    const current = revisionId
+      ? null
+      : await this.revisions.current(siteId, 'article', article.id, actor);
+    const revision = revisionId
+      ? await this.revisions.getVersion(
+          siteId,
+          'article',
+          article.id,
+          revisionId,
+          actor,
+        )
+      : current?.draft;
+    if (!revision) return article;
+    const draft = Object.assign(
+      new ArticleEntity(),
+      article,
+      revision.snapshot,
+      {
+        draftRevisionId: revision.id,
+        approvedRevisionId: current?.approvedRevisionId ?? null,
+        publishedRevisionId: current?.publishedRevisionId ?? null,
+        reviewState: current?.reviewState ?? 'draft',
+      },
+    );
+    if (draft.categoryId !== article.categoryId)
+      draft.category = draft.categoryId
+        ? await this.categories.findOne({
+            where: { id: draft.categoryId, siteId, deletedAt: IsNull() },
+          })
+        : null;
+    if (draft.authorId !== article.authorId)
+      draft.author = draft.authorId
+        ? await this.authors.findOne({
+            where: { id: draft.authorId, siteId },
+          })
+        : null;
+    if (
+      draft.coverMediaId !== article.coverMediaId ||
+      draft.previewMediaId !== article.previewMediaId
+    ) {
+      const site = await this.sites.findOne({ where: { id: siteId } });
+      if (!site) throw new NotFoundException('Сайт не найден');
+      if (draft.coverMediaId !== article.coverMediaId)
+        draft.coverMedia = draft.coverMediaId
+          ? await this.media.findOne({
+              where: { id: draft.coverMediaId, workspaceId: site.workspaceId },
+            })
+          : null;
+      if (draft.previewMediaId !== article.previewMediaId)
+        draft.previewMedia = draft.previewMediaId
+          ? await this.media.findOne({
+              where: {
+                id: draft.previewMediaId,
+                workspaceId: site.workspaceId,
+              },
+            })
+          : null;
+    }
+    return draft;
   }
 
   private publicCanonicalBase(site: SiteEntity) {
@@ -257,13 +345,14 @@ export class ContentService {
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
       const membership = await this.memberships.findOne({
-        select: { role: true },
+        select: { role: true, siteIds: true },
         where: {
           userId: actor.userId,
           workspaceId: site.workspaceId,
         },
       });
       if (
+        !membership?.siteIds?.includes(siteId) ||
         !hasSitePermission(
           actor.platformRole,
           membership?.role ?? null,
@@ -351,14 +440,21 @@ export class ContentService {
     site: SiteEntity,
     page: PageEntity | undefined,
     legacyBanners: BannerEntity[],
+    revisionAssignments?: PageBannerAssignmentSnapshot[] | null,
   ) {
     if (site.siteType !== SiteType.MEDIA || !page || !this.bannerAssignments)
       return { banners: legacyBanners };
-    const assignments = await this.bannerAssignments.find({
-      where: { siteId: site.id, pageId: page.id },
-      relations: { banner: { media: true, mobileMedia: true } },
-      order: { zone: 'ASC' },
-    });
+    const assignments = revisionAssignments
+      ? await this.hydratePageBannerAssignments(
+          site.id,
+          page.id,
+          revisionAssignments,
+        )
+      : await this.bannerAssignments.find({
+          where: { siteId: site.id, pageId: page.id },
+          relations: { banner: { media: true, mobileMedia: true } },
+          order: { zone: 'ASC' },
+        });
     const assignedBanners = assignments
       .filter((assignment) => assignment.banner.isActive)
       .map((assignment) => ({
@@ -1177,7 +1273,12 @@ export class ContentService {
     });
   }
 
-  async getArticlePreview(siteId: string, articleId: string, actor: Actor) {
+  async getArticlePreview(
+    siteId: string,
+    articleId: string,
+    actor: Actor,
+    revisionId?: string,
+  ) {
     const site = await this.requireSiteModule(siteId, actor, 'articles');
     const article = await this.articles.findOne({
       where: { id: articleId, siteId, deletedAt: IsNull() },
@@ -1191,6 +1292,12 @@ export class ContentService {
       },
     });
     if (!article) throw new NotFoundException('Материал не найден');
+    const previewArticle = await this.articleForCms(
+      siteId,
+      article,
+      actor,
+      revisionId,
+    );
     const [related, pages, banners, categories] = await Promise.all([
       this.lifecycle?.resolveRelatedArticles(siteId, article.id, false) ??
         Promise.resolve([]),
@@ -1231,13 +1338,13 @@ export class ContentService {
         noIndex: true,
       },
       article:
-        article.createdBy || article.updatedBy
+        previewArticle.createdBy || previewArticle.updatedBy
           ? {
-              ...article,
-              createdBy: this.publicActor(article.createdBy),
-              updatedBy: this.publicActor(article.updatedBy),
+              ...previewArticle,
+              createdBy: this.publicActor(previewArticle.createdBy),
+              updatedBy: this.publicActor(previewArticle.updatedBy),
             }
-          : article,
+          : previewArticle,
       pages,
       banners,
       related,
@@ -1245,10 +1352,42 @@ export class ContentService {
     };
   }
 
-  async getPagePreview(siteId: string, pageId: string, actor: Actor) {
+  async getPagePreview(
+    siteId: string,
+    pageId: string,
+    actor: Actor,
+    revisionId?: string,
+    siteOverrides?: {
+      globalData?: SiteGlobalData;
+      layoutSettings?: SiteLayoutSettings;
+    },
+  ) {
     const site = await this.requireSite(siteId, actor);
-    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
-    if (!page) throw new NotFoundException('Страница не найдена');
+    const publicPage = await this.pages.findOne({
+      where: { id: pageId, siteId },
+    });
+    if (!publicPage) throw new NotFoundException('Страница не найдена');
+    let page = publicPage;
+    let selectedSnapshot: Record<string, unknown> | null = null;
+    if (revisionId && !this.revisions)
+      throw new ServiceUnavailableException('История страницы недоступна');
+    if (this.revisions && this.versionedPage(publicPage)) {
+      const selected = revisionId
+        ? await this.revisions.getVersion(
+            siteId,
+            'page',
+            pageId,
+            revisionId,
+            actor,
+          )
+        : (await this.revisions.current(siteId, 'page', pageId, actor))?.draft;
+      if (selected) {
+        selectedSnapshot = selected.snapshot;
+        page = Object.assign(new PageEntity(), publicPage, selected.snapshot);
+      }
+    } else if (revisionId) {
+      throw new BadRequestException('Ревизии этой страницы недоступны');
+    }
     const [navigationPages, articles, banners, categories] = await Promise.all([
       this.pages.find({
         where: {
@@ -1297,7 +1436,12 @@ export class ContentService {
             where: { siteId, pageId: page.id },
           })
         : null;
-    const pageBanners = await this.pageBannerData(site, page, banners);
+    const pageBanners = await this.pageBannerData(
+      site,
+      page,
+      banners,
+      this.pageBannerAssignmentsFromSnapshot(selectedSnapshot),
+    );
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
@@ -1309,8 +1453,8 @@ export class ContentService {
         canonicalUrl: null,
         seoImageMediaId: site.seoImageMediaId,
         noIndex: true,
-        globalData: site.globalData,
-        layoutSettings: site.layoutSettings,
+        globalData: siteOverrides?.globalData ?? site.globalData,
+        layoutSettings: siteOverrides?.layoutSettings ?? site.layoutSettings,
       },
       page,
       pages:
@@ -1626,9 +1770,163 @@ export class ContentService {
     return this.getSiteSettings(siteId, actor);
   }
 
+  private siteGlobalsSnapshot(
+    source: SiteGlobalData,
+    changes: UpdateSiteGlobalsDto = {},
+  ): SiteGlobalData {
+    const value = (input?: string | null) => input?.trim() || undefined;
+    return {
+      companyName:
+        changes.companyName === undefined
+          ? source.companyName
+          : value(changes.companyName),
+      organizationType:
+        changes.organizationType === undefined
+          ? source.organizationType
+          : changes.organizationType || undefined,
+      legalName:
+        changes.legalName === undefined
+          ? source.legalName
+          : value(changes.legalName),
+      inn: changes.inn === undefined ? source.inn : value(changes.inn),
+      ogrn: changes.ogrn === undefined ? source.ogrn : value(changes.ogrn),
+      legalAddress:
+        changes.legalAddress === undefined
+          ? source.legalAddress
+          : value(changes.legalAddress),
+      phone: changes.phone === undefined ? source.phone : value(changes.phone),
+      email:
+        changes.email === undefined
+          ? source.email
+          : value(changes.email)?.toLowerCase(),
+      address:
+        changes.address === undefined ? source.address : value(changes.address),
+      telegramUrl:
+        changes.telegramUrl === undefined
+          ? source.telegramUrl
+          : value(changes.telegramUrl),
+      vkUrl: changes.vkUrl === undefined ? source.vkUrl : value(changes.vkUrl),
+    };
+  }
+
+  private siteLayoutSectionSnapshot(
+    scope: SiteLayoutRevisionScope,
+    source: SiteLayoutSettings,
+    changes: UpdateSiteLayoutDto = {},
+  ): SiteLayoutSettings {
+    const value = (input?: string | null) => input?.trim() || undefined;
+    if (scope === 'header')
+      return {
+        logoText:
+          changes.logoText === undefined
+            ? source.logoText
+            : value(changes.logoText),
+        logoMediaId:
+          changes.logoMediaId === undefined
+            ? source.logoMediaId
+            : changes.logoMediaId || undefined,
+        showPages: changes.showPages ?? source.showPages,
+        showArticles: changes.showArticles ?? source.showArticles,
+        ctaLabel:
+          changes.ctaLabel === undefined
+            ? source.ctaLabel
+            : value(changes.ctaLabel),
+        ctaUrl:
+          changes.ctaUrl === undefined ? source.ctaUrl : value(changes.ctaUrl),
+      };
+    return {
+      footerDescription:
+        changes.footerDescription === undefined
+          ? source.footerDescription
+          : value(changes.footerDescription),
+      showContacts: changes.showContacts ?? source.showContacts,
+      showSocials: changes.showSocials ?? source.showSocials,
+    };
+  }
+
+  private siteSettingsRevisionView(
+    siteId: string,
+    snapshot: Record<string, unknown>,
+    current: {
+      draft: { id: string; versionNumber: number } | null;
+      approvedRevisionId: string | null;
+      publishedRevisionId: string | null;
+      reviewState: string;
+    } | null,
+    next?: { id: string; versionNumber: number },
+  ) {
+    return {
+      ...snapshot,
+      siteId,
+      draftRevisionId: next?.id ?? current?.draft?.id ?? null,
+      draftVersionNumber:
+        next?.versionNumber ?? current?.draft?.versionNumber ?? null,
+      approvedRevisionId: next ? null : (current?.approvedRevisionId ?? null),
+      publishedRevisionId: current?.publishedRevisionId ?? null,
+      reviewState: next ? 'draft' : (current?.reviewState ?? 'draft'),
+    };
+  }
+
+  private async siteSettingsDraftState(
+    siteId: string,
+    resourceType: SiteSettingsRevisionType,
+    actor: Actor,
+    expectedDraftRevisionId: string | null | undefined,
+  ) {
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История настроек недоступна');
+    if (expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    const current = await this.revisions.current(
+      siteId,
+      resourceType,
+      siteId,
+      actor,
+    );
+    if (expectedDraftRevisionId !== (current?.draft?.id ?? null))
+      throw new ConflictException('Черновик уже изменён');
+    return current;
+  }
+
+  private async saveSiteSettingsDraft(
+    siteId: string,
+    resourceType: SiteSettingsRevisionType,
+    publicSnapshot: Record<string, unknown>,
+    snapshot: Record<string, unknown>,
+    current: Awaited<ReturnType<ContentService['siteSettingsDraftState']>>,
+    actor: Actor,
+  ) {
+    const baseline = !current
+      ? await this.revisions!.importPublishedBaseline({
+          siteId,
+          resourceType,
+          entityId: siteId,
+          snapshot: publicSnapshot,
+          actor,
+        })
+      : null;
+    const next = await this.revisions!.saveDraft({
+      siteId,
+      resourceType,
+      entityId: siteId,
+      snapshot,
+      expectedDraftRevisionId: current?.draft?.id ?? baseline?.id ?? null,
+      actor,
+    });
+    return this.siteSettingsRevisionView(siteId, snapshot, current, next);
+  }
+
   async getSiteGlobals(siteId: string, actor: Actor) {
     const site = await this.requireSite(siteId, actor);
-    return { siteId: site.id, ...site.globalData };
+    const current = this.revisions
+      ? await this.revisions.current(siteId, 'site_globals', siteId, actor)
+      : null;
+    const snapshot = this.siteGlobalsSnapshot(
+      (current?.draft?.snapshot as SiteGlobalData | undefined) ??
+        site.globalData ??
+        {},
+    );
+    return this.siteSettingsRevisionView(site.id, snapshot, current);
   }
 
   async updateSiteGlobals(
@@ -1641,38 +1939,118 @@ export class ContentService {
       actor,
       SitePermission.EDIT_CONTENT,
     );
-    const value = (input?: string) => input?.trim() || undefined;
-    site.globalData = {
-      ...(site.globalData ?? {}),
-      ...(dto.companyName !== undefined && {
-        companyName: value(dto.companyName),
-      }),
-      ...(dto.organizationType !== undefined && {
-        organizationType: dto.organizationType || undefined,
-      }),
-      ...(dto.legalName !== undefined && { legalName: value(dto.legalName) }),
-      ...(dto.inn !== undefined && { inn: value(dto.inn) }),
-      ...(dto.ogrn !== undefined && { ogrn: value(dto.ogrn) }),
-      ...(dto.legalAddress !== undefined && {
-        legalAddress: value(dto.legalAddress),
-      }),
-      ...(dto.phone !== undefined && { phone: value(dto.phone) }),
-      ...(dto.email !== undefined && {
-        email: value(dto.email)?.toLowerCase(),
-      }),
-      ...(dto.address !== undefined && { address: value(dto.address) }),
-      ...(dto.telegramUrl !== undefined && {
-        telegramUrl: value(dto.telegramUrl),
-      }),
-      ...(dto.vkUrl !== undefined && { vkUrl: value(dto.vkUrl) }),
-    };
-    await this.sites.save(site);
-    return { siteId: site.id, ...site.globalData };
+    const current = await this.siteSettingsDraftState(
+      siteId,
+      'site_globals',
+      actor,
+      dto.expectedDraftRevisionId,
+    );
+    const source =
+      (current?.draft?.snapshot as SiteGlobalData | undefined) ??
+      site.globalData ??
+      {};
+    const snapshot = this.siteGlobalsSnapshot(source, dto);
+    return this.saveSiteSettingsDraft(
+      siteId,
+      'site_globals',
+      this.siteGlobalsSnapshot(site.globalData ?? {}),
+      snapshot,
+      current,
+      actor,
+    );
   }
 
   async getSiteLayout(siteId: string, actor: Actor) {
     const site = await this.requireSite(siteId, actor);
     return { siteId: site.id, ...site.layoutSettings };
+  }
+
+  async getSiteLayoutSection(
+    siteId: string,
+    scope: SiteLayoutRevisionScope,
+    actor: Actor,
+  ) {
+    const site = await this.requireSite(siteId, actor);
+    const resourceType = `site_${scope}` as const;
+    const current = this.revisions
+      ? await this.revisions.current(siteId, resourceType, siteId, actor)
+      : null;
+    const snapshot = this.siteLayoutSectionSnapshot(
+      scope,
+      (current?.draft?.snapshot as SiteLayoutSettings | undefined) ??
+        site.layoutSettings ??
+        {},
+    );
+    return this.siteSettingsRevisionView(site.id, snapshot, current);
+  }
+
+  async updateSiteLayoutSection(
+    siteId: string,
+    scope: SiteLayoutRevisionScope,
+    actor: Actor,
+    dto: UpdateSiteLayoutDto,
+  ) {
+    const site = await this.requireSite(
+      siteId,
+      actor,
+      SitePermission.EDIT_CONTENT,
+    );
+    const headerFields = [
+      dto.logoText,
+      dto.logoMediaId,
+      dto.showPages,
+      dto.showArticles,
+      dto.ctaLabel,
+      dto.ctaUrl,
+    ];
+    const footerFields = [
+      dto.footerDescription,
+      dto.showContacts,
+      dto.showSocials,
+    ];
+    const templateFields = [
+      dto.headerTemplateKey,
+      dto.headerTemplateVersion,
+      dto.headerTemplateConfig,
+      dto.footerTemplateKey,
+      dto.footerTemplateVersion,
+      dto.footerTemplateConfig,
+    ];
+    if (
+      templateFields.some((value) => value !== undefined) ||
+      (scope === 'header' &&
+        footerFields.some((value) => value !== undefined)) ||
+      (scope === 'footer' && headerFields.some((value) => value !== undefined))
+    )
+      throw new BadRequestException(
+        'Изменения шапки и подвала согласуются отдельно',
+      );
+    if (
+      scope === 'header' &&
+      dto.logoMediaId &&
+      !(await this.workspaceHasMedia(siteId, dto.logoMediaId))
+    )
+      throw new NotFoundException('Логотип не найден');
+    const resourceType = `site_${scope}` as const;
+    const current = await this.siteSettingsDraftState(
+      siteId,
+      resourceType,
+      actor,
+      dto.expectedDraftRevisionId,
+    );
+    const source =
+      (current?.draft?.snapshot as SiteLayoutSettings | undefined) ??
+      site.layoutSettings ??
+      {};
+    const snapshot = this.siteLayoutSectionSnapshot(scope, source, dto);
+    return this.saveSiteSettingsDraft(
+      siteId,
+      resourceType,
+      this.siteLayoutSectionSnapshot(scope, site.layoutSettings ?? {}),
+      snapshot,
+      current,
+      actor,
+    );
   }
 
   async getSiteSeo(siteId: string, actor: Actor) {
@@ -1721,6 +2099,21 @@ export class ContentService {
       actor,
       SitePermission.EDIT_CONTENT,
     );
+    const changesHeaderContent =
+      dto.logoText !== undefined ||
+      dto.logoMediaId !== undefined ||
+      dto.showPages !== undefined ||
+      dto.showArticles !== undefined ||
+      dto.ctaLabel !== undefined ||
+      dto.ctaUrl !== undefined;
+    const changesFooterContent =
+      dto.footerDescription !== undefined ||
+      dto.showContacts !== undefined ||
+      dto.showSocials !== undefined;
+    if (changesHeaderContent || changesFooterContent)
+      throw new BadRequestException(
+        'Содержимое шапки и подвала сохраняется через отдельные версии',
+      );
     if (
       dto.logoMediaId &&
       !(await this.workspaceHasMedia(siteId, dto.logoMediaId))
@@ -1735,6 +2128,8 @@ export class ContentService {
       dto.footerTemplateKey !== undefined ||
       dto.footerTemplateVersion !== undefined ||
       dto.footerTemplateConfig !== undefined;
+    if (changesHeaderTemplate || changesFooterTemplate)
+      await this.requireSite(siteId, actor, SitePermission.EDIT_CODE);
     if (
       site.siteType !== SiteType.MEDIA &&
       (changesHeaderTemplate || changesFooterTemplate)
@@ -1819,9 +2214,94 @@ export class ContentService {
     return { siteId: site.id, ...site.layoutSettings };
   }
 
+  async getSiteSettingsRevisionPreview(
+    siteId: string,
+    resourceType: SiteSettingsRevisionType,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История настроек недоступна');
+    const site = await this.requireSite(siteId, actor);
+    const homepage = await this.pages.findOne({
+      where: { siteId, kind: PageKind.HOMEPAGE },
+    });
+    if (!homepage) throw new NotFoundException('Главная страница не найдена');
+    const version = await this.revisions.getVersion(
+      siteId,
+      resourceType,
+      siteId,
+      revisionId,
+      actor,
+    );
+    if (resourceType === 'site_globals')
+      return this.getPagePreview(siteId, homepage.id, actor, undefined, {
+        globalData: this.siteGlobalsSnapshot(version.snapshot),
+      });
+    const scope: SiteLayoutRevisionScope =
+      resourceType === 'site_header' ? 'header' : 'footer';
+    const section = this.siteLayoutSectionSnapshot(scope, version.snapshot);
+    if (
+      scope === 'header' &&
+      section.logoMediaId &&
+      !(await this.workspaceHasMedia(siteId, section.logoMediaId))
+    )
+      throw new NotFoundException('Логотип не найден');
+    return this.getPagePreview(siteId, homepage.id, actor, undefined, {
+      layoutSettings: { ...(site.layoutSettings ?? {}), ...section },
+    });
+  }
+
+  async publishSiteSettingsRevision(
+    siteId: string,
+    resourceType: SiteSettingsRevisionType,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История настроек недоступна');
+    let published: SiteGlobalData | SiteLayoutSettings | null = null;
+    await this.revisions.publish(
+      siteId,
+      resourceType,
+      siteId,
+      revisionId,
+      actor,
+      async (manager, snapshot) => {
+        const locked = await manager.findOne(SiteEntity, {
+          where: { id: siteId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!locked) throw new NotFoundException('Сайт не найден');
+        if (resourceType === 'site_globals') {
+          const globals = this.siteGlobalsSnapshot(snapshot);
+          locked.globalData = globals;
+          published = globals;
+        } else {
+          const scope: SiteLayoutRevisionScope =
+            resourceType === 'site_header' ? 'header' : 'footer';
+          const section = this.siteLayoutSectionSnapshot(scope, snapshot);
+          if (
+            scope === 'header' &&
+            section.logoMediaId &&
+            !(await this.workspaceHasMedia(siteId, section.logoMediaId))
+          )
+            throw new NotFoundException('Логотип не найден');
+          locked.layoutSettings = {
+            ...(locked.layoutSettings ?? {}),
+            ...section,
+          };
+          published = section;
+        }
+        await manager.save(locked);
+      },
+    );
+    return { siteId, ...(published ?? {}) };
+  }
+
   async listBanners(siteId: string, actor: Actor) {
     const site = await this.requireSiteModule(siteId, actor, 'banners');
-    return this.banners.find({
+    const rows = await this.banners.find({
       where: { siteId },
       relations: { media: true, mobileMedia: true },
       order:
@@ -1829,6 +2309,60 @@ export class ContentService {
           ? { updatedAt: 'DESC' }
           : { placement: 'ASC', sortOrder: 'ASC', createdAt: 'DESC' },
     });
+    return Promise.all(
+      rows.map(async (banner) => {
+        const current = this.revisions
+          ? await this.revisions.current(siteId, 'banner', banner.id, actor)
+          : null;
+        return current?.draft
+          ? this.bannerDraftView(
+              banner,
+              current.draft.snapshot,
+              current.draft.id,
+            )
+          : banner;
+      }),
+    );
+  }
+
+  private bannerRevisionSnapshot(banner: BannerEntity) {
+    return {
+      name: banner.name,
+      placement: banner.placement,
+      title: banner.title,
+      subtitle: banner.subtitle,
+      buttonText: banner.buttonText,
+      linkUrl: banner.linkUrl,
+      mediaId: banner.mediaId,
+      mobileMediaId: banner.mobileMediaId,
+      sortOrder: banner.sortOrder,
+      isActive: banner.isActive,
+    };
+  }
+
+  private bannerDraftView(
+    banner: BannerEntity,
+    snapshot: Record<string, unknown>,
+    draftRevisionId: string,
+  ) {
+    return {
+      ...banner,
+      ...snapshot,
+      id: banner.id,
+      siteId: banner.siteId,
+      draftRevisionId,
+    };
+  }
+
+  async assertVersionedBanner(siteId: string, bannerId: string, actor: Actor) {
+    await this.requireSiteModule(siteId, actor, 'banners');
+    const banner = await this.banners.findOne({
+      where: { id: bannerId, siteId },
+    });
+    if (!banner) throw new NotFoundException('Баннер не найден');
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История баннера недоступна');
+    return banner;
   }
 
   private async validateBannerMedia(
@@ -1857,8 +2391,10 @@ export class ContentService {
       throw new BadRequestException(
         'Для этого типа сайта требуется позиция баннера',
       );
-    return this.banners.save(
-      this.banners.create({
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История баннера недоступна');
+    return this.banners.manager.transaction(async (manager) => {
+      const desired = Object.assign(new BannerEntity(), {
         siteId,
         name: dto.name.trim(),
         placement:
@@ -1871,8 +2407,28 @@ export class ContentService {
         mobileMediaId: dto.mobileMediaId || null,
         sortOrder: dto.sortOrder ?? 0,
         isActive: dto.isActive ?? true,
-      }),
-    );
+      });
+      const banner = await manager.save(
+        manager.create(BannerEntity, {
+          ...desired,
+          // A new banner must not become public before its first approval.
+          isActive: false,
+        }),
+      );
+      const draft = await this.revisions!.saveDraftUsingManager(manager, {
+        siteId,
+        resourceType: 'banner',
+        entityId: banner.id,
+        snapshot: this.bannerRevisionSnapshot(desired),
+        expectedDraftRevisionId: null,
+        actor,
+      });
+      return this.bannerDraftView(
+        banner,
+        this.bannerRevisionSnapshot(desired),
+        draft.id,
+      );
+    });
   }
 
   async updateBanner(
@@ -1891,20 +2447,43 @@ export class ContentService {
       where: { id: bannerId, siteId },
     });
     if (!banner) throw new NotFoundException('Баннер не найден');
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История баннера недоступна');
+    const current = await this.revisions.current(
+      siteId,
+      'banner',
+      bannerId,
+      actor,
+    );
+    if (dto.expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    if (dto.expectedDraftRevisionId !== (current?.draft?.id ?? null))
+      throw new ConflictException('Черновик уже изменён');
     await this.validateBannerMedia(siteId, dto.mediaId, dto.mobileMediaId);
     if (!isAllowedBannerLink(dto.linkUrl))
       throw new BadRequestException('Недопустимый адрес баннера');
-    const prospective = {
-      ...banner,
+    const source = current?.draft
+      ? Object.assign(new BannerEntity(), banner, current.draft.snapshot)
+      : banner;
+    const baseline = !current
+      ? await this.revisions.importPublishedBaseline({
+          siteId,
+          resourceType: 'banner',
+          entityId: bannerId,
+          snapshot: this.bannerRevisionSnapshot(banner),
+          actor,
+        })
+      : null;
+    const prospective = Object.assign(new BannerEntity(), source, {
       ...(dto.name !== undefined && { name: dto.name.trim() }),
       placement:
         site.siteType === SiteType.MEDIA
           ? banner.placement === BannerPlacement.ARTICLE_SIDEBAR
-            ? banner.placement
+            ? source.placement
             : null
           : dto.placement !== undefined
             ? dto.placement
-            : banner.placement,
+            : source.placement,
       ...(dto.title !== undefined && { title: dto.title?.trim() || null }),
       ...(dto.subtitle !== undefined && {
         subtitle: dto.subtitle?.trim() || null,
@@ -1921,11 +2500,142 @@ export class ContentService {
       }),
       ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
       ...(dto.isActive !== undefined && { isActive: dto.isActive }),
-    };
+    });
     if (prospective.isActive)
       await this.validateExistingBannerAssignments(siteId, prospective);
-    Object.assign(banner, prospective);
-    return this.banners.save(banner);
+    const next = await this.revisions.saveDraft({
+      siteId,
+      resourceType: 'banner',
+      entityId: bannerId,
+      snapshot: this.bannerRevisionSnapshot(prospective),
+      expectedDraftRevisionId: current?.draft?.id ?? baseline?.id ?? null,
+      actor,
+    });
+    return this.bannerDraftView(
+      banner,
+      this.bannerRevisionSnapshot(prospective),
+      next.id,
+    );
+  }
+
+  async getBannerRevisionPreview(
+    siteId: string,
+    bannerId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    const banner = await this.assertVersionedBanner(siteId, bannerId, actor);
+    const version = await this.revisions!.getVersion(
+      siteId,
+      'banner',
+      bannerId,
+      revisionId,
+      actor,
+    );
+    return {
+      ...version.snapshot,
+      id: banner.id,
+      siteId: banner.siteId,
+      revisionId: version.id,
+      versionNumber: version.versionNumber,
+    };
+  }
+
+  private bannerFromSnapshot(
+    site: SiteEntity,
+    banner: BannerEntity,
+    snapshot: Record<string, unknown>,
+  ) {
+    const nullableText = (key: string, maxLength: number) => {
+      const raw = snapshot[key];
+      if (raw === null) return null;
+      if (typeof raw !== 'string') return undefined;
+      const trimmed = raw.trim();
+      return trimmed.length <= maxLength ? trimmed || null : undefined;
+    };
+    const name = typeof snapshot.name === 'string' ? snapshot.name.trim() : '';
+    const placement = snapshot.placement;
+    const title = nullableText('title', 200);
+    const subtitle = nullableText('subtitle', 300);
+    const buttonText = nullableText('buttonText', 80);
+    const linkUrl = nullableText('linkUrl', 500);
+    const mediaId = nullableText('mediaId', 36);
+    const mobileMediaId = nullableText('mobileMediaId', 36);
+    const sortOrder = snapshot.sortOrder;
+    const isActive = snapshot.isActive;
+    const placementValid =
+      placement === null ||
+      (typeof placement === 'string' &&
+        Object.values(BannerPlacement).includes(placement as BannerPlacement));
+    if (
+      name.length < 2 ||
+      name.length > 160 ||
+      !placementValid ||
+      (site.siteType !== SiteType.MEDIA && placement === null) ||
+      title === undefined ||
+      subtitle === undefined ||
+      buttonText === undefined ||
+      linkUrl === undefined ||
+      mediaId === undefined ||
+      mobileMediaId === undefined ||
+      !Number.isInteger(sortOrder) ||
+      Number(sortOrder) < 0 ||
+      Number(sortOrder) > 9999 ||
+      typeof isActive !== 'boolean' ||
+      !isAllowedBannerLink(linkUrl)
+    )
+      throw new BadRequestException('Снимок баннера несовместим');
+    return Object.assign(new BannerEntity(), banner, {
+      name,
+      placement:
+        site.siteType === SiteType.MEDIA &&
+        placement !== BannerPlacement.ARTICLE_SIDEBAR
+          ? null
+          : placement,
+      title,
+      subtitle,
+      buttonText,
+      linkUrl,
+      mediaId,
+      mobileMediaId,
+      sortOrder: Number(sortOrder),
+      isActive,
+    });
+  }
+
+  async publishBannerRevision(
+    siteId: string,
+    bannerId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    const site = await this.requireSiteModule(siteId, actor, 'banners');
+    const banner = await this.assertVersionedBanner(siteId, bannerId, actor);
+    let published: BannerEntity | null = null;
+    await this.revisions!.publish(
+      siteId,
+      'banner',
+      bannerId,
+      revisionId,
+      actor,
+      async (manager, snapshot) => {
+        const locked = await manager.findOne(BannerEntity, {
+          where: { id: bannerId, siteId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!locked) throw new NotFoundException('Баннер не найден');
+        const changed = this.bannerFromSnapshot(site, locked, snapshot);
+        await this.validateBannerMedia(
+          siteId,
+          changed.mediaId,
+          changed.mobileMediaId,
+        );
+        if (changed.isActive)
+          await this.validateExistingBannerAssignments(siteId, changed);
+        published = await manager.save(changed);
+      },
+    );
+    return published ?? banner;
   }
 
   async deleteBanner(siteId: string, bannerId: string, actor: Actor) {
@@ -1933,7 +2643,7 @@ export class ContentService {
       siteId,
       actor,
       'banners',
-      SitePermission.EDIT_CONTENT,
+      SitePermission.APPROVE,
     );
     const banner = await this.banners.findOne({
       where: { id: bannerId, siteId },
@@ -1968,14 +2678,176 @@ export class ContentService {
     );
   }
 
+  private pageBannerAssignmentsFromSnapshot(
+    snapshot: Record<string, unknown> | null | undefined,
+  ): PageBannerAssignmentSnapshot[] | null {
+    if (!snapshot || snapshot.bannerAssignments === undefined) return null;
+    if (!Array.isArray(snapshot.bannerAssignments))
+      throw new BadRequestException('Снимок назначений баннеров повреждён');
+    const assignments = snapshot.bannerAssignments.map((entry) => {
+      if (
+        !entry ||
+        typeof entry !== 'object' ||
+        typeof (entry as Record<string, unknown>).zone !== 'string' ||
+        typeof (entry as Record<string, unknown>).bannerId !== 'string'
+      )
+        throw new BadRequestException('Снимок назначений баннеров повреждён');
+      return {
+        zone: (entry as { zone: string }).zone,
+        bannerId: (entry as { bannerId: string }).bannerId,
+      };
+    });
+    if (
+      new Set(assignments.map(({ zone }) => zone)).size !== assignments.length
+    )
+      throw new BadRequestException('Зона баннера повторяется в снимке');
+    return assignments.sort((left, right) =>
+      left.zone.localeCompare(right.zone),
+    );
+  }
+
+  private async publicPageBannerAssignments(
+    siteId: string,
+    pageId: string,
+    manager?: EntityManager,
+  ): Promise<PageBannerAssignmentSnapshot[]> {
+    const rows = manager
+      ? await manager.find(PageBannerAssignmentEntity, {
+          where: { siteId, pageId },
+          order: { zone: 'ASC' },
+        })
+      : ((await this.bannerAssignments?.find({
+          where: { siteId, pageId },
+          order: { zone: 'ASC' },
+        })) ?? []);
+    return rows.map(({ zone, bannerId }) => ({ zone, bannerId }));
+  }
+
+  private async hydratePageBannerAssignments(
+    siteId: string,
+    pageId: string,
+    assignments: PageBannerAssignmentSnapshot[],
+  ) {
+    if (!assignments.length) return [];
+    const banners = await this.banners.find({
+      where: {
+        siteId,
+        id: In(assignments.map(({ bannerId }) => bannerId)),
+      },
+      relations: { media: true, mobileMedia: true },
+    });
+    const byId = new Map(banners.map((banner) => [banner.id, banner]));
+    return assignments.flatMap(({ zone, bannerId }) => {
+      const banner = byId.get(bannerId);
+      return banner
+        ? [
+            {
+              id: `${pageId}:${zone}`,
+              siteId,
+              pageId,
+              zone,
+              bannerId,
+              banner,
+            },
+          ]
+        : [];
+    });
+  }
+
+  private async pageAssignmentDraftState(
+    siteId: string,
+    page: PageEntity,
+    actor: Actor,
+    expectedDraftRevisionId: string | null | undefined,
+  ) {
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История страницы недоступна');
+    if (expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    const current = await this.revisions.current(
+      siteId,
+      'page',
+      page.id,
+      actor,
+    );
+    if (expectedDraftRevisionId !== (current?.draft?.id ?? null))
+      throw new ConflictException('Черновик уже изменён');
+    const publicAssignments = await this.publicPageBannerAssignments(
+      siteId,
+      page.id,
+    );
+    return {
+      current,
+      publicAssignments,
+      assignments:
+        this.pageBannerAssignmentsFromSnapshot(current?.draft?.snapshot) ??
+        publicAssignments,
+      draftPage: current?.draft
+        ? Object.assign(new PageEntity(), page, current.draft.snapshot)
+        : page,
+    };
+  }
+
+  private async savePageAssignmentDraft(
+    siteId: string,
+    page: PageEntity,
+    actor: Actor,
+    state: Awaited<ReturnType<ContentService['pageAssignmentDraftState']>>,
+    assignments: PageBannerAssignmentSnapshot[],
+  ) {
+    const baseline =
+      !state.current && page.status === PageStatus.PUBLISHED
+        ? await this.revisions!.importPublishedBaseline({
+            siteId,
+            resourceType: 'page',
+            entityId: page.id,
+            snapshot: this.pageSnapshot(page, state.publicAssignments),
+            actor,
+          })
+        : null;
+    const next = await this.revisions!.saveDraft({
+      siteId,
+      resourceType: 'page',
+      entityId: page.id,
+      snapshot: this.pageSnapshot(state.draftPage, assignments),
+      expectedDraftRevisionId: state.current?.draft?.id ?? baseline?.id ?? null,
+      actor,
+    });
+    return {
+      assignments: await this.hydratePageBannerAssignments(
+        siteId,
+        page.id,
+        assignments,
+      ),
+      draftRevisionId: next.id,
+    };
+  }
+
   async listPageBannerAssignments(
     siteId: string,
     pageId: string,
     actor: Actor,
   ) {
     await this.requireMediaToolkit(siteId, actor);
-    if (!(await this.pages.existsBy({ id: pageId, siteId })))
-      throw new NotFoundException('Страница не найдена');
+    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
+    if (!page) throw new NotFoundException('Страница не найдена');
+    if (this.revisions && this.versionedPage(page)) {
+      const current = await this.revisions.current(
+        siteId,
+        'page',
+        pageId,
+        actor,
+      );
+      const snapshotAssignments = this.pageBannerAssignmentsFromSnapshot(
+        current?.draft?.snapshot,
+      );
+      if (snapshotAssignments)
+        return this.hydratePageBannerAssignments(
+          siteId,
+          pageId,
+          snapshotAssignments,
+        );
+    }
     return (
       (await this.bannerAssignments?.find({
         where: { siteId, pageId },
@@ -1992,7 +2864,22 @@ export class ContentService {
     dto: AssignPageBannerDto,
   ) {
     await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
-    const slot = await this.requirePageBannerSlot(siteId, pageId, dto.zone);
+    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
+    if (!page) throw new NotFoundException('Страница не найдена');
+    const state = this.versionedPage(page)
+      ? await this.pageAssignmentDraftState(
+          siteId,
+          page,
+          actor,
+          dto.expectedDraftRevisionId,
+        )
+      : null;
+    const slot = await this.requirePageBannerSlot(
+      siteId,
+      pageId,
+      dto.zone,
+      state?.draftPage,
+    );
     const banner = await this.banners.findOne({
       where: { id: dto.bannerId, siteId },
     });
@@ -2002,6 +2889,19 @@ export class ContentService {
     await this.validateBannerSlotMedia(siteId, banner, slot);
     if (!this.bannerAssignments)
       throw new ServiceUnavailableException('Назначения баннеров недоступны');
+    if (state) {
+      const assignments = [
+        ...state.assignments.filter(({ zone }) => zone !== dto.zone),
+        { zone: dto.zone, bannerId: dto.bannerId },
+      ].sort((left, right) => left.zone.localeCompare(right.zone));
+      return this.savePageAssignmentDraft(
+        siteId,
+        page,
+        actor,
+        state,
+        assignments,
+      );
+    }
     await this.bannerAssignments.upsert(
       { siteId, pageId, bannerId: dto.bannerId, zone: dto.zone },
       ['pageId', 'zone'],
@@ -2014,7 +2914,10 @@ export class ContentService {
       `Баннер назначен в зону ${dto.zone}`,
       { zone: dto.zone, bannerId: dto.bannerId },
     );
-    return this.listPageBannerAssignments(siteId, pageId, actor);
+    return {
+      assignments: await this.listPageBannerAssignments(siteId, pageId, actor),
+      draftRevisionId: null,
+    };
   }
 
   async unassignPageBanner(
@@ -2022,11 +2925,30 @@ export class ContentService {
     pageId: string,
     zone: string,
     actor: Actor,
+    dto: UnassignPageBannerDto,
   ) {
     await this.requireMediaToolkit(siteId, actor, SitePermission.EDIT_CONTENT);
-    await this.requirePageBannerSlot(siteId, pageId, zone);
+    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
+    if (!page) throw new NotFoundException('Страница не найдена');
+    const state = this.versionedPage(page)
+      ? await this.pageAssignmentDraftState(
+          siteId,
+          page,
+          actor,
+          dto.expectedDraftRevisionId,
+        )
+      : null;
+    await this.requirePageBannerSlot(siteId, pageId, zone, state?.draftPage);
     if (!this.bannerAssignments)
       throw new ServiceUnavailableException('Назначения баннеров недоступны');
+    if (state)
+      return this.savePageAssignmentDraft(
+        siteId,
+        page,
+        actor,
+        state,
+        state.assignments.filter((assignment) => assignment.zone !== zone),
+      );
     await this.bannerAssignments.delete({ siteId, pageId, zone });
     await this.recordPageActivity(
       siteId,
@@ -2036,15 +2958,18 @@ export class ContentService {
       `Баннер снят с зоны ${zone}`,
       { zone },
     );
-    return { pageId, zone };
+    return { pageId, zone, assignments: [], draftRevisionId: null };
   }
 
   private async requirePageBannerSlot(
     siteId: string,
     pageId: string,
     zone: string,
+    sourcePage?: PageEntity,
   ) {
-    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
+    const page =
+      sourcePage ??
+      (await this.pages.findOne({ where: { id: pageId, siteId } }));
     if (!page) throw new NotFoundException('Страница не найдена');
     const slot = bannerSlotsForPage(page).find((item) => item.id === zone);
     if (!slot)
@@ -2385,11 +3310,16 @@ export class ContentService {
       },
       order: { sortOrder: 'ASC', updatedAt: 'DESC' },
     });
-    return rows.map((article) => ({
-      ...article,
-      createdBy: this.publicActor(article.createdBy),
-      updatedBy: this.publicActor(article.updatedBy),
-    }));
+    return Promise.all(
+      rows.map(async (row) => {
+        const article = await this.articleForCms(siteId, row, actor);
+        return {
+          ...article,
+          createdBy: this.publicActor(article.createdBy),
+          updatedBy: this.publicActor(article.updatedBy),
+        };
+      }),
+    );
   }
 
   async listSiteActivity(siteId: string, actor: Actor) {
@@ -2542,10 +3472,11 @@ export class ContentService {
     dto: UpdateArticleDto,
   ) {
     await this.requireSiteModule(siteId, actor, 'articles');
-    const article = await this.articles.findOne({
+    let article = await this.articles.findOne({
       where: { id: articleId, siteId, deletedAt: IsNull() },
     });
     if (!article) throw new NotFoundException('Статья не найдена');
+    const publicArticle = article;
     await this.requireSiteModule(
       siteId,
       actor,
@@ -2555,6 +3486,25 @@ export class ContentService {
         ? SitePermission.EDIT_PUBLISHED
         : SitePermission.EDIT_CONTENT,
     );
+    const staged =
+      this.revisions &&
+      (article.publicationState === PublicationState.PUBLISHED ||
+        article.publicationState === PublicationState.HIDDEN);
+    const currentRevision = staged
+      ? await this.revisions.current(siteId, 'article', articleId, actor)
+      : null;
+    if (staged) {
+      if (dto.expectedDraftRevisionId === undefined)
+        throw new BadRequestException('Укажите актуальную версию черновика');
+      if (dto.expectedDraftRevisionId !== (currentRevision?.draft?.id ?? null))
+        throw new ConflictException('Черновик уже изменён');
+    }
+    if (currentRevision?.draft)
+      article = Object.assign(
+        new ArticleEntity(),
+        article,
+        currentRevision.draft.snapshot,
+      );
     await this.validateLinks(
       siteId,
       dto.categoryId,
@@ -2627,6 +3577,51 @@ export class ContentService {
             : null,
       updatedByUserId: actor.userId,
     };
+    if (staged) {
+      if (!this.lifecycle)
+        throw new ServiceUnavailableException('История статьи недоступна');
+      const duplicate = await this.articles.findOne({
+        where: { siteId, slug },
+      });
+      if (duplicate && duplicate.id !== articleId)
+        throw new ConflictException('Такой slug статьи уже используется');
+      const redirect = await this.articleRedirects?.findOne({
+        where: { siteId, fromSlug: slug },
+      });
+      if (redirect && redirect.articleId !== articleId)
+        throw new ConflictException(
+          'Этот slug уже сохранён как прежний адрес другой статьи',
+        );
+      const baseline = currentRevision
+        ? null
+        : await this.revisions.importPublishedBaseline({
+            siteId,
+            resourceType: 'article',
+            entityId: articleId,
+            snapshot: this.lifecycle.articleSnapshot(publicArticle),
+            actor,
+          });
+      const snapshot =
+        currentRevision?.draft?.snapshot ??
+        this.lifecycle.articleSnapshot(publicArticle);
+      const revision =
+        (typeof snapshot.revision === 'number'
+          ? snapshot.revision
+          : publicArticle.revision) + 1;
+      const draft = await this.revisions.saveDraft({
+        siteId,
+        resourceType: 'article',
+        entityId: articleId,
+        snapshot: { ...snapshot, ...changes, revision },
+        expectedDraftRevisionId:
+          currentRevision?.draft?.id ?? baseline?.id ?? null,
+        actor,
+      });
+      return Object.assign(new ArticleEntity(), article, changes, {
+        revision,
+        draftRevisionId: draft.id,
+      });
+    }
     return this.articles.manager.transaction(async (manager) => {
       const locked = await manager.findOne(ArticleEntity, {
         where: { id: articleId, siteId, deletedAt: IsNull() },
@@ -2733,6 +3728,69 @@ export class ContentService {
     );
     if (dto.body === undefined && dto.bodyDocument === undefined)
       throw new BadRequestException('Передайте текст или документ статьи');
+    if (
+      this.revisions &&
+      (article.publicationState === PublicationState.PUBLISHED ||
+        article.publicationState === PublicationState.HIDDEN)
+    ) {
+      if (!this.lifecycle)
+        throw new ServiceUnavailableException('История статьи недоступна');
+      const current = await this.revisions.current(
+        siteId,
+        'article',
+        articleId,
+        actor,
+      );
+      const baseline = current
+        ? null
+        : await this.revisions.importPublishedBaseline({
+            siteId,
+            resourceType: 'article',
+            entityId: articleId,
+            snapshot: this.lifecycle.articleSnapshot(article),
+            actor,
+          });
+      const snapshot =
+        current?.draft?.snapshot ?? this.lifecycle.articleSnapshot(article);
+      if (snapshot.revision !== dto.expectedRevision)
+        throw new ConflictException(
+          'Материал уже изменён. Обновите данные и повторите сохранение',
+        );
+      const previousBody =
+        typeof snapshot.body === 'string' ? snapshot.body : '';
+      const bodyDocument = normalizeArticleDocument(
+        dto.bodyDocument,
+        dto.body ?? previousBody,
+      );
+      await this.validateArticleDocumentMedia(siteId, bodyDocument);
+      const body = dto.bodyDocument
+        ? articleDocumentText(bodyDocument)
+        : (dto.body ?? previousBody);
+      const updatedAt = new Date();
+      const draft = await this.revisions.saveDraft({
+        siteId,
+        resourceType: 'article',
+        entityId: articleId,
+        snapshot: {
+          ...snapshot,
+          body,
+          bodyDocument,
+          documentVersion: bodyDocument.version,
+          revision: dto.expectedRevision + 1,
+        },
+        expectedDraftRevisionId: current?.draft?.id ?? baseline?.id ?? null,
+        actor,
+      });
+      return {
+        id: articleId,
+        body,
+        bodyDocument,
+        documentVersion: bodyDocument.version,
+        revision: dto.expectedRevision + 1,
+        updatedAt,
+        draftRevisionId: draft.id,
+      };
+    }
     const before = Object.assign(new ArticleEntity(), article);
     const bodyDocument = normalizeArticleDocument(
       dto.bodyDocument,
@@ -2805,9 +3863,21 @@ export class ContentService {
       where: { id: articleId, siteId },
     });
     if (!article) throw new NotFoundException('Статья не найдена');
-    if (article.status === ArticleStatus.PUBLISHED)
+    if (
+      article.status === ArticleStatus.PUBLISHED ||
+      article.status === ArticleStatus.HIDDEN ||
+      article.publicationState === PublicationState.PUBLISHED ||
+      article.publicationState === PublicationState.HIDDEN
+    )
       throw new ConflictException(
         'Сначала снимите статью с публикации, затем её можно удалить',
+      );
+    if (
+      this.revisions &&
+      (await this.revisions.current(siteId, 'article', articleId, actor))
+    )
+      throw new ConflictException(
+        'Статья использует ревизии: прямое удаление недоступно',
       );
     await this.articles.remove(article);
     return { id: articleId };
@@ -2860,6 +3930,64 @@ export class ContentService {
     });
   }
 
+  private categoryRevisionSnapshot(
+    category: CategoryEntity,
+  ): Record<string, unknown> {
+    return {
+      name: category.name,
+      slug: category.slug,
+      description: category.description,
+      sortOrder: category.sortOrder,
+      color: category.color,
+      parentId: category.parentId,
+      icon: category.icon,
+      imageMediaId: category.imageMediaId,
+      seoTitle: category.seoTitle,
+      seoDescription: category.seoDescription,
+      canonicalUrl: category.canonicalUrl,
+      noIndex: category.noIndex,
+      ogTitle: category.ogTitle,
+      ogDescription: category.ogDescription,
+      ogImageMediaId: category.ogImageMediaId,
+      structuredData: category.structuredData,
+      displayTemplateKey: category.displayTemplateKey,
+      displayTemplateVersion: category.displayTemplateVersion,
+      displayTemplateConfig: category.displayTemplateConfig,
+    };
+  }
+
+  private categoryDraftView(
+    category: CategoryEntity,
+    snapshot: Record<string, unknown>,
+    draftRevisionId: string,
+  ) {
+    return {
+      ...category,
+      ...snapshot,
+      id: category.id,
+      siteId: category.siteId,
+      status: category.status,
+      publicationState: category.publicationState,
+      publishedAt: category.publishedAt,
+      draftRevisionId,
+    };
+  }
+
+  async assertVersionedCategory(
+    siteId: string,
+    categoryId: string,
+    actor: Actor,
+  ) {
+    await this.requireSiteModule(siteId, actor, 'categories');
+    const category = await this.categories.findOne({
+      where: { id: categoryId, siteId, deletedAt: IsNull() },
+    });
+    if (!category) throw new NotFoundException('Рубрика не найдена');
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История рубрики недоступна');
+    return category;
+  }
+
   async listCategories(siteId: string, actor: Actor) {
     await this.requireSiteModule(siteId, actor, 'categories');
     const rows = await this.categories.find({
@@ -2869,22 +3997,33 @@ export class ContentService {
     });
     return Promise.all(
       rows.map(async (category) => {
-        const [articleCount, childCount, redirects] = await Promise.all([
-          this.articles.count({
-            where: { siteId, categoryId: category.id, deletedAt: IsNull() },
-          }),
-          this.categories.count({
-            where: { siteId, parentId: category.id, deletedAt: IsNull() },
-          }),
-          this.categoryRedirects
-            ? this.categoryRedirects.find({
-                where: { siteId, categoryId: category.id },
-                order: { createdAt: 'DESC' },
-              })
-            : Promise.resolve([]),
-        ]);
+        const [articleCount, childCount, redirects, current] =
+          await Promise.all([
+            this.articles.count({
+              where: { siteId, categoryId: category.id, deletedAt: IsNull() },
+            }),
+            this.categories.count({
+              where: { siteId, parentId: category.id, deletedAt: IsNull() },
+            }),
+            this.categoryRedirects
+              ? this.categoryRedirects.find({
+                  where: { siteId, categoryId: category.id },
+                  order: { createdAt: 'DESC' },
+                })
+              : Promise.resolve([]),
+            this.revisions
+              ? this.revisions.current(siteId, 'category', category.id, actor)
+              : Promise.resolve(null),
+          ]);
+        const view = current?.draft
+          ? this.categoryDraftView(
+              category,
+              current.draft.snapshot,
+              current.draft.id,
+            )
+          : category;
         return {
-          ...category,
+          ...view,
           createdBy: this.publicActor(category.createdBy),
           updatedBy: this.publicActor(category.updatedBy),
           articleCount,
@@ -2946,6 +4085,8 @@ export class ContentService {
       'categories',
       SitePermission.EDIT_CONTENT,
     );
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История рубрики недоступна');
     const slug = dto.slug.trim().toLowerCase();
     if (new Set(['404', 'privacy-policy', 'search']).has(slug))
       throw new ConflictException('Этот slug зарезервирован системой');
@@ -3031,7 +4172,19 @@ export class ContentService {
         'category created',
         manager,
       );
-      return category;
+      const draft = await this.revisions!.saveDraftUsingManager(manager, {
+        siteId,
+        resourceType: 'category',
+        entityId: category.id,
+        snapshot: this.categoryRevisionSnapshot(category),
+        expectedDraftRevisionId: null,
+        actor,
+      });
+      return this.categoryDraftView(
+        category,
+        this.categoryRevisionSnapshot(category),
+        draft.id,
+      );
     });
   }
 
@@ -3051,6 +4204,21 @@ export class ContentService {
       where: { id: categoryId, siteId, deletedAt: IsNull() },
     });
     if (!category) throw new NotFoundException('Рубрика не найдена');
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История рубрики недоступна');
+    const current = await this.revisions.current(
+      siteId,
+      'category',
+      categoryId,
+      actor,
+    );
+    if (dto.expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    if (dto.expectedDraftRevisionId !== (current?.draft?.id ?? null))
+      throw new ConflictException('Черновик уже изменён');
+    const source = current?.draft
+      ? Object.assign(new CategoryEntity(), category, current.draft.snapshot)
+      : category;
     if (
       (dto.status && dto.status !== category.status) ||
       (dto.publicationState &&
@@ -3060,9 +4228,9 @@ export class ContentService {
         'Статус рубрики изменяется только через процесс публикации',
       );
     const displayTemplateKey =
-      dto.displayTemplateKey?.trim() || category.displayTemplateKey;
+      dto.displayTemplateKey?.trim() || source.displayTemplateKey;
     const displayTemplateVersion =
-      dto.displayTemplateVersion?.trim() || category.displayTemplateVersion;
+      dto.displayTemplateVersion?.trim() || source.displayTemplateVersion;
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.CATEGORY,
@@ -3077,16 +4245,23 @@ export class ContentService {
     });
     if (duplicate && duplicate.id !== categoryId)
       throw new ConflictException('Такая рубрика уже существует');
+    const redirect = await this.categoryRedirects?.findOne({
+      where: { siteId, fromSlug: slug },
+    });
+    if (redirect && redirect.categoryId !== categoryId)
+      throw new ConflictException(
+        'Этот slug уже сохранён как прежний адрес другой рубрики',
+      );
     const parentId =
-      dto.parentId === undefined ? (category.parentId ?? null) : dto.parentId;
+      dto.parentId === undefined ? (source.parentId ?? null) : dto.parentId;
     const imageMediaId =
       dto.imageMediaId === undefined
-        ? (category.imageMediaId ?? null)
+        ? (source.imageMediaId ?? null)
         : dto.imageMediaId;
     await this.validateCategoryParent(siteId, parentId, categoryId);
     const ogImageMediaId =
       dto.ogImageMediaId === undefined
-        ? (category.ogImageMediaId ?? null)
+        ? (source.ogImageMediaId ?? null)
         : dto.ogImageMediaId;
     await this.validateCategoryImage(siteId, imageMediaId, ogImageMediaId);
     const changes = {
@@ -3094,139 +4269,73 @@ export class ContentService {
       slug,
       description:
         dto.description === undefined
-          ? category.description
+          ? source.description
           : dto.description?.trim() || null,
-      status: category.status,
-      publishedAt:
-        dto.publishedAt === undefined
-          ? category.publishedAt
-          : dto.publishedAt
-            ? new Date(dto.publishedAt)
-            : null,
-      sortOrder: dto.sortOrder ?? category.sortOrder ?? 0,
-      color: dto.color ?? category.color,
+      sortOrder: dto.sortOrder ?? source.sortOrder ?? 0,
+      color: dto.color ?? source.color,
       parentId,
       icon:
         dto.icon === undefined
-          ? (category.icon ?? null)
+          ? (source.icon ?? null)
           : dto.icon?.trim() || null,
       imageMediaId,
       seoTitle:
         dto.seoTitle === undefined
-          ? (category.seoTitle ?? null)
+          ? (source.seoTitle ?? null)
           : dto.seoTitle?.trim() || null,
       seoDescription:
         dto.seoDescription === undefined
-          ? (category.seoDescription ?? null)
+          ? (source.seoDescription ?? null)
           : dto.seoDescription?.trim() || null,
       canonicalUrl:
         dto.canonicalUrl === undefined
-          ? (category.canonicalUrl ?? null)
+          ? (source.canonicalUrl ?? null)
           : dto.canonicalUrl?.trim().replace(/\/$/, '') || null,
-      noIndex: dto.noIndex ?? category.noIndex ?? false,
+      noIndex: dto.noIndex ?? source.noIndex ?? false,
       ogTitle:
         dto.ogTitle === undefined
-          ? (category.ogTitle ?? null)
+          ? (source.ogTitle ?? null)
           : dto.ogTitle?.trim() || null,
       ogDescription:
         dto.ogDescription === undefined
-          ? (category.ogDescription ?? null)
+          ? (source.ogDescription ?? null)
           : dto.ogDescription?.trim() || null,
       ogImageMediaId,
       structuredData:
         dto.structuredData === undefined
-          ? (category.structuredData ?? null)
+          ? (source.structuredData ?? null)
           : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
       displayTemplateConfig:
-        dto.displayTemplateConfig ?? category.displayTemplateConfig,
-      updatedByUserId: actor.userId,
+        dto.displayTemplateConfig ?? source.displayTemplateConfig,
     };
-    return this.categories.manager.transaction(async (manager) => {
-      const locked = await manager.findOne(CategoryEntity, {
-        where: { id: categoryId, siteId, deletedAt: IsNull() },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!locked) throw new NotFoundException('Рубрика не найдена');
-      const before = Object.assign(new CategoryEntity(), locked);
-      const previousSlug = locked.slug;
-      const slugChanged = previousSlug !== slug;
-      const duplicateInTransaction = await manager.findOne(CategoryEntity, {
-        where: { siteId, slug },
-      });
-      if (duplicateInTransaction && duplicateInTransaction.id !== categoryId)
-        throw new ConflictException('Такая рубрика уже существует');
-      const targetRedirect = await manager.findOne(CategoryRedirectEntity, {
-        where: { siteId, fromSlug: slug },
-      });
-      if (targetRedirect && targetRedirect.categoryId !== categoryId)
-        throw new ConflictException(
-          'Этот slug уже сохранён как прежний адрес другой рубрики',
-        );
-      if (slugChanged) {
-        const previousRedirect = await manager.findOne(CategoryRedirectEntity, {
-          where: { siteId, fromSlug: previousSlug },
-        });
-        if (previousRedirect && previousRedirect.categoryId !== categoryId)
-          throw new ConflictException(
-            'Прежний адрес принадлежит другой рубрике',
-          );
-        if (targetRedirect)
-          await manager.delete(CategoryRedirectEntity, {
-            id: targetRedirect.id,
-          });
-      }
-      changes.status = locked.status;
-      if (dto.publishedAt === undefined)
-        changes.publishedAt = locked.publishedAt;
-      await manager.update(
-        CategoryEntity,
-        { id: categoryId, siteId },
-        changes as never,
-      );
-      const saved = Object.assign(locked, changes);
-      if (slugChanged)
-        await manager.upsert(
-          CategoryRedirectEntity,
-          { siteId, categoryId, fromSlug: previousSlug },
-          ['siteId', 'fromSlug'],
-        );
-      if (this.categoryActivities)
-        await manager.save(
-          manager.create(CategoryActivityEntity, {
-            categoryId,
-            userId: actor.userId,
-            action: slugChanged ? 'slug_changed' : 'updated',
-            message: slugChanged
-              ? `Адрес изменён: ${previousSlug} → ${slug}`
-              : 'Настройки рубрики обновлены',
-          }),
-        );
-      await this.lifecycle?.recordCategoryChange(
-        before,
-        saved,
-        actor.userId,
-        ContentEventType.PARAMETERS_UPDATED,
-        'category parameters saved',
-        manager,
-      );
-      if (slugChanged)
-        await this.lifecycle?.recordEvent(
-          {
+    const baseline =
+      !current &&
+      (category.publicationState === PublicationState.PUBLISHED ||
+        category.publicationState === PublicationState.HIDDEN)
+        ? await this.revisions.importPublishedBaseline({
             siteId,
-            entityType: ContentEntityType.CATEGORY,
+            resourceType: 'category',
             entityId: categoryId,
-            eventType: ContentEventType.REDIRECT_CREATED,
-            actorUserId: actor.userId,
-            reason: 'slug changed',
-            before: { slug: previousSlug },
-            after: { slug },
-          },
-          manager,
-        );
-      return saved;
+            snapshot: this.categoryRevisionSnapshot(category),
+            actor,
+          })
+        : null;
+    const changed = Object.assign(new CategoryEntity(), source, changes);
+    const next = await this.revisions.saveDraft({
+      siteId,
+      resourceType: 'category',
+      entityId: categoryId,
+      snapshot: this.categoryRevisionSnapshot(changed),
+      expectedDraftRevisionId: current?.draft?.id ?? baseline?.id ?? null,
+      actor,
     });
+    return this.categoryDraftView(
+      category,
+      this.categoryRevisionSnapshot(changed),
+      next.id,
+    );
   }
 
   async getCategoryDeleteSummary(
@@ -3267,13 +4376,42 @@ export class ContentService {
     };
   }
 
-  async getCategoryPreview(siteId: string, categoryId: string, actor: Actor) {
+  async getCategoryRevisionPreview(
+    siteId: string,
+    categoryId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    await this.assertVersionedCategory(siteId, categoryId, actor);
+    return this.getCategoryPreview(siteId, categoryId, actor, revisionId);
+  }
+
+  async getCategoryPreview(
+    siteId: string,
+    categoryId: string,
+    actor: Actor,
+    revisionId?: string,
+  ) {
     const site = await this.requireSiteModule(siteId, actor, 'categories');
     const category = await this.categories.findOne({
       where: { id: categoryId, siteId, deletedAt: IsNull() },
       relations: { imageMedia: true },
     });
     if (!category) throw new NotFoundException('Рубрика не найдена');
+    const exact = revisionId
+      ? await this.revisions?.getVersion(
+          siteId,
+          'category',
+          categoryId,
+          revisionId,
+          actor,
+        )
+      : null;
+    if (revisionId && !exact)
+      throw new ServiceUnavailableException('История рубрики недоступна');
+    const previewCategory = exact
+      ? this.categoryDraftView(category, exact.snapshot, exact.id)
+      : category;
     const [articles, children, pages] = await Promise.all([
       this.articles.find({
         where: { siteId, categoryId, deletedAt: IsNull() },
@@ -3303,12 +4441,125 @@ export class ContentService {
         canonicalUrl: null,
         noIndex: true,
       },
-      category,
+      category: previewCategory,
       redirectTo: null,
       articles,
       children,
       pages,
     };
+  }
+
+  async publishCategoryRevision(
+    siteId: string,
+    categoryId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    const category = await this.assertVersionedCategory(
+      siteId,
+      categoryId,
+      actor,
+    );
+    let published: CategoryEntity | null = null;
+    await this.revisions!.publish(
+      siteId,
+      'category',
+      categoryId,
+      revisionId,
+      actor,
+      async (manager, snapshot) => {
+        const locked = await manager.findOne(CategoryEntity, {
+          where: { id: categoryId, siteId, deletedAt: IsNull() },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!locked) throw new NotFoundException('Рубрика не найдена');
+        if (
+          typeof snapshot.name !== 'string' ||
+          snapshot.name.trim().length < 2 ||
+          typeof snapshot.slug !== 'string' ||
+          !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(snapshot.slug)
+        )
+          throw new BadRequestException('Снимок рубрики несовместим');
+        const candidate = Object.assign(
+          new CategoryEntity(),
+          locked,
+          snapshot,
+          {
+            id: categoryId,
+            siteId,
+            name: snapshot.name.trim(),
+            slug: snapshot.slug.trim().toLowerCase(),
+          },
+        );
+        if (new Set(['404', 'privacy-policy', 'search']).has(candidate.slug))
+          throw new ConflictException('Этот slug зарезервирован системой');
+        await this.validateCategoryParent(
+          siteId,
+          candidate.parentId ?? null,
+          categoryId,
+        );
+        await this.validateCategoryImage(
+          siteId,
+          candidate.imageMediaId ?? null,
+          candidate.ogImageMediaId ?? null,
+        );
+        await this.lifecycle?.assertTemplate(
+          siteId,
+          ContentTemplateKind.CATEGORY,
+          candidate.displayTemplateKey,
+          candidate.displayTemplateVersion,
+        );
+        const duplicate = await manager.findOne(CategoryEntity, {
+          where: { siteId, slug: candidate.slug },
+        });
+        if (duplicate && duplicate.id !== categoryId)
+          throw new ConflictException('Такая рубрика уже существует');
+        const targetRedirect = await manager.findOne(CategoryRedirectEntity, {
+          where: { siteId, fromSlug: candidate.slug },
+        });
+        if (targetRedirect && targetRedirect.categoryId !== categoryId)
+          throw new ConflictException(
+            'Этот slug уже сохранён как прежний адрес другой рубрики',
+          );
+        const previousSlug = locked.slug;
+        if (previousSlug !== candidate.slug) {
+          const previousRedirect = await manager.findOne(
+            CategoryRedirectEntity,
+            { where: { siteId, fromSlug: previousSlug } },
+          );
+          if (previousRedirect && previousRedirect.categoryId !== categoryId)
+            throw new ConflictException(
+              'Прежний адрес принадлежит другой рубрике',
+            );
+          if (targetRedirect)
+            await manager.delete(CategoryRedirectEntity, {
+              id: targetRedirect.id,
+            });
+          await manager.upsert(
+            CategoryRedirectEntity,
+            { siteId, categoryId, fromSlug: previousSlug },
+            ['siteId', 'fromSlug'],
+          );
+        }
+        published = await manager.save(
+          Object.assign(locked, this.categoryRevisionSnapshot(candidate), {
+            id: categoryId,
+            siteId,
+            status: CategoryStatus.ACTIVE,
+            publicationState: PublicationState.PUBLISHED,
+            publishedAt: locked.publishedAt ?? new Date(),
+            updatedByUserId: actor.userId,
+          }),
+        );
+      },
+    );
+    return (
+      published ?? {
+        ...category,
+        status: CategoryStatus.ACTIVE,
+        publicationState: PublicationState.PUBLISHED,
+      }
+    );
   }
 
   async deleteCategory(
@@ -3397,7 +4648,7 @@ export class ContentService {
       siteId,
       actor,
       'categories',
-      SitePermission.EDIT_CONTENT,
+      SitePermission.APPROVE,
     );
     return this.categories.manager.transaction(async (manager) => {
       const redirect = await manager.findOne(CategoryRedirectEntity, {
@@ -3424,7 +4675,57 @@ export class ContentService {
 
   async listAuthors(siteId: string, actor: Actor) {
     await this.requireSiteModule(siteId, actor, 'authors');
-    return this.authors.find({ where: { siteId }, order: { fullName: 'ASC' } });
+    const rows = await this.authors.find({
+      where: { siteId },
+      order: { fullName: 'ASC' },
+    });
+    return Promise.all(
+      rows.map(async (author) => {
+        const current = this.revisions
+          ? await this.revisions.current(siteId, 'author', author.id, actor)
+          : null;
+        return current?.draft
+          ? this.authorDraftView(
+              author,
+              current.draft.snapshot,
+              current.draft.id,
+            )
+          : author;
+      }),
+    );
+  }
+
+  private authorRevisionSnapshot(author: AuthorEntity) {
+    return {
+      fullName: author.fullName,
+      email: author.email,
+      bio: author.bio,
+    };
+  }
+
+  private authorDraftView(
+    author: AuthorEntity,
+    snapshot: Record<string, unknown>,
+    draftRevisionId: string,
+  ) {
+    return {
+      ...author,
+      ...snapshot,
+      id: author.id,
+      siteId: author.siteId,
+      draftRevisionId,
+    };
+  }
+
+  async assertVersionedAuthor(siteId: string, authorId: string, actor: Actor) {
+    await this.requireSiteModule(siteId, actor, 'authors');
+    const author = await this.authors.findOne({
+      where: { id: authorId, siteId },
+    });
+    if (!author) throw new NotFoundException('Автор не найден');
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История автора недоступна');
+    return author;
   }
 
   async createAuthor(siteId: string, actor: Actor, dto: CreateAuthorDto) {
@@ -3434,14 +4735,31 @@ export class ContentService {
       'authors',
       SitePermission.EDIT_CONTENT,
     );
-    return this.authors.save(
-      this.authors.create({
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История автора недоступна');
+    return this.authors.manager.transaction(async (manager) => {
+      const author = await manager.save(
+        manager.create(AuthorEntity, {
+          siteId,
+          fullName: dto.fullName.trim(),
+          email: dto.email?.trim().toLowerCase() || null,
+          bio: dto.bio?.trim() || null,
+        }),
+      );
+      const draft = await this.revisions!.saveDraftUsingManager(manager, {
         siteId,
-        fullName: dto.fullName.trim(),
-        email: dto.email?.trim().toLowerCase() || null,
-        bio: dto.bio?.trim() || null,
-      }),
-    );
+        resourceType: 'author',
+        entityId: author.id,
+        snapshot: this.authorRevisionSnapshot(author),
+        expectedDraftRevisionId: null,
+        actor,
+      });
+      return this.authorDraftView(
+        author,
+        this.authorRevisionSnapshot(author),
+        draft.id,
+      );
+    });
   }
 
   async updateAuthor(
@@ -3460,12 +4778,120 @@ export class ContentService {
       where: { id: authorId, siteId },
     });
     if (!author) throw new NotFoundException('Автор не найден');
-    Object.assign(author, {
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История автора недоступна');
+    const current = await this.revisions.current(
+      siteId,
+      'author',
+      authorId,
+      actor,
+    );
+    if (dto.expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    if (dto.expectedDraftRevisionId !== (current?.draft?.id ?? null))
+      throw new ConflictException('Черновик уже изменён');
+    const source = current?.draft
+      ? Object.assign(new AuthorEntity(), author, current.draft.snapshot)
+      : author;
+    const baseline = !current
+      ? await this.revisions.importPublishedBaseline({
+          siteId,
+          resourceType: 'author',
+          entityId: authorId,
+          snapshot: this.authorRevisionSnapshot(author),
+          actor,
+        })
+      : null;
+    const changed = Object.assign(new AuthorEntity(), source, {
       fullName: dto.fullName.trim(),
       email: dto.email?.trim().toLowerCase() || null,
       bio: dto.bio?.trim() || null,
     });
-    return this.authors.save(author);
+    const next = await this.revisions.saveDraft({
+      siteId,
+      resourceType: 'author',
+      entityId: authorId,
+      snapshot: this.authorRevisionSnapshot(changed),
+      expectedDraftRevisionId: current?.draft?.id ?? baseline?.id ?? null,
+      actor,
+    });
+    return this.authorDraftView(
+      author,
+      this.authorRevisionSnapshot(changed),
+      next.id,
+    );
+  }
+
+  async getAuthorRevisionPreview(
+    siteId: string,
+    authorId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    const author = await this.assertVersionedAuthor(siteId, authorId, actor);
+    const version = await this.revisions!.getVersion(
+      siteId,
+      'author',
+      authorId,
+      revisionId,
+      actor,
+    );
+    return {
+      ...version.snapshot,
+      id: author.id,
+      siteId: author.siteId,
+      revisionId: version.id,
+      versionNumber: version.versionNumber,
+    };
+  }
+
+  async publishAuthorRevision(
+    siteId: string,
+    authorId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    const author = await this.assertVersionedAuthor(siteId, authorId, actor);
+    let published: AuthorEntity | null = null;
+    await this.revisions!.publish(
+      siteId,
+      'author',
+      authorId,
+      revisionId,
+      actor,
+      async (manager, snapshot) => {
+        const locked = await manager.findOne(AuthorEntity, {
+          where: { id: authorId, siteId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!locked) throw new NotFoundException('Автор не найден');
+        const fullName =
+          typeof snapshot.fullName === 'string' ? snapshot.fullName.trim() : '';
+        const email =
+          snapshot.email === null || typeof snapshot.email === 'string'
+            ? snapshot.email?.trim().toLowerCase() || null
+            : undefined;
+        const bio =
+          snapshot.bio === null || typeof snapshot.bio === 'string'
+            ? snapshot.bio?.trim() || null
+            : undefined;
+        if (
+          fullName.length < 2 ||
+          fullName.length > 160 ||
+          email === undefined ||
+          (email !== null &&
+            (email.length > 255 ||
+              !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) ||
+          bio === undefined ||
+          (bio !== null && bio.length > 500)
+        )
+          throw new BadRequestException('Снимок автора несовместим');
+        published = await manager.save(
+          Object.assign(locked, { fullName, email, bio }),
+        );
+      },
+    );
+    return published ?? author;
   }
 
   async deleteAuthor(siteId: string, authorId: string, actor: Actor) {
@@ -3473,7 +4899,7 @@ export class ContentService {
       siteId,
       actor,
       'authors',
-      SitePermission.EDIT_CONTENT,
+      SitePermission.APPROVE,
     );
     const author = await this.authors.findOne({
       where: { id: authorId, siteId },
@@ -3720,16 +5146,89 @@ export class ContentService {
       throw new BadRequestException('Для обычной страницы требуется slug');
   }
 
+  private versionedPage(page: PageEntity) {
+    return (
+      page.kind === PageKind.HOMEPAGE ||
+      (page.kind === PageKind.PAGE && !fixedSystemPageTitles.has(page.slug))
+    );
+  }
+
+  async assertVersionedPage(siteId: string, pageId: string, actor: Actor) {
+    await this.requireSite(siteId, actor);
+    const page = await this.pages.findOne({ where: { id: pageId, siteId } });
+    if (!page) throw new NotFoundException('Страница не найдена');
+    if (!this.versionedPage(page))
+      throw new BadRequestException('Ревизии этой страницы недоступны');
+    return page;
+  }
+
+  async getPageRevisionPreview(
+    siteId: string,
+    pageId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    await this.assertVersionedPage(siteId, pageId, actor);
+    return this.getPagePreview(siteId, pageId, actor, revisionId);
+  }
+
+  private pageSnapshot(
+    page: PageEntity,
+    bannerAssignments?: PageBannerAssignmentSnapshot[],
+  ): Record<string, unknown> {
+    const snapshot: Record<string, unknown> = {
+      title: page.title,
+      slug: page.slug,
+      kind: page.kind,
+      blocks: page.blocks,
+      seoTitle: page.seoTitle,
+      seoDescription: page.seoDescription,
+      canonicalUrl: page.canonicalUrl,
+      noIndex: page.noIndex,
+      ogTitle: page.ogTitle,
+      ogDescription: page.ogDescription,
+      ogImageMediaId: page.ogImageMediaId,
+      structuredData: page.structuredData,
+      redirects: page.redirects,
+    };
+    if (bannerAssignments !== undefined)
+      snapshot.bannerAssignments = bannerAssignments;
+    return snapshot;
+  }
+
+  private pageDraftView(
+    page: PageEntity,
+    snapshot: Record<string, unknown>,
+    draftRevisionId: string,
+  ) {
+    return {
+      ...page,
+      ...snapshot,
+      id: page.id,
+      siteId: page.siteId,
+      status: page.status,
+      draftRevisionId,
+    };
+  }
+
   async listPages(siteId: string, actor: Actor) {
     await this.requireSite(siteId, actor);
     const pages = await this.pages.find({
       where: { siteId },
       order: { kind: 'ASC', title: 'ASC' },
     });
-    return pages.map((page) => ({
-      ...page,
-      bannerSlots: bannerSlotsForPage(page),
-    }));
+    return Promise.all(
+      pages.map(async (page) => {
+        const current =
+          this.revisions && this.versionedPage(page)
+            ? await this.revisions.current(siteId, 'page', page.id, actor)
+            : null;
+        const view = current?.draft
+          ? this.pageDraftView(page, current.draft.snapshot, current.draft.id)
+          : page;
+        return { ...view, bannerSlots: bannerSlotsForPage(page) };
+      }),
+    );
   }
 
   async getNotFoundPage(siteId: string, actor: Actor) {
@@ -3772,7 +5271,7 @@ export class ContentService {
     actor: Actor,
     dto: UpdateNotFoundTemplateDto,
   ) {
-    await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
+    await this.requireSite(siteId, actor, SitePermission.EDIT_CODE);
     const page = await this.pages.findOne({ where: { siteId, slug: '404' } });
     if (!page) throw new NotFoundException('Страница 404 не найдена');
     const template = NOT_FOUND_TEMPLATES.find(
@@ -3916,17 +5415,36 @@ export class ContentService {
           ? 'Страницу 404 настраивайте через модуль 404'
           : 'Политику конфиденциальности редактируйте через модуль политики',
       );
+    const staged = Boolean(this.revisions && this.versionedPage(page));
     await this.requireSite(
       siteId,
       actor,
-      page.status === PageStatus.PUBLISHED
-        ? SitePermission.EDIT_PUBLISHED
-        : SitePermission.EDIT_CONTENT,
+      staged
+        ? SitePermission.EDIT_CONTENT
+        : page.status === PageStatus.PUBLISHED
+          ? SitePermission.EDIT_PUBLISHED
+          : SitePermission.EDIT_CONTENT,
     );
     if (dto.status !== page.status)
       throw new BadRequestException(
         'Статус страницы изменяется только через публикацию',
       );
+    const current = staged
+      ? await this.revisions!.current(siteId, 'page', pageId, actor)
+      : null;
+    if (staged) {
+      if (dto.expectedDraftRevisionId === undefined)
+        throw new BadRequestException('Укажите актуальную версию черновика');
+      if (dto.expectedDraftRevisionId !== (current?.draft?.id ?? null))
+        throw new ConflictException('Черновик уже изменён');
+    }
+    const source = current?.draft
+      ? Object.assign(new PageEntity(), page, current.draft.snapshot)
+      : page;
+    const bannerAssignments = staged
+      ? (this.pageBannerAssignmentsFromSnapshot(current?.draft?.snapshot) ??
+        (await this.publicPageBannerAssignments(siteId, pageId)))
+      : undefined;
     const fixedSystemTitle =
       page.kind === PageKind.PAGE
         ? fixedSystemPageTitles.get(page.slug)
@@ -3936,10 +5454,20 @@ export class ContentService {
       : dto.kind === PageKind.HOMEPAGE
         ? ''
         : dto.slug.trim().toLowerCase();
+    if (
+      staged &&
+      (dto.kind !== page.kind ||
+        (page.kind === PageKind.HOMEPAGE && slug !== '') ||
+        (page.kind === PageKind.PAGE &&
+          (fixedSystemPageTitles.has(slug) || !slug)))
+    )
+      throw new BadRequestException(
+        'Тип версионируемой страницы нельзя изменить',
+      );
     const duplicate = await this.pages.findOne({ where: { siteId, slug } });
     if (duplicate && duplicate.id !== page.id)
       throw new ConflictException('Такой адрес страницы уже используется');
-    Object.assign(page, {
+    const changed = Object.assign(new PageEntity(), source, {
       title: fixedSystemTitle ?? dto.title.trim(),
       slug,
       kind: fixedSystemTitle ? PageKind.PAGE : dto.kind,
@@ -3950,27 +5478,53 @@ export class ContentService {
       noIndex: dto.noIndex ?? false,
       ogTitle:
         dto.ogTitle === undefined
-          ? (page.ogTitle ?? null)
+          ? (source.ogTitle ?? null)
           : dto.ogTitle?.trim() || null,
       ogDescription:
         dto.ogDescription === undefined
-          ? (page.ogDescription ?? null)
+          ? (source.ogDescription ?? null)
           : dto.ogDescription?.trim() || null,
       ogImageMediaId:
         dto.ogImageMediaId === undefined
-          ? (page.ogImageMediaId ?? null)
+          ? (source.ogImageMediaId ?? null)
           : dto.ogImageMediaId,
       structuredData:
         dto.structuredData === undefined
-          ? (page.structuredData ?? null)
+          ? (source.structuredData ?? null)
           : dto.structuredData,
-      redirects: dto.redirects ?? page.redirects ?? [],
+      redirects: dto.redirects ?? source.redirects ?? [],
     });
     if (
-      page.ogImageMediaId &&
-      !(await this.workspaceHasMedia(siteId, page.ogImageMediaId))
+      changed.ogImageMediaId &&
+      !(await this.workspaceHasMedia(siteId, changed.ogImageMediaId))
     )
       throw new NotFoundException('Open Graph изображение не найдено');
+    if (staged) {
+      const baseline =
+        !current && page.status === PageStatus.PUBLISHED
+          ? await this.revisions!.importPublishedBaseline({
+              siteId,
+              resourceType: 'page',
+              entityId: pageId,
+              snapshot: this.pageSnapshot(page, bannerAssignments),
+              actor,
+            })
+          : null;
+      const next = await this.revisions!.saveDraft({
+        siteId,
+        resourceType: 'page',
+        entityId: pageId,
+        snapshot: this.pageSnapshot(changed, bannerAssignments),
+        expectedDraftRevisionId: current?.draft?.id ?? baseline?.id ?? null,
+        actor,
+      });
+      return this.pageDraftView(
+        page,
+        this.pageSnapshot(changed, bannerAssignments),
+        next.id,
+      );
+    }
+    Object.assign(page, changed);
     const saved = await this.pages.save(page);
     await this.recordPageActivity(
       siteId,
@@ -3989,12 +5543,130 @@ export class ContentService {
     return saved;
   }
 
+  async publishPageRevision(
+    siteId: string,
+    pageId: string,
+    revisionId: string,
+    actor: Actor,
+  ) {
+    const page = await this.assertVersionedPage(siteId, pageId, actor);
+    if (!this.revisions)
+      throw new ServiceUnavailableException('История страницы недоступна');
+    let published: PageEntity | null = null;
+    await this.revisions.publish(
+      siteId,
+      'page',
+      pageId,
+      revisionId,
+      actor,
+      async (manager, snapshot) => {
+        const locked = await manager.findOne(PageEntity, {
+          where: { id: pageId, siteId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!locked || !this.versionedPage(locked))
+          throw new NotFoundException('Страница не найдена');
+        const snapshotAssignments =
+          this.pageBannerAssignmentsFromSnapshot(snapshot) ??
+          (await this.publicPageBannerAssignments(siteId, pageId, manager));
+        const pageFields = { ...snapshot };
+        delete pageFields.bannerAssignments;
+        const homepageSnapshot =
+          locked.kind === PageKind.HOMEPAGE &&
+          pageFields.kind === PageKind.HOMEPAGE &&
+          pageFields.slug === '';
+        const ordinarySnapshot =
+          locked.kind === PageKind.PAGE &&
+          pageFields.kind === PageKind.PAGE &&
+          typeof pageFields.slug === 'string' &&
+          Boolean(pageFields.slug) &&
+          !fixedSystemPageTitles.has(pageFields.slug);
+        if (!homepageSnapshot && !ordinarySnapshot)
+          throw new BadRequestException('Снимок страницы несовместим');
+        const candidate = Object.assign(new PageEntity(), locked, pageFields);
+        if (!Array.isArray(candidate.blocks))
+          throw new BadRequestException('Снимок страницы несовместим');
+        await this.validatePageBlocks(siteId, candidate as CreatePageDto, {
+          key: locked.systemTemplateKey,
+          version: locked.systemTemplateVersion,
+        });
+        if (
+          candidate.ogImageMediaId &&
+          !(await this.workspaceHasMedia(siteId, candidate.ogImageMediaId))
+        )
+          throw new NotFoundException('Open Graph изображение не найдено');
+        if (
+          !candidate.blocks.some(
+            (block) =>
+              Boolean(block.mediaId) ||
+              Boolean(block.title?.trim()) ||
+              Boolean(block.text?.trim()),
+          )
+        )
+          throw new BadRequestException(
+            'Перед публикацией добавьте содержимое страницы',
+          );
+        const duplicate = await manager.findOne(PageEntity, {
+          where: { siteId, slug: candidate.slug },
+        });
+        if (duplicate && duplicate.id !== pageId)
+          throw new ConflictException('Такой адрес страницы уже используется');
+        for (const assignment of snapshotAssignments) {
+          const slot = bannerSlotsForPage(candidate).find(
+            ({ id }) => id === assignment.zone,
+          );
+          if (!slot)
+            throw new BadRequestException(
+              `Зона ${assignment.zone} больше не объявлена шаблоном страницы`,
+            );
+          const banner = await manager.findOne(BannerEntity, {
+            where: { id: assignment.bannerId, siteId },
+            relations: { media: true, mobileMedia: true },
+          });
+          if (!banner)
+            throw new NotFoundException('Баннер этого сайта не найден');
+          const compatibilityError = bannerSlotCompatibilityError(slot, banner);
+          if (compatibilityError)
+            throw new BadRequestException(
+              `${slot.name}: ${compatibilityError}`,
+            );
+          await this.validateBannerSlotMedia(siteId, banner, slot);
+        }
+        published = await manager.save(
+          Object.assign(locked, pageFields, {
+            id: pageId,
+            siteId,
+            kind: locked.kind,
+            status: PageStatus.PUBLISHED,
+          }),
+        );
+        await manager.delete(PageBannerAssignmentEntity, { siteId, pageId });
+        if (snapshotAssignments.length)
+          await manager.upsert(
+            PageBannerAssignmentEntity,
+            snapshotAssignments.map(({ zone, bannerId }) => ({
+              siteId,
+              pageId,
+              zone,
+              bannerId,
+            })),
+            ['pageId', 'zone'],
+          );
+      },
+    );
+    return published ?? { ...page, status: PageStatus.PUBLISHED };
+  }
+
   async deletePage(siteId: string, pageId: string, actor: Actor) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
     const page = await this.pages.findOne({ where: { id: pageId, siteId } });
     if (!page) throw new NotFoundException('Страница не найдена');
     if (fixedSystemPageTitles.has(page.slug))
       throw new ConflictException('Системную страницу нельзя удалить');
+    if (this.versionedPage(page) && this.revisions)
+      throw new ConflictException(
+        'Удаление версионируемой страницы пока недоступно',
+      );
     if (page.status === PageStatus.PUBLISHED)
       throw new ConflictException(
         'Сначала снимите страницу с публикации, затем её можно удалить',
@@ -4012,6 +5684,14 @@ export class ContentService {
     await this.requireSite(siteId, actor, SitePermission.APPROVE);
     const page = await this.pages.findOne({ where: { id: pageId, siteId } });
     if (!page) throw new NotFoundException('Страница не найдена');
+    if (this.versionedPage(page) && this.revisions)
+      throw new BadRequestException(
+        'Страница публикуется через согласованную ревизию',
+      );
+    if (page.slug === 'privacy-policy' && this.revisions)
+      throw new BadRequestException(
+        'Политика публикуется через согласованную ревизию',
+      );
     if (page.slug === '404')
       throw new BadRequestException(
         'Статус страницы 404 изменяется только через модуль 404',

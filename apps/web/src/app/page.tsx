@@ -38,6 +38,7 @@ import { MediaBannerLibraryView } from "./media-banner-library-view";
 import { SiteVariablesView } from "./site-variables-view";
 import { MediaLayoutView } from "./media-layout-view";
 import { MediaTemplatesView } from "./media-templates-view";
+import { SiteUsersView } from "./site-users-view";
 
 type SessionData = {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -233,7 +234,8 @@ function Dashboard({
     | "seo"
     | "integration"
     | "settings"
-    | "history";
+    | "history"
+    | "site-users";
   const [activeView, setActiveView] = useState<View>("all-projects");
   const [navigationTarget, setNavigationTarget] = useState<
     (SearchTarget & { requestId: number }) | null
@@ -317,12 +319,17 @@ function Dashboard({
   const site = workspace?.sites.find((item) => item.id === selectedSiteId);
   const isWispoAdmin = session.user.platformRole === "wispo_admin";
   const workspaceRole = workspace?.role;
-  const roleLabel = isWispoAdmin ? "Администратор" : "Сотрудник";
+  const roleLabel = isWispoAdmin ? "Администратор Wispo" : workspaceRole === "site_owner" ? "Владелец сайта" : "Сотрудник";
   const hasWorkspaceAccess = isWispoAdmin || Boolean(workspaceRole);
   const canEdit = hasWorkspaceAccess;
-  const canApprove = hasWorkspaceAccess;
-  const canEditPublished = hasWorkspaceAccess;
-  const canManageSettings = canEditPublished;
+  const canApprove = isWispoAdmin || workspaceRole === "site_owner";
+  const canEditPublished = canApprove;
+  const canEditCode =
+    canApprove ||
+    workspaceRole === "wispo_developer" ||
+    workspaceRole === "site_developer";
+  const canManageSettings = isWispoAdmin || workspaceRole === "site_owner";
+  const canManageSiteUsers = canManageSettings;
 
   useEffect(() => {
     function restoreSiteView() {
@@ -337,6 +344,8 @@ function Dashboard({
         "homepage",
         "articles",
         "pages",
+        "categories",
+        "authors",
         "privacy-policy",
         "404",
         "header",
@@ -530,6 +539,7 @@ function Dashboard({
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
       { id: "settings", icon: "management", label: "Настройки сайта" },
+      { id: "site-users", icon: "management", label: "Пользователи" },
       { id: "history", icon: "log", label: "История изменений" },
     ],
     corporate: [
@@ -549,6 +559,7 @@ function Dashboard({
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
       { id: "settings", icon: "management", label: "Настройки сайта" },
+      { id: "site-users", icon: "management", label: "Пользователи" },
       { id: "history", icon: "log", label: "История изменений" },
     ],
     landing: [
@@ -558,6 +569,7 @@ function Dashboard({
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
       { id: "settings", icon: "management", label: "Настройки сайта" },
+      { id: "site-users", icon: "management", label: "Пользователи" },
       { id: "history", icon: "log", label: "История изменений" },
     ],
   };
@@ -567,7 +579,8 @@ function Dashboard({
   ).filter(
     (item) =>
       (item.id !== "banners" || hasBannerSlots) &&
-      (!["settings", "integration"].includes(item.id) || canManageSettings),
+      (!["settings", "integration"].includes(item.id) || canManageSettings) &&
+      (item.id !== "site-users" || canManageSiteUsers),
   );
   const siteTopTabs = (
     [
@@ -617,6 +630,7 @@ function Dashboard({
       "seo",
       "integration",
       "settings",
+      "site-users",
       "history",
     ].includes(item.id),
   );
@@ -1806,6 +1820,7 @@ function Dashboard({
               siteName={site.name}
               siteSlug={site.slug}
               canEdit={canEdit}
+              canEditCode={canEditCode}
               canApprove={canApprove}
               canEditPublished={canEditPublished}
               onCountChange={setContentCount}
@@ -1868,6 +1883,7 @@ function Dashboard({
           <NotFoundPageView
             siteId={site?.id}
             canEdit={canEdit}
+            canEditCode={canEditCode}
             canApprove={canApprove}
           />
         ) : activeView === "site" && site?.siteType === "media" ? (
@@ -1879,7 +1895,8 @@ function Dashboard({
         ) : activeView === "templates" && site?.siteType === "media" ? (
           <MediaTemplatesView
             siteId={site.id}
-            canEdit={canEdit}
+            canEdit={canEditCode}
+            canApprove={canApprove}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "homepage-template" && site?.siteType === "media" ? (
@@ -1939,7 +1956,9 @@ function Dashboard({
           <SiteDirectoryView
             siteId={site?.id}
             siteName={site?.name}
+            siteSlug={site?.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             mode={activeView}
             focusId={
               navigationTarget?.view === activeView
@@ -1954,6 +1973,7 @@ function Dashboard({
               siteId={site.id}
               siteName={site.name}
               canEdit={canEdit}
+              canApprove={canApprove}
               createOnOpenKey={bannerLibraryContext?.createKey}
               initialPreviewRenderer={bannerLibraryContext?.previewRenderer}
               onBackToAssignments={
@@ -1977,6 +1997,7 @@ function Dashboard({
             siteId={site.id}
             siteName={site.name}
             canEdit={canEdit}
+            canApprove={canApprove}
           />
         ) : activeView === "layout" && site?.siteType === "media" ? (
           <MediaLayoutView
@@ -1984,14 +2005,17 @@ function Dashboard({
             siteName={site.name}
             siteSlug={site.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "header" || activeView === "footer" ? (
           <SiteLayoutView
             siteId={site?.id}
             siteName={site?.name}
+            siteSlug={site?.slug}
             mode={activeView}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "media" ? (
@@ -2000,12 +2024,15 @@ function Dashboard({
             siteName={site?.name}
             workspaceName={workspace?.name}
             canEdit={canEdit}
+            canApprove={canApprove}
           />
         ) : activeView === "globals" ? (
           <SiteGlobalsView
             siteId={site?.id}
             siteName={site?.name}
+            siteSlug={site?.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "seo" ? (
@@ -2014,6 +2041,7 @@ function Dashboard({
             siteName={site?.name}
             siteSlug={site?.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "integration" && canManageSettings ? (
@@ -2029,6 +2057,8 @@ function Dashboard({
             onSaved={onSessionRefresh}
             onDirtyChange={setHasUnsavedChanges}
           />
+        ) : activeView === "site-users" && site && canManageSiteUsers ? (
+          <SiteUsersView siteId={site.id} siteName={site.name} />
         ) : activeView === "history" && site ? (
           <AuditLogView siteId={site.id} />
         ) : isWispoAdmin && isPlatform ? (
