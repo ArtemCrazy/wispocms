@@ -326,14 +326,26 @@ describe('DeepSeek adapter', () => {
       JSON.stringify(body.messages).length,
     );
   });
-  it('still rejects malformed preparation JSON beyond literal whitespace', async () => {
-    fetchMock.mockResolvedValue(
+  it('uses plain text for a malformed intermediate JSON response', async () => {
+    fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           choices: [
             {
               finish_reason: 'stop',
-              message: { content: '{"content":"Оборванный\nответ' },
+              message: { content: '{"content":"Оборванный' },
+            },
+          ],
+        }),
+      ),
+    );
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { content: '[S1.1] Проверенный факт.' },
             },
           ],
         }),
@@ -342,10 +354,52 @@ describe('DeepSeek adapter', () => {
     await expect(
       ai.generate({
         instruction: 'Подготовь',
+        context: {
+          materials: [],
+          previousResult: null,
+          processingStage: 'register',
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ content: '[S1.1] Проверенный факт.' });
+    const first = JSON.parse(
+      (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string,
+    ) as {
+      response_format: { type: string };
+    };
+    const second = JSON.parse(
+      (fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string,
+    ) as {
+      response_format: { type: string };
+      messages: Array<{ content: string }>;
+    };
+    expect(first.response_format.type).toBe('json_object');
+    expect(second.response_format.type).toBe('text');
+    expect(second.messages[0].content).toContain('компактного реестра фактов');
+    expect(second.messages[0].content).not.toContain('Верни только JSON');
+  });
+  it('still rejects a repeated malformed preparation response', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: { content: '{"content":"Оборванный\nответ' },
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    await expect(
+      ai.generate({
+        instruction: 'Подготовь',
         context: { materials: [], previousResult: null },
         signal: new AbortController().signal,
       }),
-    ).rejects.toThrow('некорректный');
+    ).rejects.toThrow('повторно вернул некорректный формат');
   });
   it('distinguishes malformed JSON from an invalid provider envelope without leaking text', async () => {
     fetchMock.mockResolvedValueOnce(
@@ -370,6 +424,18 @@ describe('DeepSeek adapter', () => {
         }),
       ),
     );
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: { content: '{"content":"PRIVATE' },
+            },
+          ],
+        }),
+      ),
+    );
     const error = await ai
       .generate({
         instruction: 'Подготовь',
@@ -377,7 +443,7 @@ describe('DeepSeek adapter', () => {
         signal: new AbortController().signal,
       })
       .catch((reason: unknown) => reason);
-    expect(String(error)).toContain('некорректный JSON');
+    expect(String(error)).toContain('повторно вернул некорректный формат');
     expect(String(error)).not.toContain('PRIVATE');
   });
   it.each([400, 401, 402, 403, 422])(
