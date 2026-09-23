@@ -2685,6 +2685,12 @@ integration('Content Center / isolated PostgreSQL', () => {
       service.resume(otherWorkspace, run.id, employee),
     ).rejects.toThrow();
     await service.resume(workspace, run.id, employee);
+    // A resumed run keeps its original creation time but receives a fresh
+    // queue deadline; otherwise the worker expires an older run immediately.
+    await db.query(
+      `UPDATE cc_preparation_runs SET created_at=now()-interval '31 minutes' WHERE id=$1`,
+      [run.id],
+    );
     await service.processNext();
     expect((await service.overview(workspace, admin)).run.status).toBe(
       'succeeded',
