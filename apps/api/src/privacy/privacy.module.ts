@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { ContentModule } from '../content/content.module';
 import {
   PageEntity,
   PrivacyLegalModelEntity,
@@ -17,6 +18,7 @@ import { PrivacyService } from './privacy.service';
 @Module({
   imports: [
     AuthModule,
+    ContentModule,
     TypeOrmModule.forFeature([
       SiteEntity,
       WorkspaceMembershipEntity,

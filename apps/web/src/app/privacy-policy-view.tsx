@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type SectionDiff = {
   key: string;
@@ -200,6 +201,7 @@ export function PrivacyPolicyView({
   const [templateDirty, setTemplateDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [draftRevisionId, setDraftRevisionId] = useState<string | null>(null);
 
   const applyState = useCallback((next: PrivacyState) => {
     setState(next);
@@ -215,9 +217,16 @@ export function PrivacyPolicyView({
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    applyState(
-      await request<PrivacyState>(`/api/sites/${siteId}/content/privacy`),
-    );
+    const [live, revision] = await Promise.all([
+      request<PrivacyState>(`/api/sites/${siteId}/content/privacy`),
+      request<{
+        draft: { id: string; snapshot: PrivacyState } | null;
+      } | null>(
+        `/api/sites/${siteId}/content/versioned/privacy/revisions/current`,
+      ),
+    ]);
+    applyState(revision?.draft?.snapshot ?? live);
+    setDraftRevisionId(revision?.draft?.id ?? null);
   }, [applyState, siteId]);
 
   useEffect(() => {
@@ -275,12 +284,17 @@ export function PrivacyPolicyView({
     setSettingsDirty(true);
   }
 
-  async function run(action: () => Promise<PrivacyState>, success: string) {
+  async function run(
+    action: () => Promise<PrivacyState & { draftRevisionId: string }>,
+    success: string,
+  ) {
     setBusy(true);
     setMessage("");
     try {
-      applyState(await action());
-      setMessage(success);
+      const next = await action();
+      setDraftRevisionId(next.draftRevisionId);
+      applyState(next);
+      setMessage(`${success}. Создана новая версия черновика`);
     } catch (reason) {
       setMessage(
         reason instanceof Error ? reason.message : "Не удалось выполнить действие",
@@ -295,17 +309,31 @@ export function PrivacyPolicyView({
     setBusy(true);
     setMessage("");
     try {
-      await request<PrivacyState>(
+      const companyDraft = await request<
+        PrivacyState & { draftRevisionId: string }
+      >(
         `/api/sites/${siteId}/content/privacy/company`,
-        { method: "PUT", body: JSON.stringify(company) },
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            ...company,
+            expectedDraftRevisionId: draftRevisionId,
+          }),
+        },
       );
-      applyState(
-        await request<PrivacyState>(
-          `/api/sites/${siteId}/content/privacy/settings`,
-          { method: "PUT", body: JSON.stringify(settings) },
-        ),
+      const next = await request<PrivacyState & { draftRevisionId: string }>(
+        `/api/sites/${siteId}/content/privacy/settings`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            ...settings,
+            expectedDraftRevisionId: companyDraft.draftRevisionId,
+          }),
+        },
       );
-      setMessage("Данные и настройки сохранены");
+      setDraftRevisionId(next.draftRevisionId);
+      applyState(next);
+      setMessage("Данные и настройки сохранены как новая версия");
     } catch (reason) {
       setMessage(
         reason instanceof Error ? reason.message : "Не удалось сохранить настройки",
@@ -329,6 +357,7 @@ export function PrivacyPolicyView({
             key: template.key,
             version: template.version,
             config: templateConfig,
+            expectedDraftRevisionId: draftRevisionId,
           }),
         }),
       "Шаблон отображения сохранён",
@@ -351,7 +380,10 @@ export function PrivacyPolicyView({
       () =>
         request(`/api/sites/${siteId}/content/privacy/regenerate`, {
           method: "POST",
-          body: JSON.stringify({ confirmManualReset: replacingManual }),
+          body: JSON.stringify({
+            confirmManualReset: replacingManual,
+            expectedDraftRevisionId: draftRevisionId,
+          }),
         }),
       "Документ сформирован из сохранённых данных",
     );
@@ -364,7 +396,10 @@ export function PrivacyPolicyView({
       () =>
         request(`/api/sites/${siteId}/content/privacy/manual-document`, {
           method: "PUT",
-          body: JSON.stringify({ text: manualText }),
+          body: JSON.stringify({
+            text: manualText,
+            expectedDraftRevisionId: draftRevisionId,
+          }),
         }),
       "Ручная версия сохранена и сверка завершена",
     );
@@ -382,7 +417,10 @@ export function PrivacyPolicyView({
       () =>
         request(`/api/sites/${siteId}/content/privacy/reset-to-automatic`, {
           method: "POST",
-          body: JSON.stringify({ confirm: true }),
+          body: JSON.stringify({
+            confirm: true,
+            expectedDraftRevisionId: draftRevisionId,
+          }),
         }),
       "Восстановлена автоматическая версия",
     );
@@ -394,29 +432,16 @@ export function PrivacyPolicyView({
       () =>
         request(`/api/sites/${siteId}/content/privacy/legal-model/${action}`, {
           method: "POST",
-          body: JSON.stringify({ modelId: state.availableUpdate!.targetModelId }),
+          body: JSON.stringify({
+            modelId: state.availableUpdate!.targetModelId,
+            expectedDraftRevisionId: draftRevisionId,
+          }),
         }),
       action === "accept"
         ? state.mode === "manual"
           ? "Модель принята. Сверьте и сохраните ручной документ"
           : "Юридическая модель принята, документ обновлён"
         : "Обновление отложено",
-    );
-  }
-
-  async function changePublication(status: "draft" | "published") {
-    if (!siteId || !state) return;
-    await run(
-      async () => {
-        await request(
-          `/api/sites/${siteId}/content/pages/${state.pageId}/status`,
-          { method: "POST", body: JSON.stringify({ status }) },
-        );
-        return request(`/api/sites/${siteId}/content/privacy`);
-      },
-      status === "published"
-        ? "Политика опубликована"
-        : "Политика снята с публикации",
     );
   }
 
@@ -797,13 +822,21 @@ export function PrivacyPolicyView({
                 <p>{state.published.at ? `Опубликована ${new Date(state.published.at).toLocaleString("ru-RU")}. ` : ""}Модель {state.published.legalModelVersion ?? "—"}, шаблон {state.published.templateKey ?? "—"}.</p>
               ) : <p>{state.publicationBlockedReason ?? "Документ готов к публикации."}</p>}
             </div>
-            {state.pageStatus === "published" ? (
-              <button type="button" className="secondary" disabled={busy || !canApprove} title={canApprove ? undefined : "Недостаточно прав для снятия с публикации"} onClick={() => void changePublication("draft")}>Снять с публикации</button>
-            ) : (
-              <button type="button" disabled={busy || !canApprove || !state.publicationAvailable} title={!canApprove ? "Недостаточно прав для публикации" : (state.publicationBlockedReason ?? undefined)} onClick={() => void changePublication("published")}>Опубликовать</button>
-            )}
+            <p>Публикация выполняется ниже после одобрения конкретной версии.</p>
           </div>
         </div>
+      ) : null}
+      {siteId ? (
+        <SiteSettingsRevisionPanel
+          siteId={siteId}
+          resource="privacy"
+          label="Политика конфиденциальности"
+          canEdit={canEdit}
+          canApprove={canApprove}
+          dirty={dirty}
+          refreshToken={draftRevisionId}
+          onChanged={load}
+        />
       ) : null}
     </section>
   );

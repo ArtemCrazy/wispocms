@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 export type SiteLayoutSettings = {
   siteId: string;
@@ -19,8 +20,21 @@ export type SiteLayoutSettings = {
   footerTemplateKey?: string;
   footerTemplateVersion?: string;
   footerTemplateConfig?: Record<string, unknown>;
+  draftRevisionId?: string | null;
+  draftVersionNumber?: number | null;
+  approvedRevisionId?: string | null;
+  publishedRevisionId?: string | null;
+  reviewState?: "draft" | "in_review" | "changes_requested" | "approved";
 };
-type LayoutDraft = Omit<SiteLayoutSettings, "siteId">;
+type LayoutDraft = Omit<
+  SiteLayoutSettings,
+  | "siteId"
+  | "draftRevisionId"
+  | "draftVersionNumber"
+  | "approvedRevisionId"
+  | "publishedRevisionId"
+  | "reviewState"
+>;
 type MediaItem = { id: string; originalName: string; altText: string | null };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -43,14 +57,18 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function SiteLayoutView({
   siteId,
   siteName,
+  siteSlug,
   mode,
   canEdit = true,
+  canApprove = false,
   onDirtyChange,
 }: {
   siteId?: string;
   siteName?: string;
+  siteSlug?: string;
   mode: "header" | "footer";
   canEdit?: boolean;
+  canApprove?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [data, setData] = useState<SiteLayoutSettings | null>(null);
@@ -63,7 +81,7 @@ export function SiteLayoutView({
   const load = useCallback(async () => {
     if (!siteId) return;
     const [loaded, mediaRows] = await Promise.all([
-      request<SiteLayoutSettings>(`/api/sites/${siteId}/content/layout`),
+      request<SiteLayoutSettings>(`/api/sites/${siteId}/content/layout/${mode}`),
       request<MediaItem[]>(`/api/sites/${siteId}/content/media`),
     ]);
     setMedia(mediaRows);
@@ -80,7 +98,7 @@ export function SiteLayoutView({
       showSocials: loaded.showSocials ?? true,
     });
     setDirty(false);
-  }, [siteId]);
+  }, [mode, siteId]);
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -122,22 +140,24 @@ export function SiteLayoutView({
       mode === "header"
         ? {
             logoText: text(draft.logoText),
-            logoMediaId: draft.logoMediaId || undefined,
+            logoMediaId: draft.logoMediaId || null,
             showPages: draft.showPages,
             showArticles: draft.showArticles,
             ctaLabel: text(draft.ctaLabel),
             ctaUrl: text(draft.ctaUrl),
+            expectedDraftRevisionId: data?.draftRevisionId ?? null,
           }
         : {
             footerDescription: text(draft.footerDescription),
             showContacts: draft.showContacts,
             showSocials: draft.showSocials,
+            expectedDraftRevisionId: data?.draftRevisionId ?? null,
           };
     setSaving(true);
     setMessage("");
     try {
       const updated = await request<SiteLayoutSettings>(
-        `/api/sites/${siteId}/content/layout`,
+        `/api/sites/${siteId}/content/layout/${mode}`,
         {
           method: "PATCH",
           body: JSON.stringify(payload),
@@ -156,7 +176,9 @@ export function SiteLayoutView({
         showSocials: updated.showSocials ?? true,
       });
       setDirty(false);
-      setMessage(`${mode === "header" ? "Шапка" : "Подвал"} сайта сохранён`);
+      setMessage(
+        `Новая версия ${mode === "header" ? "шапки" : "подвала"} сохранена. Публичный сайт не изменён.`,
+      );
     } catch (reason) {
       setMessage(
         reason instanceof Error
@@ -390,6 +412,19 @@ export function SiteLayoutView({
           </div>
         ) : null}
       </form>
+      {siteId ? (
+        <SiteSettingsRevisionPanel
+          siteId={siteId}
+          siteSlug={siteSlug}
+          resource={mode}
+          label={mode === "header" ? "Шапка" : "Подвал"}
+          canEdit={canEdit}
+          canApprove={canApprove}
+          dirty={dirty}
+          refreshToken={data.draftRevisionId}
+          onChanged={load}
+        />
+      ) : null}
     </section>
   );
 }

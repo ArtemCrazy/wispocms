@@ -1,6 +1,15 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { parseApiBody } from "./api-response";
+import {
+  ArticleRevisionCurrent,
+  revisionActions,
+} from "./article-revision-actions";
+import {
+  categoryRevisionApiBase,
+  categoryRevisionPreviewPath,
+} from "./category-revision-links";
 
 type Category = {
   id: string;
@@ -19,6 +28,15 @@ type Category = {
   ogDescription: string | null;
   ogImageMediaId: string | null;
   structuredData: Record<string, unknown> | null;
+  publicationState: "draft" | "published" | "hidden" | "disabled" | "archive";
+  draftRevisionId?: string | null;
+};
+
+type CmsCategoryVersion = {
+  id: string;
+  versionNumber: number;
+  createdAt: string;
+  actorUserId: string | null;
 };
 
 type MediaItem = {
@@ -32,6 +50,12 @@ type Author = {
   fullName: string;
   email: string | null;
   bio: string | null;
+  draftRevisionId?: string | null;
+};
+
+type AuthorPreview = Author & {
+  revisionId: string;
+  versionNumber: number;
 };
 
 type DirectoryMode = "categories" | "authors";
@@ -50,7 +74,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
         : (payload?.message ?? "Ошибка запроса"),
     );
   }
-  return response.json();
+  return parseApiBody<T>(await response.text());
 }
 
 function initials(name: string) {
@@ -64,15 +88,19 @@ function initials(name: string) {
 export function SiteDirectoryView({
   siteId,
   siteName,
+  siteSlug,
   mode,
   canEdit = true,
+  canApprove = true,
   focusId,
   focusRequestId,
 }: {
   siteId?: string;
   siteName?: string;
+  siteSlug?: string;
   mode: DirectoryMode;
   canEdit?: boolean;
+  canApprove?: boolean;
   focusId?: string;
   focusRequestId?: number;
 }) {
@@ -87,6 +115,52 @@ export function SiteDirectoryView({
   const [message, setMessage] = useState("");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [revisionCurrent, setRevisionCurrent] = useState<
+    ArticleRevisionCurrent | null | undefined
+  >(undefined);
+  const [categoryVersions, setCategoryVersions] = useState<
+    CmsCategoryVersion[]
+  >([]);
+  const [authorRevisionCurrent, setAuthorRevisionCurrent] = useState<
+    ArticleRevisionCurrent | null | undefined
+  >(undefined);
+  const [authorVersions, setAuthorVersions] = useState<CmsCategoryVersion[]>([]);
+  const [authorPreview, setAuthorPreview] = useState<AuthorPreview | null>(null);
+  const currentRevisionActions = revisionCurrent
+    ? revisionActions(revisionCurrent, { canEdit, canApprove })
+    : null;
+  const currentAuthorRevisionActions = authorRevisionCurrent
+    ? revisionActions(authorRevisionCurrent, { canEdit, canApprove })
+    : null;
+
+  const reloadCategoryRevision = useCallback(
+    async (categoryId: string) => {
+      if (!siteId) return null;
+      const base = categoryRevisionApiBase(siteId, categoryId);
+      const current =
+        (await api<ArticleRevisionCurrent | null>(`${base}/current`)) ?? null;
+      const versions = current ? await api<CmsCategoryVersion[]>(base) : [];
+      setRevisionCurrent(current);
+      setCategoryVersions(versions);
+      return current;
+    },
+    [siteId],
+  );
+
+  const reloadAuthorRevision = useCallback(
+    async (authorId: string) => {
+      if (!siteId) return null;
+      const base = `/api/sites/${encodeURIComponent(siteId)}/content/authors/${encodeURIComponent(authorId)}/revisions`;
+      const current =
+        (await api<ArticleRevisionCurrent | null>(`${base}/current`)) ?? null;
+      const versions = current ? await api<CmsCategoryVersion[]>(base) : [];
+      setAuthorRevisionCurrent(current);
+      setAuthorVersions(versions);
+      setAuthorPreview(null);
+      return current;
+    },
+    [siteId],
+  );
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -107,6 +181,11 @@ export function SiteDirectoryView({
       setCreating(false);
       setEditingId(null);
       setNewParentId(null);
+      setRevisionCurrent(undefined);
+      setCategoryVersions([]);
+      setAuthorRevisionCurrent(undefined);
+      setAuthorVersions([]);
+      setAuthorPreview(null);
       setQuery("");
       void load().catch((error) => setMessage(error.message));
     }, 0);
@@ -129,6 +208,46 @@ export function SiteDirectoryView({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [authors, categories, focusId, focusRequestId, mode]);
+
+  async function openCategoryEditor(categoryId: string) {
+    setEditingId(categoryId);
+    setCreating(false);
+    setNewParentId(null);
+    setMessage("");
+    setRevisionCurrent(undefined);
+    setCategoryVersions([]);
+    setBusy(true);
+    try {
+      await reloadCategoryRevision(categoryId);
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось открыть рубрику",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openAuthorEditor(authorId: string) {
+    setEditingId(authorId);
+    setCreating(false);
+    setMessage("");
+    setAuthorRevisionCurrent(undefined);
+    setAuthorVersions([]);
+    setAuthorPreview(null);
+    setBusy(true);
+    try {
+      await reloadAuthorRevision(authorId);
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error ? reason.message : "Не удалось открыть автора",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function save(event: FormEvent<HTMLFormElement>, itemId?: string) {
     event.preventDefault();
@@ -166,16 +285,28 @@ export function SiteDirectoryView({
               String(data.get("ogDescription") ?? "").trim() || null,
             ogImageMediaId: String(data.get("ogImageMediaId") ?? "") || null,
             structuredData,
+            ...(itemId
+              ? {
+                  expectedDraftRevisionId:
+                    revisionCurrent?.draft?.id ?? null,
+                }
+              : {}),
           }
         : {
             fullName: String(data.get("fullName") ?? ""),
             email: String(data.get("email") ?? "").trim() || null,
             bio: String(data.get("bio") ?? "").trim() || null,
+            ...(itemId
+              ? {
+                  expectedDraftRevisionId:
+                    authorRevisionCurrent?.draft?.id ?? null,
+                }
+              : {}),
           };
     setBusy(true);
     setMessage("");
     try {
-      await api(
+      const saved = await api<Category | Author>(
         `/api/sites/${siteId}/content/${mode}${itemId ? `/${itemId}` : ""}`,
         {
           method: itemId ? "PATCH" : "POST",
@@ -183,21 +314,239 @@ export function SiteDirectoryView({
         },
       );
       setCreating(false);
-      setEditingId(null);
       setNewParentId(null);
+      if (mode === "categories") {
+        const category = saved as Category;
+        setEditingId(category.id);
+        await reloadCategoryRevision(category.id);
+      } else {
+        const author = saved as Author;
+        setEditingId(author.id);
+        await reloadAuthorRevision(author.id);
+      }
       setMessage(
         mode === "categories"
           ? itemId
-            ? "Рубрика обновлена"
-            : "Рубрика добавлена"
+            ? "Новая версия рубрики сохранена"
+            : "Рубрика создана как черновик"
           : itemId
-            ? "Автор обновлён"
-            : "Автор добавлен",
+            ? "Новая версия автора сохранена"
+            : "Автор создан как черновик",
       );
       await load();
     } catch (reason) {
       setMessage(
         reason instanceof Error ? reason.message : "Не удалось сохранить",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeCategoryRevision(
+    action: "submit" | "approve" | "request-changes" | "publish",
+  ) {
+    if (!siteId || !editingId || !revisionCurrent?.draft) return;
+    let reason: string | undefined;
+    if (action === "request-changes") {
+      reason = window.prompt("Что нужно исправить в этой версии?")?.trim();
+      if (!reason) return;
+    }
+    if (
+      action === "publish" &&
+      !window.confirm(
+        "Опубликовать именно одобренную версию рубрики? Изменения станут видны посетителям сайта.",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const base = categoryRevisionApiBase(siteId, editingId);
+      const openedRevisionId = revisionCurrent.draft.id;
+      const latest =
+        (await api<ArticleRevisionCurrent | null>(`${base}/current`)) ?? null;
+      if (latest?.draft?.id !== openedRevisionId) {
+        setMessage(
+          "Версия рубрики изменилась после открытия. Проверьте новую версию перед действием.",
+        );
+        return;
+      }
+      const available = revisionActions(latest, { canEdit, canApprove });
+      const permission =
+        action === "request-changes" ? "requestChanges" : action;
+      if (!available[permission]) {
+        setMessage(
+          "Состояние версии изменилось. Обновите рубрику и проверьте действия.",
+        );
+        return;
+      }
+      await api(
+        `${base}/${encodeURIComponent(openedRevisionId)}/${action}`,
+        {
+          method: "POST",
+          ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+        },
+      );
+      await Promise.all([reloadCategoryRevision(editingId), load()]);
+      setMessage(
+        action === "submit"
+          ? "Версия рубрики отправлена владельцу сайта на проверку"
+          : action === "approve"
+            ? "Версия рубрики одобрена. Теперь её можно опубликовать"
+            : action === "request-changes"
+              ? "Версия рубрики возвращена на доработку"
+              : "Одобренная версия рубрики опубликована",
+      );
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось изменить состояние версии рубрики",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreCategoryRevision(version: CmsCategoryVersion) {
+    if (!siteId || !editingId || !revisionCurrent?.draft) return;
+    if (
+      !window.confirm(
+        `Восстановить версию ${version.versionNumber} как новый черновик?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const base = categoryRevisionApiBase(siteId, editingId);
+      await api(`${base}/${encodeURIComponent(version.id)}/restore`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedDraftRevisionId: revisionCurrent.draft.id,
+        }),
+      });
+      await Promise.all([reloadCategoryRevision(editingId), load()]);
+      setMessage("Выбранная версия восстановлена как новый черновик");
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить версию рубрики",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeAuthorRevision(
+    action: "submit" | "approve" | "request-changes" | "publish",
+  ) {
+    if (!siteId || !editingId || !authorRevisionCurrent?.draft) return;
+    let reason: string | undefined;
+    if (action === "request-changes") {
+      reason = window.prompt("Что нужно исправить в этой версии?")?.trim();
+      if (!reason) return;
+    }
+    if (
+      action === "publish" &&
+      !window.confirm(
+        "Опубликовать именно одобренную версию автора? Изменения появятся в опубликованных материалах.",
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const base = `/api/sites/${encodeURIComponent(siteId)}/content/authors/${encodeURIComponent(editingId)}/revisions`;
+      const openedRevisionId = authorRevisionCurrent.draft.id;
+      const latest =
+        (await api<ArticleRevisionCurrent | null>(`${base}/current`)) ?? null;
+      if (latest?.draft?.id !== openedRevisionId) {
+        setMessage(
+          "Версия автора изменилась после открытия. Проверьте новую версию перед действием.",
+        );
+        return;
+      }
+      const available = revisionActions(latest, { canEdit, canApprove });
+      const permission =
+        action === "request-changes" ? "requestChanges" : action;
+      if (!available[permission]) {
+        setMessage(
+          "Состояние версии изменилось. Обновите автора и проверьте действия.",
+        );
+        return;
+      }
+      await api(
+        `${base}/${encodeURIComponent(openedRevisionId)}/${action}`,
+        {
+          method: "POST",
+          ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+        },
+      );
+      await Promise.all([reloadAuthorRevision(editingId), load()]);
+      setMessage(
+        action === "submit"
+          ? "Версия автора отправлена владельцу сайта на проверку"
+          : action === "approve"
+            ? "Версия автора одобрена. Теперь её можно опубликовать"
+            : action === "request-changes"
+              ? "Версия автора возвращена на доработку"
+              : "Одобренная версия автора опубликована",
+      );
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось изменить состояние версии автора",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewAuthorRevision() {
+    if (!siteId || !editingId || !authorRevisionCurrent?.draft) return;
+    setBusy(true);
+    try {
+      const base = `/api/sites/${encodeURIComponent(siteId)}/content/authors/${encodeURIComponent(editingId)}/revisions`;
+      const preview = await api<AuthorPreview>(
+        `${base}/${encodeURIComponent(authorRevisionCurrent.draft.id)}/preview`,
+      );
+      setAuthorPreview(preview);
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось открыть версию автора",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restoreAuthorRevision(version: CmsCategoryVersion) {
+    if (!siteId || !editingId || !authorRevisionCurrent?.draft) return;
+    if (
+      !window.confirm(
+        `Восстановить версию ${version.versionNumber} как новый черновик?`,
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const base = `/api/sites/${encodeURIComponent(siteId)}/content/authors/${encodeURIComponent(editingId)}/revisions`;
+      await api(`${base}/${encodeURIComponent(version.id)}/restore`, {
+        method: "POST",
+        body: JSON.stringify({
+          expectedDraftRevisionId: authorRevisionCurrent.draft.id,
+        }),
+      });
+      await Promise.all([reloadAuthorRevision(editingId), load()]);
+      setMessage("Выбранная версия автора восстановлена как новый черновик");
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить версию автора",
       );
     } finally {
       setBusy(false);
@@ -300,8 +649,12 @@ export function SiteDirectoryView({
       : categories.length
     : visibleAuthors.length;
 
-  const categoryForm = (category?: Category) => (
-    <form
+  const categoryForm = (category?: Category) =>
+    category && revisionCurrent === undefined ? (
+      <p role="status">Загружаем актуальную версию рубрики…</p>
+    ) : (
+      <form
+      key={`${category?.id ?? "new"}-${revisionCurrent?.draft?.id ?? "base"}`}
       className="directory-form category-settings-form"
       onSubmit={(event) => save(event, category?.id)}
     >
@@ -457,6 +810,107 @@ export function SiteDirectoryView({
         />
         <span>Запретить индексацию этой рубрики</span>
       </label>
+      {category ? (
+        <section className="workflow-panel">
+          <strong>
+            Версия рубрики{" "}
+            {revisionCurrent?.draft
+              ? `№${revisionCurrent.draft.versionNumber}`
+              : "не создана"}
+          </strong>
+          <p className="publication-hint">
+            {revisionCurrent === undefined
+              ? "Загружаем состояние версии рубрики…"
+              : revisionCurrent?.draft
+                ? `Состояние: ${revisionCurrent.reviewState}. Публичная рубрика не меняется до выпуска одобренной версии.`
+                : "Сохраните рубрику, чтобы создать первую версию для согласования."}
+          </p>
+          <div className="workflow-actions">
+            {currentRevisionActions?.submit ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void changeCategoryRevision("submit")}
+              >
+                Отправить владельцу на проверку
+              </button>
+            ) : null}
+            {currentRevisionActions?.requestChanges ? (
+              <button
+                type="button"
+                className="changes"
+                disabled={busy}
+                onClick={() => void changeCategoryRevision("request-changes")}
+              >
+                Вернуть на доработку
+              </button>
+            ) : null}
+            {currentRevisionActions?.approve ? (
+              <button
+                type="button"
+                className="publish"
+                disabled={busy}
+                onClick={() => void changeCategoryRevision("approve")}
+              >
+                Одобрить версию
+              </button>
+            ) : null}
+            {currentRevisionActions?.publish ? (
+              <button
+                type="button"
+                className="publish"
+                disabled={busy}
+                onClick={() => void changeCategoryRevision("publish")}
+              >
+                Опубликовать одобренную версию
+              </button>
+            ) : null}
+          </div>
+          {revisionCurrent?.draft && siteId && siteSlug ? (
+            <a
+              href={categoryRevisionPreviewPath({
+                siteSlug,
+                siteId,
+                categoryId: category.id,
+                categorySlug: category.slug,
+                revisionId: revisionCurrent.draft.id,
+              })}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Посмотреть выбранную версию ↗
+            </a>
+          ) : null}
+          {categoryVersions.length ? (
+            <div className="activity-list">
+              {categoryVersions.map((version) => (
+                <article key={version.id}>
+                  <div>
+                    <strong>Версия №{version.versionNumber}</strong>
+                    <small>
+                      {new Intl.DateTimeFormat("ru", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(version.createdAt))}
+                    </small>
+                  </div>
+                  {canEdit && version.id !== revisionCurrent?.draft?.id ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void restoreCategoryRevision(version)}
+                    >
+                      Восстановить как черновик
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <p>Новая рубрика будет создана как черновик.</p>
+      )}
       <div className="directory-form-actions">
         <button disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button>
         <button
@@ -471,59 +925,177 @@ export function SiteDirectoryView({
           Отмена
         </button>
       </div>
-    </form>
-  );
+      </form>
+    );
 
-  const authorForm = (author?: Author) => (
+  const authorForm = (author?: Author) =>
+    author && authorRevisionCurrent === undefined ? (
+      <p role="status">Загружаем актуальную версию автора…</p>
+    ) : (
     <form
+      key={`${author?.id ?? "new"}-${authorRevisionCurrent?.draft?.id ?? "base"}`}
       className="directory-form directory-edit-form author-edit-form"
       onSubmit={(event) => save(event, author?.id)}
     >
-      <label>
-        <span>Имя и фамилия</span>
-        <input
-          name="fullName"
-          required
-          minLength={2}
-          maxLength={160}
-          placeholder="Имя и фамилия"
-          defaultValue={author?.fullName}
-        />
-      </label>
-      <label>
-        <span>Почта</span>
-        <input
-          name="email"
-          type="email"
-          maxLength={255}
-          placeholder="author@example.ru"
-          defaultValue={author?.email ?? ""}
-        />
-      </label>
-      <label>
-        <span>Описание</span>
-        <input
-          name="bio"
-          maxLength={500}
-          placeholder="Короткое описание"
-          defaultValue={author?.bio ?? ""}
-        />
-      </label>
-      <div className="directory-form-actions">
-        <button disabled={busy}>{busy ? "Сохраняем…" : "Сохранить"}</button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => {
-            setCreating(false);
-            setEditingId(null);
-          }}
-        >
-          Отмена
-        </button>
+      <div className="author-fields">
+        <label>
+          <span>Имя и фамилия</span>
+          <input
+            name="fullName"
+            required
+            minLength={2}
+            maxLength={160}
+            placeholder="Имя и фамилия"
+            defaultValue={author?.fullName}
+          />
+        </label>
+        <label>
+          <span>Почта</span>
+          <input
+            name="email"
+            type="email"
+            maxLength={255}
+            placeholder="author@example.ru"
+            defaultValue={author?.email ?? ""}
+          />
+        </label>
+        <label>
+          <span>Описание</span>
+          <input
+            name="bio"
+            maxLength={500}
+            placeholder="Короткое описание"
+            defaultValue={author?.bio ?? ""}
+          />
+        </label>
+        <div className="directory-form-actions">
+          <button disabled={busy}>
+            {busy ? "Сохраняем…" : "Сохранить"}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              setCreating(false);
+              setEditingId(null);
+              setAuthorRevisionCurrent(undefined);
+              setAuthorVersions([]);
+              setAuthorPreview(null);
+            }}
+          >
+            Отмена
+          </button>
+        </div>
       </div>
+      {author ? (
+        <section className="workflow-panel">
+          <strong>
+            Версия автора{" "}
+            {authorRevisionCurrent?.draft
+              ? `№${authorRevisionCurrent.draft.versionNumber}`
+              : "не создана"}
+          </strong>
+          <p className="publication-hint">
+            {authorRevisionCurrent?.draft
+              ? `Состояние: ${authorRevisionCurrent.reviewState}. Опубликованные материалы не меняются до выпуска одобренной версии.`
+              : "Сохраните автора, чтобы создать первую версию для согласования."}
+          </p>
+          <div className="workflow-actions">
+            {currentAuthorRevisionActions?.submit ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void changeAuthorRevision("submit")}
+              >
+                Отправить владельцу на проверку
+              </button>
+            ) : null}
+            {currentAuthorRevisionActions?.requestChanges ? (
+              <button
+                type="button"
+                className="changes"
+                disabled={busy}
+                onClick={() => void changeAuthorRevision("request-changes")}
+              >
+                Вернуть на доработку
+              </button>
+            ) : null}
+            {currentAuthorRevisionActions?.approve ? (
+              <button
+                type="button"
+                className="publish"
+                disabled={busy}
+                onClick={() => void changeAuthorRevision("approve")}
+              >
+                Одобрить версию
+              </button>
+            ) : null}
+            {currentAuthorRevisionActions?.publish ? (
+              <button
+                type="button"
+                className="publish"
+                disabled={busy}
+                onClick={() => void changeAuthorRevision("publish")}
+              >
+                Опубликовать одобренную версию
+              </button>
+            ) : null}
+          </div>
+          {authorRevisionCurrent?.draft ? (
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => void previewAuthorRevision()}
+            >
+              Просмотреть выбранную версию
+            </button>
+          ) : null}
+          {authorPreview ? (
+            <article
+              className="author-revision-preview"
+              role="region"
+              aria-label="Предпросмотр автора"
+            >
+              <strong>{authorPreview.fullName}</strong>
+              <small>{authorPreview.email ?? "Почта не указана"}</small>
+              <p>{authorPreview.bio ?? "Описание не добавлено"}</p>
+              <small>Версия №{authorPreview.versionNumber}</small>
+            </article>
+          ) : null}
+          {authorVersions.length ? (
+            <div className="activity-list">
+              {authorVersions.map((version) => (
+                <article key={version.id}>
+                  <div>
+                    <strong>Версия №{version.versionNumber}</strong>
+                    <small>
+                      {new Intl.DateTimeFormat("ru", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      }).format(new Date(version.createdAt))}
+                    </small>
+                  </div>
+                  {canEdit &&
+                  version.id !== authorRevisionCurrent?.draft?.id ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void restoreAuthorRevision(version)}
+                    >
+                      Восстановить как черновик
+                    </button>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <p>Новый автор будет создан как черновик.</p>
+      )}
     </form>
-  );
+    );
 
   return (
     <section className="directory-section">
@@ -543,6 +1115,11 @@ export function SiteDirectoryView({
               setCreating(true);
               setEditingId(null);
               setNewParentId(null);
+              setRevisionCurrent(undefined);
+              setCategoryVersions([]);
+              setAuthorRevisionCurrent(undefined);
+              setAuthorVersions([]);
+              setAuthorPreview(null);
               setMessage("");
             }}
           >
@@ -640,6 +1217,8 @@ export function SiteDirectoryView({
                       setCreating(true);
                       setEditingId(null);
                       setNewParentId(category.id);
+                      setRevisionCurrent(undefined);
+                      setCategoryVersions([]);
                       setMessage("");
                     }}
                   >
@@ -649,21 +1228,10 @@ export function SiteDirectoryView({
                     aria-label={`Настроить рубрику ${category.name}`}
                     title="Настройки рубрики"
                     onClick={() => {
-                      setEditingId(category.id);
-                      setCreating(false);
-                      setNewParentId(null);
-                      setMessage("");
+                      void openCategoryEditor(category.id);
                     }}
                   >
                     ⚙
-                  </button>
-                  <button
-                    className="danger"
-                    disabled={busy}
-                    aria-label={`Удалить рубрику ${category.name}`}
-                    onClick={() => void remove(category)}
-                  >
-                    ×
                   </button>
                 </div>
               ) : null}
@@ -700,25 +1268,26 @@ export function SiteDirectoryView({
                   <small>{author.email ?? "Почта не указана"}</small>
                   <p>{author.bio ?? "Описание пока не добавлено"}</p>
                 </div>
-                {canEdit ? (
+                {canEdit || canApprove ? (
                   <div className="directory-actions">
-                    <button
-                      aria-label={`Редактировать автора ${author.fullName}`}
-                      onClick={() => {
-                        setEditingId(author.id);
-                        setCreating(false);
-                      }}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      className="danger"
-                      disabled={busy}
-                      aria-label={`Удалить автора ${author.fullName}`}
-                      onClick={() => void remove(author)}
-                    >
-                      ×
-                    </button>
+                    {canEdit ? (
+                      <button
+                        aria-label={`Редактировать автора ${author.fullName}`}
+                        onClick={() => void openAuthorEditor(author.id)}
+                      >
+                        ✎
+                      </button>
+                    ) : null}
+                    {canApprove ? (
+                      <button
+                        className="danger"
+                        disabled={busy}
+                        aria-label={`Удалить автора ${author.fullName}`}
+                        onClick={() => void remove(author)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </article>

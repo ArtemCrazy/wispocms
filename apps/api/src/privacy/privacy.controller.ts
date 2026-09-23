@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -25,12 +26,42 @@ import {
   UpdatePrivacySettingsDto,
   UpdatePrivacyTemplateDto,
 } from './privacy.dto';
+import { SiteResourceRevisionsService } from '../content/site-resource-revisions.service';
 import { PrivacyService } from './privacy.service';
 
 @Controller('sites/:siteId/content/privacy')
 @UseGuards(JwtAuthGuard)
 export class PrivacyController {
-  constructor(private readonly privacyService: PrivacyService) {}
+  constructor(
+    private readonly privacyService: PrivacyService,
+    private readonly revisions: SiteResourceRevisionsService,
+  ) {}
+
+  private expected(dto: { expectedDraftRevisionId?: string | null }) {
+    if (dto.expectedDraftRevisionId === undefined)
+      throw new BadRequestException('Укажите актуальную версию черновика');
+    return dto.expectedDraftRevisionId;
+  }
+
+  private async checkpoint(
+    siteId: string,
+    request: AuthenticatedRequest,
+    dto: { expectedDraftRevisionId?: string | null },
+    mutation: () => Promise<unknown>,
+  ) {
+    const expectedDraftRevisionId = this.expected(dto);
+    const preparedRevisionId = await this.revisions.prepareMutation(
+      siteId,
+      'site_privacy',
+      request.auth!,
+      expectedDraftRevisionId,
+    );
+    const snapshot = (await mutation()) as Record<string, unknown>;
+    return this.revisions.save(siteId, 'site_privacy', request.auth!, {
+      snapshot,
+      expectedDraftRevisionId: preparedRevisionId,
+    });
+  }
 
   @Get()
   get(
@@ -46,7 +77,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdatePrivacyCompanyDto,
   ) {
-    return this.privacyService.updateCompany(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.updateCompany(siteId, request.auth!, dto),
+    );
   }
 
   @Put('settings')
@@ -55,7 +88,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdatePrivacySettingsDto,
   ) {
-    return this.privacyService.updateSettings(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.updateSettings(siteId, request.auth!, dto),
+    );
   }
 
   @Put('template')
@@ -64,7 +99,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdatePrivacyTemplateDto,
   ) {
-    return this.privacyService.updateTemplate(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.updateTemplate(siteId, request.auth!, dto),
+    );
   }
 
   @Post('legal-model/accept')
@@ -73,7 +110,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: SelectPrivacyLegalModelDto,
   ) {
-    return this.privacyService.acceptLegalModel(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.acceptLegalModel(siteId, request.auth!, dto),
+    );
   }
 
   @Post('legal-model/defer')
@@ -82,7 +121,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: SelectPrivacyLegalModelDto,
   ) {
-    return this.privacyService.deferLegalModel(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.deferLegalModel(siteId, request.auth!, dto),
+    );
   }
 
   @Post('generate')
@@ -91,7 +132,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: GeneratePrivacyDocumentDto,
   ) {
-    return this.privacyService.generate(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.generate(siteId, request.auth!, dto),
+    );
   }
 
   @Post('regenerate')
@@ -100,7 +143,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: GeneratePrivacyDocumentDto,
   ) {
-    return this.privacyService.generate(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.generate(siteId, request.auth!, dto),
+    );
   }
 
   @Put('manual-document')
@@ -109,7 +154,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() dto: UpdatePrivacyManualDocumentDto,
   ) {
-    return this.privacyService.updateManual(siteId, request.auth!, dto);
+    return this.checkpoint(siteId, request, dto, () =>
+      this.privacyService.updateManual(siteId, request.auth!, dto),
+    );
   }
 
   @Post('reset-to-automatic')
@@ -118,8 +165,9 @@ export class PrivacyController {
     @Req() request: AuthenticatedRequest,
     @Body() _dto: ResetPrivacyDocumentDto,
   ) {
-    void _dto;
-    return this.privacyService.resetToAutomatic(siteId, request.auth!);
+    return this.checkpoint(siteId, request, _dto, () =>
+      this.privacyService.resetToAutomatic(siteId, request.auth!),
+    );
   }
 }
 

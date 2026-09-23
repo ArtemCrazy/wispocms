@@ -23,6 +23,30 @@ import { SetArmaturexEcommerceSiteType1789675200000 } from './migrations/1789675
 import { ExpandMediaSiteToolkit1789761600000 } from './migrations/1789761600000-ExpandMediaSiteToolkit';
 import { ImportSkinovaMediaSite1789848000000 } from './migrations/1789848000000-ImportSkinovaMediaSite';
 import { CanonicalBannerSlots1789934400000 } from './migrations/1789934400000-CanonicalBannerSlots';
+import { ContentCenterPreparation1790020800000 } from './migrations/1790020800000-ContentCenterPreparation';
+import { ContentCenterSourceFiles1790107200000 } from './migrations/1790107200000-ContentCenterSourceFiles';
+import { ContentCenterResearch1790193600000 } from './migrations/1790193600000-ContentCenterResearch';
+import { ContentCenterCreation1790280000000 } from './migrations/1790280000000-ContentCenterCreation';
+import { CreationPublicationTargets1790340000000 } from './migrations/1790340000000-CreationPublicationTargets';
+import { DeepseekIntegration1790400000000 } from './migrations/1790400000000-DeepseekIntegration';
+import { GlobalPromptLibrary1790486400000 } from './migrations/1790486400000-GlobalPromptLibrary';
+import { ContentCenterSiteImports1790572800000 } from './migrations/1790572800000-ContentCenterSiteImports';
+import { PreparationRequestLabels1790659200000 } from './migrations/1790659200000-PreparationRequestLabels';
+import { PreparationReadablePrompts1790745600000 } from './migrations/1790745600000-PreparationReadablePrompts';
+import { SourceRefreshJobs1790832000000 } from './migrations/1790832000000-SourceRefreshJobs';
+import { ContentCenterVkSources1790918400000 } from './migrations/1790918400000-ContentCenterVkSources';
+import { PlatformVkIntegration1791004800000 } from './migrations/1791004800000-PlatformVkIntegration';
+import { InstagramYoutubeSources1791091200000 } from './migrations/1791091200000-InstagramYoutubeSources';
+import { YouTubeTranscriptions1791177600000 } from './migrations/1791177600000-YouTubeTranscriptions';
+import { PreparationGeneralPrompts1791264000000 } from './migrations/1791264000000-PreparationGeneralPrompts';
+import { RemoveLegacyCompetitorStarter1791350400000 } from './migrations/1791350400000-RemoveLegacyCompetitorStarter';
+import { PreparationCheckpoints1791436800000 } from './migrations/1791436800000-PreparationCheckpoints';
+import { SiteScopedRoles1790017200000 } from './migrations/1790017200000-SiteScopedRoles';
+import { CmsRevisionLedger1790103600000 } from './migrations/1790103600000-CmsRevisionLedger';
+import { ProtectCmsRevisionHistory1790107200000 } from './migrations/1790107200000-ProtectCmsRevisionHistory';
+import { ExpandCmsRevisionResourceTypes1790190000000 } from './migrations/1790190000000-ExpandCmsRevisionResourceTypes';
+import { CompleteCmsRevisionResourceTypes1790200000000 } from './migrations/1790200000000-CompleteCmsRevisionResourceTypes';
+import { RemainingMetadataRevisionTypes1790210000000 } from './migrations/1790210000000-RemainingMetadataRevisionTypes';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -52,6 +76,30 @@ export function createDataSourceOptions(): DataSourceOptions {
       ExpandMediaSiteToolkit1789761600000,
       ImportSkinovaMediaSite1789848000000,
       CanonicalBannerSlots1789934400000,
+      ContentCenterPreparation1790020800000,
+      ContentCenterSourceFiles1790107200000,
+      ContentCenterResearch1790193600000,
+      ContentCenterCreation1790280000000,
+      CreationPublicationTargets1790340000000,
+      DeepseekIntegration1790400000000,
+      GlobalPromptLibrary1790486400000,
+      ContentCenterSiteImports1790572800000,
+      PreparationRequestLabels1790659200000,
+      PreparationReadablePrompts1790745600000,
+      SourceRefreshJobs1790832000000,
+      ContentCenterVkSources1790918400000,
+      PlatformVkIntegration1791004800000,
+      InstagramYoutubeSources1791091200000,
+      YouTubeTranscriptions1791177600000,
+      PreparationGeneralPrompts1791264000000,
+      RemoveLegacyCompetitorStarter1791350400000,
+      PreparationCheckpoints1791436800000,
+      SiteScopedRoles1790017200000,
+      CmsRevisionLedger1790103600000,
+      ProtectCmsRevisionHistory1790107200000,
+      ExpandCmsRevisionResourceTypes1790190000000,
+      CompleteCmsRevisionResourceTypes1790200000000,
+      RemainingMetadataRevisionTypes1790210000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

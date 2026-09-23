@@ -25,12 +25,15 @@ type UserItem = {
   email: string;
   fullName: string;
   platformRole: string;
+  accountKind: "legacy" | "wispo" | "site";
+  homeSiteId: string | null;
   isActive: boolean;
   memberships: Array<{
     id: string;
     workspaceId: string;
     workspaceName: string;
     role: string;
+    siteIds: string[];
   }>;
 };
 

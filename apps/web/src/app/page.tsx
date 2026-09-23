@@ -10,6 +10,7 @@ import {
 } from "react";
 import { LoginScreen } from "./login-screen";
 import { PlatformView } from "./platform-views";
+import { PlatformAiSettings } from "./platform-ai-settings";
 import { ContentView } from "./content-view";
 import { PagesView } from "./pages-view";
 import { SiteDirectoryView } from "./site-directories-view";
@@ -38,6 +39,14 @@ import { MediaBannerLibraryView } from "./media-banner-library-view";
 import { SiteVariablesView } from "./site-variables-view";
 import { MediaLayoutView } from "./media-layout-view";
 import { MediaTemplatesView } from "./media-templates-view";
+import { ContentCenterView } from "./content-center/content-center-view";
+import {
+  CONTENT_CENTER_SECTIONS,
+  contentCenterSection,
+  parseContentCenterScreen,
+  type ContentCenterScreen,
+} from "./content-center/navigation";
+import { SiteUsersView } from "./site-users-view";
 
 type SessionData = {
   user: { id: string; email: string; fullName: string; platformRole: string };
@@ -46,6 +55,7 @@ type SessionData = {
     name: string;
     slug: string;
     role: string | null;
+    canUseContentCenter: boolean;
     members: Array<{
       id: string;
       fullName: string;
@@ -210,6 +220,7 @@ function Dashboard({
     | "all-projects"
     | "global-search"
     | "overview"
+    | "platform-settings"
     | "workspaces"
     | "team"
     | "audit"
@@ -229,12 +240,15 @@ function Dashboard({
     | "layout"
     | "variables"
     | "media"
+    | "content-center"
     | "globals"
     | "seo"
     | "integration"
     | "settings"
-    | "history";
+    | "history"
+    | "site-users";
   const [activeView, setActiveView] = useState<View>("all-projects");
+  const [contentCenterScreen, setContentCenterScreen] = useState<ContentCenterScreen>("root");
   const [navigationTarget, setNavigationTarget] = useState<
     (SearchTarget & { requestId: number }) | null
   >(null);
@@ -317,18 +331,39 @@ function Dashboard({
   const site = workspace?.sites.find((item) => item.id === selectedSiteId);
   const isWispoAdmin = session.user.platformRole === "wispo_admin";
   const workspaceRole = workspace?.role;
-  const roleLabel = isWispoAdmin ? "Администратор" : "Сотрудник";
+  const roleLabel = isWispoAdmin ? "Администратор Wispo" : workspaceRole === "site_owner" ? "Владелец сайта" : "Сотрудник";
   const hasWorkspaceAccess = isWispoAdmin || Boolean(workspaceRole);
   const canEdit = hasWorkspaceAccess;
-  const canApprove = hasWorkspaceAccess;
-  const canEditPublished = hasWorkspaceAccess;
-  const canManageSettings = canEditPublished;
+  const canApprove = isWispoAdmin || workspaceRole === "site_owner";
+  const canEditPublished = canApprove;
+  const canEditCode =
+    canApprove ||
+    workspaceRole === "wispo_developer" ||
+    workspaceRole === "site_developer";
+  const canManageSettings = isWispoAdmin || workspaceRole === "site_owner";
+  const canManageSiteUsers = canManageSettings;
 
   useEffect(() => {
     function restoreSiteView() {
       const url = new URL(window.location.href);
       const siteId = url.searchParams.get("site");
       const view = url.searchParams.get("view");
+      if (view === "platform-settings" && isWispoAdmin) {
+        setActiveView("platform-settings");
+        setNavigationTarget(null);
+        return;
+      }
+      if (view === "content-center") {
+        const workspaceId = url.searchParams.get("workspace");
+        if (session.workspaces.some((item) => item.id === workspaceId && item.canUseContentCenter)) {
+          setSelectedWorkspaceId(workspaceId);
+          setSelectedSiteId(null);
+          setActiveView("content-center");
+          setContentCenterScreen(parseContentCenterScreen(url.searchParams.get("cc")));
+          setNavigationTarget(null);
+        }
+        return;
+      }
       if (!siteId || !view) return;
       const restorableViews: View[] = [
         "site",
@@ -337,6 +372,8 @@ function Dashboard({
         "homepage",
         "articles",
         "pages",
+        "categories",
+        "authors",
         "privacy-policy",
         "404",
         "header",
@@ -386,7 +423,7 @@ function Dashboard({
     }
     window.addEventListener("popstate", restoreSiteView);
     return () => window.removeEventListener("popstate", restoreSiteView);
-  }, [session.workspaces]);
+  }, [session.workspaces, isWispoAdmin]);
 
   function confirmDiscardChanges() {
     if (!hasUnsavedChanges) return true;
@@ -409,6 +446,20 @@ function Dashboard({
     )
       return false;
     if (view !== "banners") setBannerLibraryContext(null);
+    if (view === "platform-settings" || activeView === "platform-settings") {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("site");
+      url.searchParams.delete("workspace");
+      url.searchParams.delete("cc");
+      if (view === "platform-settings") url.searchParams.set("view", view);
+      else url.searchParams.delete("view");
+      window.history.pushState({}, "", url);
+    }
+    if (activeView === "content-center" && view !== "content-center" && view !== "platform-settings") {
+      const url = new URL(window.location.href);
+      for (const key of ["cc", "ccVersion", "workspace", "view"]) url.searchParams.delete(key);
+      window.history.replaceState({}, "", url);
+    }
     navigationSequence.current += 1;
     setActiveView(view);
     setNavigationTarget(
@@ -432,9 +483,11 @@ function Dashboard({
         "all-projects",
         "global-search",
         "overview",
+        "platform-settings",
         "workspaces",
         "team",
         "audit",
+        "content-center",
       ].includes(view)
     ) {
       const url = new URL(window.location.href);
@@ -459,14 +512,14 @@ function Dashboard({
     .join("")
     .slice(0, 2)
     .toUpperCase();
-  const isPlatform = ["overview", "workspaces", "team", "audit"].includes(
+  const isPlatform = ["overview", "workspaces", "team", "audit", "platform-settings"].includes(
     activeView,
   );
   const showsPlatformMenu = isPlatform;
   const isSiteNavigationActive =
     Boolean(selectedSiteId) &&
     !isPlatform &&
-    !["projects", "all-projects", "global-search"].includes(activeView);
+    !["projects", "all-projects", "global-search", "content-center"].includes(activeView);
   type SiteMenuItem = {
     id: View;
     icon: string;
@@ -525,11 +578,12 @@ function Dashboard({
       { id: "layout", icon: "header", label: "Шапка и подвал" },
       { id: "banners", icon: "banners", label: "Баннеры" },
       { id: "variables", icon: "company-data", label: "Переменные" },
-      { id: "media", icon: "content-center", label: "Контентный центр" },
+      { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Общие данные" },
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
       { id: "settings", icon: "management", label: "Настройки сайта" },
+      { id: "site-users", icon: "management", label: "Пользователи" },
       { id: "history", icon: "log", label: "История изменений" },
     ],
     corporate: [
@@ -544,20 +598,22 @@ function Dashboard({
       { id: "banners", icon: "banners", label: "Баннеры" },
       { id: "header", icon: "header", label: "Шапка" },
       { id: "footer", icon: "footer", label: "Подвал" },
-      { id: "media", icon: "content-center", label: "Контентный центр" },
+      { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Данные компании" },
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
       { id: "settings", icon: "management", label: "Настройки сайта" },
+      { id: "site-users", icon: "management", label: "Пользователи" },
       { id: "history", icon: "log", label: "История изменений" },
     ],
     landing: [
       { id: "homepage", icon: "home", label: "Структура лендинга" },
-      { id: "media", icon: "content-center", label: "Контентный центр" },
+      { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Контакты" },
       { id: "seo", icon: "seo", label: "SEO" },
       { id: "integration", icon: "integration", label: "Подключение" },
       { id: "settings", icon: "management", label: "Настройки сайта" },
+      { id: "site-users", icon: "management", label: "Пользователи" },
       { id: "history", icon: "log", label: "История изменений" },
     ],
   };
@@ -567,7 +623,8 @@ function Dashboard({
   ).filter(
     (item) =>
       (item.id !== "banners" || hasBannerSlots) &&
-      (!["settings", "integration"].includes(item.id) || canManageSettings),
+      (!["settings", "integration"].includes(item.id) || canManageSettings) &&
+      (item.id !== "site-users" || canManageSiteUsers),
   );
   const siteTopTabs = (
     [
@@ -617,6 +674,7 @@ function Dashboard({
       "seo",
       "integration",
       "settings",
+      "site-users",
       "history",
     ].includes(item.id),
   );
@@ -991,7 +1049,7 @@ function Dashboard({
 
   function openProject(workspaceId: string) {
     if (
-      (workspaceId !== selectedWorkspaceId || selectedSiteId !== null) &&
+      (workspaceId !== selectedWorkspaceId || selectedSiteId !== null || activeView !== "projects") &&
       hasUnsavedChanges &&
       !confirmDiscardChanges()
     )
@@ -1031,6 +1089,22 @@ function Dashboard({
     url.searchParams.set("site", siteId);
     url.searchParams.set("view", initialView);
     window.history.pushState({}, "", url);
+  }
+
+  function openContentCenter(workspaceId: string, screen: ContentCenterScreen = "root") {
+    const stayingInContentCenter = activeView === "content-center" && selectedWorkspaceId === workspaceId;
+    if (!stayingInContentCenter && hasUnsavedChanges && !confirmDiscardChanges()) return;
+    setSelectedWorkspaceId(workspaceId);
+    setSelectedSiteId(null);
+    setStructurePages([]);
+    navigateTo("content-center", undefined, true);
+    const url = new URL(window.location.href);
+    for (const key of ["site", "subview", "cc", "ccVersion"]) url.searchParams.delete(key);
+    url.searchParams.set("workspace", workspaceId);
+    url.searchParams.set("view", "content-center");
+    if (screen !== "root") url.searchParams.set("cc", screen);
+    window.history.pushState({}, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }
 
   function showAllProjects() {
@@ -1129,7 +1203,7 @@ function Dashboard({
                   <button
                     onClick={() => {
                       setSwitcherOpen(false);
-                      if (isWispoAdmin) navigateTo("workspaces");
+                      if (isWispoAdmin) navigateTo("platform-settings");
                       else showAllProjects();
                     }}
                   >
@@ -1246,6 +1320,14 @@ function Dashboard({
             <>
               <p className="nav-label">Управление Wispo</p>
               <button
+                title="Настройки платформы"
+                className={`nav-item ${activeView === "platform-settings" ? "active" : ""}`}
+                onClick={() => navigateTo("platform-settings")}
+              >
+                <Icon><span className="weeek-icon weeek-icon-settings" aria-hidden="true" /></Icon>
+                <span className="nav-text">Настройки платформы</span>
+              </button>
+              <button
                 title="Обзор платформы"
                 className={`nav-item ${activeView === "overview" ? "active" : ""}`}
                 onClick={() => navigateTo("overview")}
@@ -1322,6 +1404,7 @@ function Dashboard({
               {renderWorkspaceCreate("sidebar")}
               {session.workspaces.map((workspaceItem) => {
                 const expanded = workspaceItem.id === selectedWorkspaceId;
+                const contentCenterOpen = expanded && activeView === "content-center";
                 const selected =
                   expanded && activeView === "projects" && !selectedSiteId;
                 return (
@@ -1385,6 +1468,35 @@ function Dashboard({
                             Сайтов пока нет
                           </p>
                         ) : null}
+                        {workspaceItem.canUseContentCenter && <>
+                        <div className="workspace-tools-divider" aria-hidden="true" />
+                        <button
+                          className={`nav-item workspace-site-item ${contentCenterOpen && contentCenterScreen === "root" ? "active" : ""}`}
+                          tabIndex={expanded ? 0 : -1}
+                          aria-current={contentCenterOpen && contentCenterScreen === "root" ? "page" : undefined}
+                          aria-expanded={contentCenterOpen}
+                          onClick={() => openContentCenter(workspaceItem.id)}
+                        >
+                          <span className="site-system-icon content-center" aria-hidden="true" />
+                          <span className="nav-text">Контент-центр</span>
+                        </button>
+                        {contentCenterOpen && (
+                          <div className="workspace-content-sections" role="group" aria-label="Разделы контент-центра">
+                            {CONTENT_CENTER_SECTIONS.map((section) => (
+                              <button
+                                key={section.id}
+                                className={`nav-item workspace-content-section ${contentCenterSection(contentCenterScreen) === section.id ? "active" : ""}`}
+                                title={section.label}
+                                aria-label={section.label}
+                                aria-current={contentCenterScreen === section.id ? "page" : undefined}
+                                onClick={() => openContentCenter(workspaceItem.id, section.id)}
+                              >
+                                {section.id === "preparation" ? "Подготовка инфо" : section.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        </>}
                       </div>
                     </div>
                   </section>
@@ -1624,7 +1736,7 @@ function Dashboard({
                   const active = activeView === item.id;
                   const label =
                     item.id === "media"
-                      ? "Контентный центр"
+                      ? "Медиатека"
                       : item.id === "settings"
                         ? "Управление"
                         : item.label;
@@ -1689,6 +1801,7 @@ function Dashboard({
         {activeView !== "global-search" &&
         activeView !== "all-projects" &&
         activeView !== "projects" &&
+        activeView !== "content-center" &&
         !(site && isSiteNavigationActive) ? (
           <header className="topbar topbar-actions-only">
             <div className="top-actions">
@@ -1754,7 +1867,7 @@ function Dashboard({
                               setHelpOpen(false);
                             }}
                           >
-                            Контентный центр
+                            Медиатека
                           </button>
                           <a
                             href={`/preview/${site.slug}`}
@@ -1799,6 +1912,15 @@ function Dashboard({
             onChanged={onSessionRefresh}
             canCreateSite={hasWorkspaceAccess}
           />
+        ) : activeView === "content-center" && workspace?.canUseContentCenter ? (
+          <ContentCenterView
+            key={workspace.id}
+            workspaceId={workspace.id}
+            workspaceName={workspace.name}
+            onWorkspaceOpen={() => openProject(workspace.id)}
+            onDirtyChange={setHasUnsavedChanges}
+            onScreenChange={setContentCenterScreen}
+          />
         ) : activeView === "articles" ? (
           site?.siteType === "media" ? (
             <MediaArticlesView
@@ -1806,6 +1928,7 @@ function Dashboard({
               siteName={site.name}
               siteSlug={site.slug}
               canEdit={canEdit}
+              canEditCode={canEditCode}
               canApprove={canApprove}
               canEditPublished={canEditPublished}
               onCountChange={setContentCount}
@@ -1868,6 +1991,7 @@ function Dashboard({
           <NotFoundPageView
             siteId={site?.id}
             canEdit={canEdit}
+            canEditCode={canEditCode}
             canApprove={canApprove}
           />
         ) : activeView === "site" && site?.siteType === "media" ? (
@@ -1879,7 +2003,8 @@ function Dashboard({
         ) : activeView === "templates" && site?.siteType === "media" ? (
           <MediaTemplatesView
             siteId={site.id}
-            canEdit={canEdit}
+            canEdit={canEditCode}
+            canApprove={canApprove}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "homepage-template" && site?.siteType === "media" ? (
@@ -1939,7 +2064,9 @@ function Dashboard({
           <SiteDirectoryView
             siteId={site?.id}
             siteName={site?.name}
+            siteSlug={site?.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             mode={activeView}
             focusId={
               navigationTarget?.view === activeView
@@ -1954,6 +2081,7 @@ function Dashboard({
               siteId={site.id}
               siteName={site.name}
               canEdit={canEdit}
+              canApprove={canApprove}
               createOnOpenKey={bannerLibraryContext?.createKey}
               initialPreviewRenderer={bannerLibraryContext?.previewRenderer}
               onBackToAssignments={
@@ -1977,6 +2105,7 @@ function Dashboard({
             siteId={site.id}
             siteName={site.name}
             canEdit={canEdit}
+            canApprove={canApprove}
           />
         ) : activeView === "layout" && site?.siteType === "media" ? (
           <MediaLayoutView
@@ -1984,14 +2113,17 @@ function Dashboard({
             siteName={site.name}
             siteSlug={site.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "header" || activeView === "footer" ? (
           <SiteLayoutView
             siteId={site?.id}
             siteName={site?.name}
+            siteSlug={site?.slug}
             mode={activeView}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "media" ? (
@@ -2000,12 +2132,15 @@ function Dashboard({
             siteName={site?.name}
             workspaceName={workspace?.name}
             canEdit={canEdit}
+            canApprove={canApprove}
           />
         ) : activeView === "globals" ? (
           <SiteGlobalsView
             siteId={site?.id}
             siteName={site?.name}
+            siteSlug={site?.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "seo" ? (
@@ -2014,6 +2149,7 @@ function Dashboard({
             siteName={site?.name}
             siteSlug={site?.slug}
             canEdit={canEdit}
+            canApprove={canApprove}
             onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "integration" && canManageSettings ? (
@@ -2029,8 +2165,12 @@ function Dashboard({
             onSaved={onSessionRefresh}
             onDirtyChange={setHasUnsavedChanges}
           />
+        ) : activeView === "site-users" && site && canManageSiteUsers ? (
+          <SiteUsersView siteId={site.id} siteName={site.name} />
         ) : activeView === "history" && site ? (
           <AuditLogView siteId={site.id} />
+        ) : isWispoAdmin && activeView === "platform-settings" ? (
+          <PlatformAiSettings onDirtyChange={setHasUnsavedChanges} />
         ) : isWispoAdmin && isPlatform ? (
           <PlatformView
             view={activeView as "overview" | "workspaces" | "team" | "audit"}

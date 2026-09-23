@@ -106,6 +106,8 @@ type PublicSitePageProps = {
   searchParams: Promise<{
     cmsSiteId?: string | string[];
     cmsPageId?: string | string[];
+    cmsSiteSettings?: string | string[];
+    cmsRevisionId?: string | string[];
   }>;
 };
 
@@ -120,7 +122,10 @@ export async function generateMetadata({
   searchParams,
 }: PublicSitePageProps): Promise<Metadata> {
   const query = await searchParams;
-  if (queryValue(query.cmsSiteId) && queryValue(query.cmsPageId))
+  if (
+    queryValue(query.cmsSiteId) &&
+    (queryValue(query.cmsPageId) || queryValue(query.cmsSiteSettings))
+  )
     return {
       title: "Предпросмотр CMS",
       robots: { index: false, follow: false },
@@ -165,12 +170,34 @@ export default async function PublicSitePage({
   const query = await searchParams;
   const siteId = queryValue(query.cmsSiteId);
   const pageId = queryValue(query.cmsPageId);
-  const cmsPreview = siteId && pageId ? { siteId, pageId } : null;
-  const result = cmsPreview
+  const requestedSettings = queryValue(query.cmsSiteSettings);
+  const settingsScope =
+    requestedSettings === "globals" ||
+    requestedSettings === "header" ||
+    requestedSettings === "footer"
+      ? requestedSettings
+      : null;
+  const revisionId = queryValue(query.cmsRevisionId);
+  const pagePreview = siteId && pageId ? { siteId, pageId, revisionId } : null;
+  const settingsPreview =
+    siteId && settingsScope && revisionId
+      ? { siteId, settingsScope, revisionId }
+      : null;
+  const cmsPreview = pagePreview ?? settingsPreview;
+  const settingsBase =
+    settingsScope === "globals" ? "globals" : `layout/${settingsScope}`;
+  const result = pagePreview
     ? await loadPublicData<PublicSiteData>(
-        `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/pages/${encodeURIComponent(cmsPreview.pageId)}/preview`,
+        pagePreview.revisionId
+          ? `/api/sites/${encodeURIComponent(pagePreview.siteId)}/content/pages/${encodeURIComponent(pagePreview.pageId)}/revisions/${encodeURIComponent(pagePreview.revisionId)}/preview`
+          : `/api/sites/${encodeURIComponent(pagePreview.siteId)}/content/pages/${encodeURIComponent(pagePreview.pageId)}/preview`,
         (await cookies()).toString(),
       )
+    : settingsPreview
+      ? await loadPublicData<PublicSiteData>(
+          `/api/sites/${encodeURIComponent(settingsPreview.siteId)}/content/${settingsBase}/revisions/${encodeURIComponent(settingsPreview.revisionId)}/preview`,
+          (await cookies()).toString(),
+        )
     : await loadSite(siteSlug);
 
   if (!result.ok) {

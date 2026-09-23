@@ -9,6 +9,16 @@ import {
   useState,
 } from "react";
 import Image from "next/image";
+import { parseApiBody } from "./api-response";
+import {
+  ArticleRevisionCurrent,
+  legacyBulkAllowed,
+  revisionActions,
+} from "./article-revision-actions";
+import {
+  categoryRevisionApiBase,
+  categoryRevisionPreviewPath,
+} from "./category-revision-links";
 import {
   ArticleDocument,
   documentText,
@@ -49,6 +59,7 @@ type Category = {
   articleCount: number;
   childCount: number;
   redirects: RedirectAlias[];
+  draftRevisionId?: string | null;
 };
 type Author = { id: string; fullName: string; email: string | null };
 type MediaItem = {
@@ -87,6 +98,7 @@ type Article = {
   publishedAt: string | null;
   sortOrder: number;
   revision: number;
+  draftRevisionId?: string | null;
   createdAt: string;
   updatedAt: string;
   createdBy: { id: string; fullName: string } | null;
@@ -127,6 +139,12 @@ type ArticleVersion = {
   reason: string;
   createdAt: string;
   actor: { fullName: string } | null;
+};
+type CmsArticleVersion = {
+  id: string;
+  versionNumber: number;
+  createdAt: string;
+  actorUserId: string | null;
 };
 type PendingSchedule = {
   id: string;
@@ -194,7 +212,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
       response.status,
     );
   }
-  return response.json();
+  const body = await response.text();
+  return parseApiBody<T>(body);
 }
 
 function slugify(value: string) {
@@ -253,7 +272,6 @@ export function ContentView({
   siteSlug,
   canEdit = true,
   canApprove = true,
-  canEditPublished = true,
   onCountChange,
   onDirtyChange,
   openArticleId,
@@ -281,11 +299,19 @@ export function ContentView({
   const [activity, setActivity] = useState<Activity[]>([]);
   const [contentEvents, setContentEvents] = useState<ContentEvent[]>([]);
   const [articleVersions, setArticleVersions] = useState<ArticleVersion[]>([]);
+  const [revisionCurrent, setRevisionCurrent] = useState<
+    ArticleRevisionCurrent | null | undefined
+  >(undefined);
+  const [cmsVersions, setCmsVersions] = useState<CmsArticleVersion[]>([]);
+  const [categoryRevisionCurrent, setCategoryRevisionCurrent] = useState<
+    ArticleRevisionCurrent | null | undefined
+  >(undefined);
+  const [categoryCmsVersions, setCategoryCmsVersions] = useState<
+    CmsArticleVersion[]
+  >([]);
   const [templates, setTemplates] = useState<ContentTemplate[]>([]);
   const [relatedIds, setRelatedIds] = useState<string[]>([]);
   const [pendingSchedule, setPendingSchedule] =
-    useState<PendingSchedule | null>(null);
-  const [categorySchedule, setCategorySchedule] =
     useState<PendingSchedule | null>(null);
   const [trash, setTrash] = useState<{
     articles: Article[];
@@ -344,6 +370,7 @@ export function ContentView({
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const autosaveArticleId = useRef<string | null>(null);
   const autosaveExpectedRevision = useRef<number | null>(null);
+  const ownSavedDraftRevisionId = useRef<string | undefined>(undefined);
   const autosavePersistedBody = useRef("");
   const autosavePendingBody = useRef<string | null>(null);
   const autosaveRun = useRef<Promise<void> | null>(null);
@@ -351,12 +378,52 @@ export function ContentView({
   const handledOpenRequest = useRef<number | undefined>(undefined);
   const handledCategoryOpenRequest = useRef<number | undefined>(undefined);
   const handledAuthorOpenRequest = useRef<number | undefined>(undefined);
-  const editorCanEdit =
-    canEdit &&
-    (editor === "new" ||
-      !editor ||
-      editor.publicationState !== "published" ||
-      canEditPublished);
+  const editorCanEdit = canEdit;
+  const articleRevisionLoading =
+    editor !== null &&
+    editor !== "new" &&
+    (editor.publicationState === "published" ||
+      editor.publicationState === "hidden") &&
+    revisionCurrent === undefined &&
+    !ownSavedDraftRevisionId.current;
+  const currentRevisionActions = revisionCurrent
+    ? revisionActions(revisionCurrent, { canEdit, canApprove })
+    : null;
+  const currentCategoryRevisionActions = categoryRevisionCurrent
+    ? revisionActions(categoryRevisionCurrent, { canEdit, canApprove })
+    : null;
+
+  const reloadRevision = useCallback(
+    async (articleId: string) => {
+      if (!siteId) return null;
+      const base = `/api/sites/${siteId}/content/articles/${articleId}/revisions`;
+      const current =
+        (await request<ArticleRevisionCurrent | null>(`${base}/current`)) ??
+        null;
+      const versions = current ? await request<CmsArticleVersion[]>(base) : [];
+      if (autosaveArticleId.current === articleId) {
+        setRevisionCurrent(current);
+        setCmsVersions(versions);
+      }
+      return current;
+    },
+    [siteId],
+  );
+
+  const reloadCategoryRevision = useCallback(
+    async (categoryId: string) => {
+      if (!siteId) return null;
+      const base = categoryRevisionApiBase(siteId, categoryId);
+      const current =
+        (await request<ArticleRevisionCurrent | null>(`${base}/current`)) ??
+        null;
+      const versions = current ? await request<CmsArticleVersion[]>(base) : [];
+      setCategoryRevisionCurrent(current);
+      setCategoryCmsVersions(versions);
+      return current;
+    },
+    [siteId],
+  );
 
   const drainAutosave = useCallback((): Promise<void> => {
     if (autosaveRun.current) return autosaveRun.current;
@@ -375,12 +442,15 @@ export function ContentView({
             bodyDocument: ArticleDocument;
             revision: number;
             updatedAt: string;
+            draftRevisionId?: string;
           }>(`/api/sites/${siteId}/content/articles/${articleId}/body`, {
             method: "PATCH",
             body: JSON.stringify({ bodyDocument, expectedRevision }),
           });
           autosavePersistedBody.current = serializedDocument;
           autosaveExpectedRevision.current = saved.revision;
+          if (saved.draftRevisionId)
+            ownSavedDraftRevisionId.current = saved.draftRevisionId;
           if (autosaveArticleId.current === articleId)
             setEditor((current) =>
               current && current !== "new" && current.id === articleId
@@ -393,6 +463,7 @@ export function ContentView({
                   }
                 : current,
             );
+          await reloadRevision(articleId);
         } catch (reason) {
           if (autosaveArticleId.current === articleId) {
             autosaveBlocked.current = true;
@@ -423,7 +494,7 @@ export function ContentView({
       autosaveRun.current = null;
     });
     return autosaveRun.current;
-  }, [siteId]);
+  }, [siteId, reloadRevision]);
 
   useEffect(() => {
     if (!editor || editor === "new" || !editorCanEdit) return;
@@ -465,6 +536,7 @@ export function ContentView({
       setTemplates(templateRows);
       setMessage("");
       onCountChange?.(articleRows.length);
+      return articleRows;
     } catch (reason) {
       setMessage(
         reason instanceof Error
@@ -529,6 +601,7 @@ export function ContentView({
       articleDocumentRef.current = document;
       autosaveArticleId.current = article.id;
       autosaveExpectedRevision.current = article.revision ?? 0;
+      ownSavedDraftRevisionId.current = undefined;
       autosavePersistedBody.current = JSON.stringify(document);
       autosavePendingBody.current = null;
       autosaveBlocked.current = false;
@@ -537,9 +610,18 @@ export function ContentView({
       setActivity([]);
       setContentEvents([]);
       setArticleVersions([]);
+      setRevisionCurrent(undefined);
+      setCmsVersions([]);
       setRelatedIds([]);
       setPendingSchedule(null);
       setArticleRedirects([]);
+      void reloadRevision(article.id).catch((reason) =>
+        setMessage(
+          reason instanceof Error
+            ? `Не удалось загрузить согласование: ${reason.message}`
+            : "Не удалось загрузить согласование",
+        ),
+      );
       void Promise.all([
         request<Activity[]>(
           `/api/sites/${siteId}/content/articles/${article.id}/activity`,
@@ -586,7 +668,7 @@ export function ContentView({
         );
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [articles, openArticleId, openRequestId, siteId]);
+  }, [articles, openArticleId, openRequestId, siteId, reloadRevision]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -845,8 +927,10 @@ export function ContentView({
   const selectedArticles = articles.filter((article) =>
     selectedIds.includes(article.id),
   );
+  const selectedUseLegacyWorkflow = legacyBulkAllowed(selectedArticles);
   const canSendSelectedToReview =
     canEdit &&
+    selectedUseLegacyWorkflow &&
     selectedArticles.length > 0 &&
     selectedArticles.every(
       (article) =>
@@ -855,10 +939,12 @@ export function ContentView({
     );
   const canApproveSelected =
     canApprove &&
+    selectedUseLegacyWorkflow &&
     selectedArticles.length > 0 &&
     selectedArticles.every((article) => article.editorialState === "review");
   const canPublishSelected =
     canApprove &&
+    selectedUseLegacyWorkflow &&
     selectedArticles.length > 0 &&
     selectedArticles.every(
       (article) =>
@@ -867,12 +953,14 @@ export function ContentView({
     );
   const canUnpublishSelected =
     canApprove &&
+    selectedUseLegacyWorkflow &&
     selectedArticles.length > 0 &&
     selectedArticles.every(
       (article) => article.publicationState === "published",
     );
   const canDeleteSelected =
     canEdit &&
+    selectedUseLegacyWorkflow &&
     selectedArticles.length > 0 &&
     selectedArticles.every(
       (article) => article.publicationState !== "published",
@@ -906,6 +994,12 @@ export function ContentView({
     confirmation: string,
   ) {
     if (!siteId || !selectedArticles.length) return;
+    if (!selectedUseLegacyWorkflow) {
+      setMessage(
+        "Для материалов с версиями откройте статью и выберите действие для точной редакции.",
+      );
+      return;
+    }
     if (!window.confirm(confirmation)) return;
     setBulkBusy(true);
     const failedIds: string[] = [];
@@ -1007,6 +1101,7 @@ export function ContentView({
     autosaveArticleId.current = article === "new" ? null : article.id;
     autosaveExpectedRevision.current =
       article === "new" ? null : (article.revision ?? 0);
+    ownSavedDraftRevisionId.current = undefined;
     autosavePersistedBody.current = JSON.stringify(document);
     autosavePendingBody.current = null;
     autosaveBlocked.current = false;
@@ -1015,10 +1110,19 @@ export function ContentView({
     setActivity([]);
     setContentEvents([]);
     setArticleVersions([]);
+    setRevisionCurrent(undefined);
+    setCmsVersions([]);
     setRelatedIds([]);
     setPendingSchedule(null);
     setArticleRedirects([]);
     if (article !== "new" && siteId) {
+      void reloadRevision(article.id).catch((reason) => {
+        setMessage(
+          reason instanceof Error
+            ? `Не удалось загрузить согласование: ${reason.message}`
+            : "Не удалось загрузить согласование",
+        );
+      });
       try {
         const [
           activityRows,
@@ -1093,6 +1197,7 @@ export function ContentView({
     setDirty(false);
     autosaveArticleId.current = null;
     autosaveExpectedRevision.current = null;
+    ownSavedDraftRevisionId.current = undefined;
     autosavePendingBody.current = null;
     setEditor(null);
     const url = new URL(window.location.href);
@@ -1286,17 +1391,109 @@ export function ContentView({
     }
   }
 
+  async function changeRevision(
+    action: "submit" | "approve" | "request-changes" | "publish",
+  ) {
+    if (!siteId || !editor || editor === "new") return;
+    if (dirty) {
+      setMessage("Сначала сохраните изменения параметров статьи.");
+      return;
+    }
+    let reason: string | undefined;
+    if (action === "request-changes") {
+      reason = window.prompt("Что нужно исправить в этой версии?")?.trim();
+      if (!reason) return;
+    }
+    if (
+      action === "publish" &&
+      !window.confirm(
+        "Опубликовать именно одобренную версию? Изменения станут видны посетителям сайта.",
+      )
+    )
+      return;
+    setStatusBusy(true);
+    try {
+      if (!(await flushAutosave())) {
+        setMessage("Не удалось сохранить текст. Действие не выполнено.");
+        return;
+      }
+      const visibleRevisionId =
+        ownSavedDraftRevisionId.current ?? revisionCurrent?.draft?.id;
+      const current = await request<ArticleRevisionCurrent | null>(
+        `/api/sites/${siteId}/content/articles/${editor.id}/revisions/current`,
+      );
+      if (current?.draft?.id !== visibleRevisionId) {
+        setMessage(
+          "Версия изменилась после открытия. Проверьте новую версию перед одобрением.",
+        );
+        return;
+      }
+      if (!current?.draft) {
+        setMessage("Актуальная версия не найдена. Обновите статью.");
+        return;
+      }
+      const available = revisionActions(current, { canEdit, canApprove });
+      const permission =
+        action === "request-changes" ? "requestChanges" : action;
+      if (!available[permission]) {
+        setMessage(
+          "Состояние версии изменилось. Обновите статью и проверьте действия.",
+        );
+        return;
+      }
+      await request<void>(
+        `/api/sites/${siteId}/content/articles/${editor.id}/revisions/${visibleRevisionId}/${action}`,
+        {
+          method: "POST",
+          ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+        },
+      );
+      await reloadRevision(editor.id);
+      await reloadActivity(editor.id);
+      const rows = await load();
+      if (action === "publish") {
+        const article = rows?.find((item) => item.id === editor.id);
+        if (article) setEditor(article);
+      }
+      setMessage(
+        action === "submit"
+          ? "Версия отправлена владельцу сайта на проверку"
+          : action === "approve"
+            ? "Версия одобрена. Теперь её можно опубликовать"
+            : action === "request-changes"
+              ? "Версия возвращена на доработку"
+              : "Одобренная версия опубликована",
+      );
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось изменить состояние версии",
+      );
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
   async function saveRelatedArticles() {
     if (!siteId || !editor || editor === "new") return;
     try {
-      await request(
+      const saved = await request<{ draftRevisionId: string }>(
         `/api/sites/${siteId}/content/articles/${editor.id}/related`,
         {
           method: "PATCH",
-          body: JSON.stringify({ articleIds: relatedIds }),
+          body: JSON.stringify({
+            articleIds: relatedIds,
+            expectedDraftRevisionId:
+              ownSavedDraftRevisionId.current ??
+              revisionCurrent?.draft?.id ??
+              null,
+          }),
         },
       );
+      ownSavedDraftRevisionId.current = saved.draftRevisionId;
       setMessage("Связанные материалы сохранены");
+      await reloadRevision(editor.id);
       await reloadActivity(editor.id);
     } catch (reason) {
       setMessage(
@@ -1328,6 +1525,52 @@ export function ContentView({
           ? reason.message
           : "Не удалось восстановить версию",
       );
+    }
+  }
+
+  async function restoreCmsVersion(version: CmsArticleVersion) {
+    if (!siteId || !editor || editor === "new" || !revisionCurrent) return;
+    if (dirty) {
+      setMessage("Сначала сохраните изменения параметров статьи.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Восстановить версию № ${version.versionNumber} как новый черновик?`,
+      )
+    )
+      return;
+    setStatusBusy(true);
+    try {
+      if (!(await flushAutosave())) {
+        setMessage("Не удалось сохранить текст. Восстановление отменено.");
+        return;
+      }
+      const current = await reloadRevision(editor.id);
+      if (!current) throw new Error("История версий недоступна");
+      await request(
+        `/api/sites/${siteId}/content/articles/${editor.id}/revisions/${version.id}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedDraftRevisionId: current.draft?.id ?? null,
+          }),
+        },
+      );
+      const rows = await load();
+      const article = rows?.find((item) => item.id === editor.id);
+      if (article) await openEditor(article, false);
+      setMessage(
+        `Версия № ${version.versionNumber} восстановлена как новый черновик`,
+      );
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить версию",
+      );
+    } finally {
+      setStatusBusy(false);
     }
   }
 
@@ -1412,6 +1655,7 @@ export function ContentView({
 
   async function saveArticle(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!siteId || !editor || !editorCanEdit) return;
     try {
       const isNew = editor === "new";
@@ -1421,7 +1665,25 @@ export function ContentView({
         );
         return;
       }
-      const payload = articlePayload(event.currentTarget);
+      const staged =
+        !isNew &&
+        (editor.publicationState === "published" ||
+          editor.publicationState === "hidden");
+      if (staged && revisionCurrent === undefined && !ownSavedDraftRevisionId.current) {
+        setMessage("Дождитесь загрузки актуальной версии материала.");
+        return;
+      }
+      const payload = {
+        ...articlePayload(form),
+        ...(staged
+          ? {
+              expectedDraftRevisionId:
+                ownSavedDraftRevisionId.current ??
+                revisionCurrent?.draft?.id ??
+                null,
+            }
+          : {}),
+      };
       const url = isNew
         ? `/api/sites/${siteId}/content/articles`
         : `/api/sites/${siteId}/content/articles/${editor.id}`;
@@ -1488,12 +1750,47 @@ export function ContentView({
         body: JSON.stringify(payload),
       });
       setCatalog(null);
-      setMessage("Автор добавлен");
+      setMessage("Автор создан как черновик");
       await load();
     } catch (reason) {
       setMessage(
         reason instanceof Error ? reason.message : "Не удалось сохранить",
       );
+    }
+  }
+
+  async function openCategorySettings(category: Category) {
+    if (!siteId) return;
+    setCategoryEditor(category);
+    setCategoryTab("parameters");
+    setNewCategoryParentId(null);
+    setCategoryRevisionCurrent(undefined);
+    setCategoryCmsVersions([]);
+    setCategoryBusy(true);
+    try {
+      const [, rows] = await Promise.all([
+        reloadCategoryRevision(category.id),
+        request<ContentEvent[]>(
+          `/api/sites/${siteId}/content/categories/${category.id}/events`,
+        ),
+      ]);
+      setCategoryActivity(
+        rows.map((row) => ({
+          id: row.id,
+          action: row.eventType,
+          message: row.reason,
+          createdAt: row.createdAt,
+          user: row.actor,
+        })),
+      );
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось открыть рубрику",
+      );
+    } finally {
+      setCategoryBusy(false);
     }
   }
 
@@ -1516,6 +1813,7 @@ export function ContentView({
       setMessage("Проверьте JSON структурированных данных рубрики");
       return;
     }
+    const categoryId = categoryEditor === "new" ? null : categoryEditor.id;
     const payload = {
       name: String(data.get("name") ?? ""),
       slug: String(data.get("slug") ?? ""),
@@ -1535,21 +1833,31 @@ export function ContentView({
       structuredData: categoryStructuredData,
       displayTemplateKey,
       displayTemplateVersion,
+      ...(categoryId
+        ? {
+            expectedDraftRevisionId:
+              categoryRevisionCurrent?.draft?.id ?? null,
+          }
+        : {}),
     };
     setCategoryBusy(true);
     try {
-      const categoryId = categoryEditor === "new" ? null : categoryEditor.id;
-      await request(
+      const saved = await request<Category>(
         `/api/sites/${siteId}/content/categories${categoryId ? `/${categoryId}` : ""}`,
         {
           method: categoryId ? "PATCH" : "POST",
           body: JSON.stringify(payload),
         },
       );
-      setCategoryEditor(null);
+      setCategoryEditor(saved);
       setNewCategoryParentId(null);
-      setMessage(categoryId ? "Рубрика обновлена" : "Рубрика добавлена");
+      setMessage(
+        categoryId
+          ? "Новая версия рубрики сохранена"
+          : "Рубрика создана как черновик",
+      );
       await load();
+      await reloadCategoryRevision(saved.id);
     } catch (reason) {
       setMessage(
         reason instanceof Error
@@ -1561,87 +1869,128 @@ export function ContentView({
     }
   }
 
-  async function deleteCategory(category: Category) {
-    if (!siteId) return;
-    const summary = await request<{
-      articleCount: number;
-      childCount: number;
-      publishedArticleCount: number;
-    }>(`/api/sites/${siteId}/content/categories/${category.id}/delete-summary`);
+  async function changeCategoryRevision(
+    action: "submit" | "approve" | "request-changes" | "publish",
+  ) {
     if (
+      !siteId ||
+      !categoryEditor ||
+      categoryEditor === "new" ||
+      !categoryRevisionCurrent
+    )
+      return;
+    let reason: string | undefined;
+    if (action === "request-changes") {
+      reason = window.prompt("Что нужно исправить в этой версии?")?.trim();
+      if (!reason) return;
+    }
+    if (
+      action === "publish" &&
       !window.confirm(
-        `Переместить ветку «${category.name}» в корзину? Будут скрыты ${summary.articleCount} материалов (${summary.publishedArticleCount} опубликовано) и ${summary.childCount} дочерних рубрик. Ветку можно восстановить.`,
+        "Опубликовать именно одобренную версию рубрики? Изменения станут видны посетителям сайта.",
       )
     )
       return;
     setCategoryBusy(true);
     try {
-      await request(`/api/sites/${siteId}/content/categories/${category.id}`, {
-        method: "DELETE",
-      });
-      if (selectedCategoryId === category.id) openCategory(null);
-      setCategoryEditor(null);
-      setMessage("Ветка рубрики перемещена в корзину");
+      const openedRevisionId = categoryRevisionCurrent.draft?.id;
+      const base = categoryRevisionApiBase(siteId, categoryEditor.id);
+      const latest =
+        (await request<ArticleRevisionCurrent | null>(`${base}/current`)) ??
+        null;
+      if (!openedRevisionId || latest?.draft?.id !== openedRevisionId) {
+        setMessage(
+          "Версия рубрики изменилась после открытия. Проверьте новую версию перед действием.",
+        );
+        return;
+      }
+      const available = revisionActions(latest, { canEdit, canApprove });
+      const permission =
+        action === "request-changes" ? "requestChanges" : action;
+      if (!available[permission]) {
+        setMessage(
+          "Состояние версии изменилось. Обновите рубрику и проверьте действия.",
+        );
+        return;
+      }
+      const updated = await request<Category | void>(
+        `${base}/${encodeURIComponent(openedRevisionId)}/${action}`,
+        {
+          method: "POST",
+          ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+        },
+      );
+      if (action === "publish" && updated) setCategoryEditor(updated);
+      await reloadCategoryRevision(categoryEditor.id);
       await load();
-    } catch (reason) {
       setMessage(
-        reason instanceof Error ? reason.message : "Не удалось удалить рубрику",
+        action === "submit"
+          ? "Версия рубрики отправлена владельцу сайта на проверку"
+          : action === "approve"
+            ? "Версия рубрики одобрена. Теперь её можно опубликовать"
+            : action === "request-changes"
+              ? "Версия рубрики возвращена на доработку"
+              : "Одобренная версия рубрики опубликована",
       );
-    } finally {
-      setCategoryBusy(false);
-    }
-  }
-
-  async function changeCategoryPublication(state: PublicationState) {
-    if (!siteId || !categoryEditor || categoryEditor === "new") return;
-    setCategoryBusy(true);
-    try {
-      const updated = await request<Category>(
-        `/api/sites/${siteId}/content/categories/${categoryEditor.id}/publication`,
-        { method: "POST", body: JSON.stringify({ state }) },
-      );
-      setCategoryEditor(updated);
-      setMessage(`Статус рубрики: ${publicationNames[state]}`);
-      await load();
     } catch (reason) {
       setMessage(
         reason instanceof Error
           ? reason.message
-          : "Не удалось изменить публикацию",
+          : "Не удалось изменить состояние версии рубрики",
       );
     } finally {
       setCategoryBusy(false);
     }
   }
 
-  async function scheduleCategory(form: HTMLFormElement) {
-    if (!siteId || !categoryEditor || categoryEditor === "new") return;
-    const data = new FormData(form);
-    const executeAt = String(data.get("categoryScheduleAt") ?? "");
-    const state = String(data.get("categoryScheduleState") ?? "published");
-    if (!executeAt) return setMessage("Укажите дату и время перехода");
-    const saved = await request<PendingSchedule>(
-      `/api/sites/${siteId}/content/categories/${categoryEditor.id}/schedule`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          state,
-          executeAt: new Date(executeAt).toISOString(),
-        }),
-      },
-    );
-    setCategorySchedule(saved);
-    setMessage("Переход рубрики запланирован");
-  }
-
-  async function cancelCategorySchedule() {
-    if (!siteId || !categoryEditor || categoryEditor === "new") return;
-    await request(
-      `/api/sites/${siteId}/content/categories/${categoryEditor.id}/schedule`,
-      { method: "DELETE" },
-    );
-    setCategorySchedule(null);
-    setMessage("Запланированный переход рубрики отменён");
+  async function restoreCategoryRevision(version: CmsArticleVersion) {
+    if (
+      !siteId ||
+      !categoryEditor ||
+      categoryEditor === "new" ||
+      !categoryRevisionCurrent?.draft
+    )
+      return;
+    if (
+      !window.confirm(
+        `Восстановить версию ${version.versionNumber} как новый черновик?`,
+      )
+    )
+      return;
+    setCategoryBusy(true);
+    try {
+      const base = categoryRevisionApiBase(siteId, categoryEditor.id);
+      await request(
+        `${base}/${encodeURIComponent(version.id)}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedDraftRevisionId: categoryRevisionCurrent.draft.id,
+          }),
+        },
+      );
+      const current = await reloadCategoryRevision(categoryEditor.id);
+      if (current?.draft)
+        setCategoryEditor((opened) =>
+          opened && opened !== "new"
+            ? {
+                ...opened,
+                ...current.draft!.snapshot,
+                draftRevisionId: current.draft!.id,
+              }
+            : opened,
+        );
+      await load();
+      setMessage("Выбранная версия восстановлена как новый черновик");
+    } catch (reason) {
+      setMessage(
+        reason instanceof Error
+          ? reason.message
+          : "Не удалось восстановить версию рубрики",
+      );
+    } finally {
+      setCategoryBusy(false);
+    }
   }
 
   async function duplicateArticle() {
@@ -1658,22 +2007,6 @@ export function ContentView({
     await load();
     await openEditor(duplicate);
     setMessage("Копия статьи создана как черновик");
-  }
-
-  async function duplicateCategory() {
-    if (!siteId || !categoryEditor || categoryEditor === "new") return;
-    const duplicate = await request<Category>(
-      `/api/sites/${siteId}/content/categories/${categoryEditor.id}/duplicate`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          slug: `${categoryEditor.slug.slice(0, 70)}-copy-${Date.now().toString(36)}`,
-        }),
-      },
-    );
-    await load();
-    setCategoryEditor(duplicate);
-    setMessage("Копия рубрики создана как черновик");
   }
 
   async function openTrash() {
@@ -1896,6 +2229,11 @@ export function ContentView({
                 <span>
                   Выбрано материалов: <strong>{selectedIds.length}</strong>
                 </span>
+                {!selectedUseLegacyWorkflow ? (
+                  <small>
+                    Для статьи с версиями действия доступны в её редакторе.
+                  </small>
+                ) : null}
                 <div className="selection-actions">
                   {canEdit ? (
                     <button
@@ -2135,29 +2473,7 @@ export function ContentView({
                         onClick={() => {
                           const category = categoryById.get(selectedCategoryId);
                           if (!category) return;
-                          setCategoryEditor(category);
-                          setCategoryTab("parameters");
-                          setNewCategoryParentId(null);
-                          if (siteId)
-                            void Promise.all([
-                              request<ContentEvent[]>(
-                                `/api/sites/${siteId}/content/categories/${category.id}/events`,
-                              ),
-                              request<PendingSchedule | null>(
-                                `/api/sites/${siteId}/content/categories/${category.id}/schedule`,
-                              ),
-                            ]).then(([rows, schedule]) => {
-                              setCategoryActivity(
-                                rows.map((row) => ({
-                                  id: row.id,
-                                  action: row.eventType,
-                                  message: row.reason,
-                                  createdAt: row.createdAt,
-                                  user: row.actor,
-                                })),
-                              );
-                              setCategorySchedule(schedule);
-                            });
+                          void openCategorySettings(category);
                         }}
                       >
                         Настроить категорию
@@ -2348,7 +2664,16 @@ export function ContentView({
               </button>
             ))}
           </nav>
-          <form
+          {categoryEditor !== "new" &&
+          categoryRevisionCurrent === undefined ? (
+            <p role="status">Загружаем актуальную версию рубрики…</p>
+          ) : (
+            <form
+            key={
+              categoryEditor === "new"
+                ? "new-category"
+                : `${categoryEditor.id}-${categoryRevisionCurrent?.draft?.id ?? "base"}`
+            }
             className="directory-form category-settings-form"
             onSubmit={saveCategory}
           >
@@ -2443,72 +2768,55 @@ export function ContentView({
                     Публикация:{" "}
                     {publicationNames[categoryEditor.publicationState]}
                   </strong>
+                  <p className="publication-hint">
+                    {categoryRevisionCurrent === undefined
+                      ? "Загружаем состояние версии рубрики…"
+                      : categoryRevisionCurrent?.draft
+                        ? `Черновик №${categoryRevisionCurrent.draft.versionNumber} · ${categoryRevisionCurrent.reviewState}. Публичная рубрика не меняется до выпуска одобренной версии.`
+                        : "Сохраните рубрику, чтобы создать первую версию для согласования."}
+                  </p>
                   <div className="workflow-actions">
-                    {(
-                      [
-                        "draft",
-                        "published",
-                        "hidden",
-                        "disabled",
-                        "archive",
-                      ] as PublicationState[]
-                    ).map((state) => (
+                    {currentCategoryRevisionActions?.submit ? (
                       <button
-                        key={state}
                         type="button"
-                        disabled={
-                          categoryBusy ||
-                          state === categoryEditor.publicationState
-                        }
-                        onClick={() => void changeCategoryPublication(state)}
+                        disabled={categoryBusy}
+                        onClick={() => void changeCategoryRevision("submit")}
                       >
-                        {publicationNames[state]}
+                        Отправить владельцу на проверку
                       </button>
-                    ))}
-                  </div>
-                  <div className="editor-grid publication-settings">
-                    {categorySchedule ? (
-                      <div className="cms-preview-action">
-                        <span>
-                          {
-                            publicationNames[
-                              categorySchedule.targetPublicationState
-                            ]
-                          }{" "}
-                          ·{" "}
-                          {new Intl.DateTimeFormat("ru", {
-                            dateStyle: "medium",
-                            timeStyle: "short",
-                          }).format(new Date(categorySchedule.executeAt))}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => void cancelCategorySchedule()}
-                        >
-                          Отменить
-                        </button>
-                      </div>
                     ) : null}
-                    <input type="datetime-local" name="categoryScheduleAt" />
-                    <select
-                      name="categoryScheduleState"
-                      defaultValue="published"
-                    >
-                      <option value="published">Опубликовать</option>
-                      <option value="hidden">Скрыть</option>
-                      <option value="disabled">Отключить</option>
-                      <option value="archive">В архив</option>
-                      <option value="draft">В черновик</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={(event) =>
-                        event.currentTarget.form &&
-                        void scheduleCategory(event.currentTarget.form)
-                      }
-                    >
-                      Запланировать
-                    </button>
+                    {currentCategoryRevisionActions?.requestChanges ? (
+                      <button
+                        type="button"
+                        className="changes"
+                        disabled={categoryBusy}
+                        onClick={() =>
+                          void changeCategoryRevision("request-changes")
+                        }
+                      >
+                        Вернуть на доработку
+                      </button>
+                    ) : null}
+                    {currentCategoryRevisionActions?.approve ? (
+                      <button
+                        type="button"
+                        className="publish"
+                        disabled={categoryBusy}
+                        onClick={() => void changeCategoryRevision("approve")}
+                      >
+                        Одобрить версию
+                      </button>
+                    ) : null}
+                    {currentCategoryRevisionActions?.publish ? (
+                      <button
+                        type="button"
+                        className="publish"
+                        disabled={categoryBusy}
+                        onClick={() => void changeCategoryRevision("publish")}
+                      >
+                        Опубликовать одобренную версию
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ) : (
@@ -2583,13 +2891,22 @@ export function ContentView({
                     ))}
                 </select>
               </label>
-              {categoryEditor !== "new" && siteId && siteSlug ? (
+              {categoryEditor !== "new" &&
+              categoryRevisionCurrent?.draft &&
+              siteId &&
+              siteSlug ? (
                 <a
-                  href={`/preview/${siteSlug}/categories/${categoryEditor.slug}?cmsSiteId=${siteId}&cmsCategoryId=${categoryEditor.id}`}
+                  href={categoryRevisionPreviewPath({
+                    siteSlug,
+                    siteId,
+                    categoryId: categoryEditor.id,
+                    categorySlug: categoryEditor.slug,
+                    revisionId: categoryRevisionCurrent.draft.id,
+                  })}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Предпросмотр рубрики ↗
+                  Посмотреть выбранную версию ↗
                 </a>
               ) : null}
             </div>
@@ -2710,18 +3027,6 @@ export function ContentView({
                     categoryEditor.redirects.map((redirect) => (
                       <div key={redirect.id}>
                         <code>/categories/{redirect.fromSlug}</code>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            siteId &&
-                            void request(
-                              `/api/sites/${siteId}/content/categories/${categoryEditor.id}/redirects/${redirect.id}`,
-                              { method: "DELETE" },
-                            ).then(load)
-                          }
-                        >
-                          Удалить
-                        </button>
                       </div>
                     ))
                   ) : (
@@ -2756,6 +3061,31 @@ export function ContentView({
                     }).format(new Date(categoryEditor.updatedAt))}
                   </p>
                   <div className="activity-list">
+                    {categoryCmsVersions.map((version) => (
+                      <article key={version.id}>
+                        <div>
+                          <strong>Версия №{version.versionNumber}</strong>
+                          <small>
+                            {new Intl.DateTimeFormat("ru", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(new Date(version.createdAt))}
+                          </small>
+                        </div>
+                        {canEdit &&
+                        version.id !== categoryRevisionCurrent?.draft?.id ? (
+                          <button
+                            type="button"
+                            disabled={categoryBusy}
+                            onClick={() =>
+                              void restoreCategoryRevision(version)
+                            }
+                          >
+                            Восстановить как черновик
+                          </button>
+                        ) : null}
+                      </article>
+                    ))}
                     {categoryActivity.map((item) => (
                       <article key={item.id}>
                         <div>
@@ -2778,23 +3108,10 @@ export function ContentView({
             </div>
             <div className="directory-form-actions">
               {categoryEditor !== "new" ? (
-                <>
-                  <button
-                    type="button"
-                    disabled={categoryBusy}
-                    onClick={() => void duplicateCategory()}
-                  >
-                    Создать копию
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
-                    disabled={categoryBusy}
-                    onClick={() => void deleteCategory(categoryEditor)}
-                  >
-                    В корзину
-                  </button>
-                </>
+                <small>
+                  Копирование и удаление рубрики недоступны, пока она управляется
+                  через версии.
+                </small>
               ) : null}
               <button disabled={categoryBusy}>
                 {categoryBusy ? "Сохраняем…" : "Сохранить"}
@@ -2810,7 +3127,8 @@ export function ContentView({
                 Отмена
               </button>
             </div>
-          </form>
+            </form>
+          )}
         </section>
       ) : null}
 
@@ -2833,7 +3151,10 @@ export function ContentView({
               </div>
               <button onClick={closeEditor}>×</button>
             </header>
-            <form
+            {articleRevisionLoading ? (
+              <p role="status">Загружаем актуальную версию материала…</p>
+            ) : (
+              <form
               onSubmit={saveArticle}
               onChange={(event) => {
                 if (
@@ -3345,18 +3666,46 @@ export function ContentView({
                       <small>Меньшее число показывается раньше.</small>
                     </label>
                   </div>
-                  <header>
-                    <span>
-                      Редакция:{" "}
-                      <strong>{editorialNames[editor.editorialState]}</strong>
-                    </span>
-                    <span>
-                      Публикация:{" "}
-                      <strong>
-                        {publicationNames[editor.publicationState]}
-                      </strong>
-                    </span>
-                  </header>
+                  {revisionCurrent ? (
+                    <header>
+                      <span>
+                        Текущая версия:{" "}
+                        <strong>
+                          № {revisionCurrent.draft?.versionNumber ?? "—"}
+                        </strong>
+                      </span>
+                      <span>
+                        Проверка:{" "}
+                        <strong>
+                          {revisionCurrent.reviewState === "in_review"
+                            ? "У владельца сайта"
+                            : revisionCurrent.reviewState ===
+                                "changes_requested"
+                              ? "Возвращена на доработку"
+                              : revisionCurrent.reviewState === "approved"
+                                ? "Одобрена"
+                                : "Черновик"}
+                        </strong>
+                      </span>
+                    </header>
+                  ) : revisionCurrent === null ? (
+                    <header>
+                      <span>
+                        Редакция:{" "}
+                        <strong>{editorialNames[editor.editorialState]}</strong>
+                      </span>
+                      <span>
+                        Публикация:{" "}
+                        <strong>
+                          {publicationNames[editor.publicationState]}
+                        </strong>
+                      </span>
+                    </header>
+                  ) : (
+                    <p className="publication-hint">
+                      Загружаем состояние согласования…
+                    </p>
+                  )}
                   {editor.publicationState === "published" &&
                   editor.publishedAt ? (
                     <div className="publication-meta">
@@ -3398,7 +3747,27 @@ export function ContentView({
                         : "Доступные действия зависят от вашей роли в рабочем пространстве."}
                     </p>
                   )}
-                  {pendingSchedule ? (
+                  {revisionCurrent?.draft &&
+                  revisionCurrent.draft.id !==
+                    revisionCurrent.publishedRevisionId &&
+                  siteId &&
+                  siteSlug &&
+                  editor.publicationState === "published" ? (
+                    <div className="cms-preview-action">
+                      <span>
+                        Черновик № {revisionCurrent.draft.versionNumber} ещё не
+                        виден посетителям
+                      </span>
+                      <a
+                        href={`/preview/${siteSlug}/articles/${editor.slug}?cmsSiteId=${siteId}&cmsArticleId=${editor.id}&cmsRevisionId=${revisionCurrent.draft.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Посмотреть черновик ↗
+                      </a>
+                    </div>
+                  ) : null}
+                  {revisionCurrent === null && pendingSchedule ? (
                     <div className="cms-preview-action">
                       <span>
                         Запланировано:{" "}
@@ -3421,126 +3790,128 @@ export function ContentView({
                       </button>
                     </div>
                   ) : null}
-                  <div className="editor-grid publication-settings">
-                    <label>
-                      Запланировать переход
-                      <input type="datetime-local" name="scheduleAt" />
-                    </label>
-                    <label>
-                      Состояние
-                      <select name="scheduleState" defaultValue="published">
-                        <option value="published">Опубликовать</option>
-                        <option value="hidden">Скрыть из списков</option>
-                        <option value="disabled">Отключить</option>
-                        <option value="archive">В архив</option>
-                        <option value="draft">В черновик</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={(event) =>
-                        event.currentTarget.form &&
-                        void scheduleArticle(event.currentTarget.form)
-                      }
-                    >
-                      Запланировать
-                    </button>
-                  </div>
-                  <div className="workflow-actions">
-                    {canEdit &&
-                    (editor.editorialState === "draft" ||
-                      editor.editorialState === "changes") ? (
+                  {revisionCurrent === null ? (
+                    <div className="editor-grid publication-settings">
+                      <label>
+                        Запланировать переход
+                        <input type="datetime-local" name="scheduleAt" />
+                      </label>
+                      <label>
+                        Состояние
+                        <select name="scheduleState" defaultValue="published">
+                          <option value="published">Опубликовать</option>
+                          <option value="hidden">Скрыть из списков</option>
+                          <option value="disabled">Отключить</option>
+                          <option value="archive">В архив</option>
+                          <option value="draft">В черновик</option>
+                        </select>
+                      </label>
                       <button
-                        disabled={statusBusy}
                         type="button"
                         onClick={(event) =>
-                          void changeStatus("review", event.currentTarget.form)
+                          event.currentTarget.form &&
+                          void scheduleArticle(event.currentTarget.form)
                         }
                       >
-                        Отправить на согласование
+                        Запланировать
                       </button>
-                    ) : null}
-                    {canApprove && editor.editorialState === "review" ? (
-                      <>
+                    </div>
+                  ) : null}
+                  {revisionCurrent ? (
+                    <div className="workflow-actions">
+                      {currentRevisionActions?.submit ? (
                         <button
-                          disabled={statusBusy}
+                          type="button"
+                          disabled={statusBusy || dirty}
+                          onClick={() => void changeRevision("submit")}
+                        >
+                          Отправить владельцу на проверку
+                        </button>
+                      ) : null}
+                      {currentRevisionActions?.requestChanges ? (
+                        <button
                           type="button"
                           className="changes"
-                          onClick={(event) =>
-                            void changeStatus(
-                              "changes_requested",
-                              event.currentTarget.form,
-                            )
-                          }
+                          disabled={statusBusy || dirty}
+                          onClick={() => void changeRevision("request-changes")}
                         >
-                          Нужны правки
+                          Вернуть на доработку
                         </button>
+                      ) : null}
+                      {currentRevisionActions?.approve ? (
                         <button
-                          disabled={statusBusy}
                           type="button"
                           className="publish"
-                          onClick={(event) =>
-                            void approveEditorial(event.currentTarget.form)
-                          }
+                          disabled={statusBusy || dirty}
+                          onClick={() => void changeRevision("approve")}
                         >
-                          {statusBusy ? "Одобряем…" : "Одобрить"}
+                          Одобрить версию
                         </button>
-                      </>
-                    ) : null}
-                    {canApprove &&
-                    editor.editorialState === "approved" &&
-                    editor.publicationState !== "published" ? (
-                      <button
-                        disabled={statusBusy}
-                        type="button"
-                        className="publish"
-                        onClick={(event) =>
-                          void changeStatus(
-                            "published",
-                            event.currentTarget.form,
-                          )
-                        }
-                      >
-                        Опубликовать
-                      </button>
-                    ) : null}
-                    {canApprove && editor.publicationState === "published" ? (
-                      <>
+                      ) : null}
+                      {currentRevisionActions?.publish ? (
                         <button
-                          disabled={statusBusy}
                           type="button"
-                          className="changes"
-                          onClick={(event) =>
-                            void changeStatus("draft", event.currentTarget.form)
-                          }
+                          className="publish"
+                          disabled={statusBusy || dirty}
+                          onClick={() => void changeRevision("publish")}
                         >
-                          Снять с публикации
+                          Опубликовать одобренную версию
                         </button>
+                      ) : null}
+                      {dirty ? (
+                        <small>
+                          Сначала сохраните изменения параметров статьи.
+                        </small>
+                      ) : null}
+                    </div>
+                  ) : revisionCurrent === null ? (
+                    <div className="workflow-actions">
+                      {canEdit &&
+                      (editor.editorialState === "draft" ||
+                        editor.editorialState === "changes") ? (
                         <button
                           disabled={statusBusy}
                           type="button"
                           onClick={(event) =>
                             void changeStatus(
-                              "hidden",
+                              "review",
                               event.currentTarget.form,
                             )
                           }
                         >
-                          Скрыть
+                          Отправить на согласование
                         </button>
-                      </>
-                    ) : null}
-                    {canApprove && editor.publicationState === "hidden" ? (
-                      <>
-                        <button
-                          disabled={statusBusy}
-                          type="button"
-                          onClick={(event) =>
-                            void changeStatus("draft", event.currentTarget.form)
-                          }
-                        >
-                          В черновик
-                        </button>
+                      ) : null}
+                      {canApprove && editor.editorialState === "review" ? (
+                        <>
+                          <button
+                            disabled={statusBusy}
+                            type="button"
+                            className="changes"
+                            onClick={(event) =>
+                              void changeStatus(
+                                "changes_requested",
+                                event.currentTarget.form,
+                              )
+                            }
+                          >
+                            Нужны правки
+                          </button>
+                          <button
+                            disabled={statusBusy}
+                            type="button"
+                            className="publish"
+                            onClick={(event) =>
+                              void approveEditorial(event.currentTarget.form)
+                            }
+                          >
+                            {statusBusy ? "Одобряем…" : "Одобрить"}
+                          </button>
+                        </>
+                      ) : null}
+                      {canApprove &&
+                      editor.editorialState === "approved" &&
+                      editor.publicationState !== "published" ? (
                         <button
                           disabled={statusBusy}
                           type="button"
@@ -3552,61 +3923,119 @@ export function ContentView({
                             )
                           }
                         >
-                          Опубликовать снова
+                          Опубликовать
                         </button>
-                      </>
-                    ) : null}
-                    {canApprove && editor.publicationState !== "disabled" ? (
-                      <button
-                        disabled={statusBusy}
-                        type="button"
-                        onClick={() =>
-                          siteId &&
-                          request<Article>(
-                            `/api/sites/${siteId}/content/articles/${editor.id}/publication`,
-                            {
-                              method: "POST",
-                              body: JSON.stringify({ state: "disabled" }),
-                            },
-                          ).then((updated) => {
-                            setEditor((current) =>
-                              current && current !== "new"
-                                ? { ...current, ...updated }
-                                : current,
-                            );
-                            void load();
-                          })
-                        }
-                      >
-                        Отключить
-                      </button>
-                    ) : null}
-                    {canApprove && editor.publicationState !== "archive" ? (
-                      <button
-                        disabled={statusBusy}
-                        type="button"
-                        onClick={() =>
-                          siteId &&
-                          request<Article>(
-                            `/api/sites/${siteId}/content/articles/${editor.id}/publication`,
-                            {
-                              method: "POST",
-                              body: JSON.stringify({ state: "archive" }),
-                            },
-                          ).then((updated) => {
-                            setEditor((current) =>
-                              current && current !== "new"
-                                ? { ...current, ...updated }
-                                : current,
-                            );
-                            void load();
-                          })
-                        }
-                      >
-                        В архив
-                      </button>
-                    ) : null}
-                  </div>
+                      ) : null}
+                      {canApprove && editor.publicationState === "published" ? (
+                        <>
+                          <button
+                            disabled={statusBusy}
+                            type="button"
+                            className="changes"
+                            onClick={(event) =>
+                              void changeStatus(
+                                "draft",
+                                event.currentTarget.form,
+                              )
+                            }
+                          >
+                            Снять с публикации
+                          </button>
+                          <button
+                            disabled={statusBusy}
+                            type="button"
+                            onClick={(event) =>
+                              void changeStatus(
+                                "hidden",
+                                event.currentTarget.form,
+                              )
+                            }
+                          >
+                            Скрыть
+                          </button>
+                        </>
+                      ) : null}
+                      {canApprove && editor.publicationState === "hidden" ? (
+                        <>
+                          <button
+                            disabled={statusBusy}
+                            type="button"
+                            onClick={(event) =>
+                              void changeStatus(
+                                "draft",
+                                event.currentTarget.form,
+                              )
+                            }
+                          >
+                            В черновик
+                          </button>
+                          <button
+                            disabled={statusBusy}
+                            type="button"
+                            className="publish"
+                            onClick={(event) =>
+                              void changeStatus(
+                                "published",
+                                event.currentTarget.form,
+                              )
+                            }
+                          >
+                            Опубликовать снова
+                          </button>
+                        </>
+                      ) : null}
+                      {canApprove && editor.publicationState !== "disabled" ? (
+                        <button
+                          disabled={statusBusy}
+                          type="button"
+                          onClick={() =>
+                            siteId &&
+                            request<Article>(
+                              `/api/sites/${siteId}/content/articles/${editor.id}/publication`,
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ state: "disabled" }),
+                              },
+                            ).then((updated) => {
+                              setEditor((current) =>
+                                current && current !== "new"
+                                  ? { ...current, ...updated }
+                                  : current,
+                              );
+                              void load();
+                            })
+                          }
+                        >
+                          Отключить
+                        </button>
+                      ) : null}
+                      {canApprove && editor.publicationState !== "archive" ? (
+                        <button
+                          disabled={statusBusy}
+                          type="button"
+                          onClick={() =>
+                            siteId &&
+                            request<Article>(
+                              `/api/sites/${siteId}/content/articles/${editor.id}/publication`,
+                              {
+                                method: "POST",
+                                body: JSON.stringify({ state: "archive" }),
+                              },
+                            ).then((updated) => {
+                              setEditor((current) =>
+                                current && current !== "new"
+                                  ? { ...current, ...updated }
+                                  : current,
+                              );
+                              void load();
+                            })
+                          }
+                        >
+                          В архив
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </section>
               )}
               {editor !== "new" ? (
@@ -3628,7 +4057,49 @@ export function ContentView({
                       timeStyle: "short",
                     }).format(new Date(editor.updatedAt))}
                   </p>
-                  <h4>Версии</h4>
+                  {revisionCurrent ? (
+                    <>
+                      <h4>Версии CMS</h4>
+                      <div className="activity-list">
+                        {cmsVersions.map((version) => (
+                          <article key={version.id}>
+                            <div>
+                              <strong>Версия № {version.versionNumber}</strong>
+                              <small>
+                                {new Intl.DateTimeFormat("ru", {
+                                  dateStyle: "medium",
+                                  timeStyle: "short",
+                                }).format(new Date(version.createdAt))}
+                                {version.id ===
+                                revisionCurrent.publishedRevisionId
+                                  ? " · опубликована"
+                                  : ""}
+                                {version.id === revisionCurrent.draft?.id
+                                  ? " · текущий черновик"
+                                  : ""}
+                              </small>
+                              {editorCanEdit ? (
+                                <div className="workflow-actions">
+                                  <button
+                                    type="button"
+                                    disabled={statusBusy || dirty}
+                                    onClick={() =>
+                                      void restoreCmsVersion(version)
+                                    }
+                                  >
+                                    Восстановить как новый черновик
+                                  </button>
+                                </div>
+                              ) : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                  <h4>
+                    {revisionCurrent ? "Прежняя история статьи" : "Версии"}
+                  </h4>
                   <div className="activity-list">
                     {articleVersions.map((version) => (
                       <article key={version.id}>
@@ -3642,7 +4113,7 @@ export function ContentView({
                             }).format(new Date(version.createdAt))}
                           </small>
                           <p>{version.reason}</p>
-                          {editorCanEdit ? (
+                          {editorCanEdit && revisionCurrent === null ? (
                             <div className="workflow-actions">
                               <button
                                 type="button"
@@ -3733,6 +4204,7 @@ export function ContentView({
                 ) : null}
                 {editor !== "new" &&
                 canEdit &&
+                revisionCurrent === null &&
                 editor.publicationState !== "published" ? (
                   <>
                     <button
@@ -3767,7 +4239,8 @@ export function ContentView({
                   </button>
                 ) : null}
               </footer>
-            </form>
+              </form>
+            )}
           </aside>
         </div>
       ) : null}

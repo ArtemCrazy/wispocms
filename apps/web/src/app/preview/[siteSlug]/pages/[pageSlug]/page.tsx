@@ -120,6 +120,7 @@ type PublicInnerPageProps = {
   searchParams: Promise<{
     cmsSiteId?: string | string[];
     cmsPageId?: string | string[];
+    cmsRevisionId?: string | string[];
   }>;
 };
 
@@ -183,10 +184,13 @@ export default async function PublicInnerPage({
   const query = await searchParams;
   const siteId = queryValue(query.cmsSiteId);
   const pageId = queryValue(query.cmsPageId);
-  const cmsPreview = siteId && pageId ? { siteId, pageId } : null;
+  const revisionId = queryValue(query.cmsRevisionId);
+  const cmsPreview = siteId && pageId ? { siteId, pageId, revisionId } : null;
   const result = cmsPreview
     ? await loadPublicData<PublicPageData>(
-        `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/pages/${encodeURIComponent(cmsPreview.pageId)}/preview`,
+        cmsPreview.revisionId
+          ? `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/pages/${encodeURIComponent(cmsPreview.pageId)}/revisions/${encodeURIComponent(cmsPreview.revisionId)}/preview`
+          : `/api/sites/${encodeURIComponent(cmsPreview.siteId)}/content/pages/${encodeURIComponent(cmsPreview.pageId)}/preview`,
         (await cookies()).toString(),
       )
     : await loadPage(siteSlug, pageSlug);

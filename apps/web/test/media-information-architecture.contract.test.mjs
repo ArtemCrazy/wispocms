@@ -114,7 +114,7 @@ test("Media Home owns exactly banner assignments, SEO, and page history", () => 
 });
 
 test("Media libraries expose universal autosaved banners, protected variables, and search contract", () => {
-  assert.match(bannerLibrary, /Автосохранение включено/);
+  assert.match(bannerLibrary, /Автосохранение черновика включено/);
   assert.doesNotMatch(bannerLibrary, /name="placement"/);
   assert.match(bannerLibrary, /mobileMediaId/);
   assert.match(bannerLibrary, /buttonText/);
@@ -127,7 +127,9 @@ test("Media libraries expose universal autosaved banners, protected variables, a
   assert.match(variables, /\{\{\$\{item\.identifier\}\}\}/);
   assert.match(layout, /\["search", "Поиск"\]/);
   assert.match(layout, /analyticsAvailable/);
-  assert.match(layout, /recommendations\/confirm/);
+  assert.match(layout, /content\/versioned\/search/);
+  assert.match(layout, /recommendedQueries: settings\.recommendedQueries\.filter/);
+  assert.doesNotMatch(layout, /recommendations\/confirm/);
 });
 
 test("Articles owns its inline template and Content preserves the nested URL", () => {

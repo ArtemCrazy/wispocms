@@ -138,6 +138,24 @@ describe('PrivacyService', () => {
     expect(result.document).toBe('ручная версия');
   });
 
+  it('keeps edited company details in the privacy draft instead of public site globals', async () => {
+    const original = setup();
+    const publicGlobals = structuredClone(original.site.globalData);
+
+    const result = await original.service.updateCompany(
+      'site-1',
+      { userId: 'admin', platformRole: PlatformRole.WISPO_ADMIN },
+      { legalName: 'ООО «Черновик»' },
+    );
+
+    expect(original.site.globalData).toEqual(publicGlobals);
+    expect(original.state.settings).toMatchObject({
+      companyDraft: { legalName: 'ООО «Черновик»' },
+    });
+    expect(original.policyStates.save).toHaveBeenCalledWith(original.state);
+    expect(result.company.legalName).toBe('ООО «Черновик»');
+  });
+
   it('denies an employee without membership in the site workspace', async () => {
     const { service } = setup();
     await expect(
@@ -148,14 +166,34 @@ describe('PrivacyService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
-  it('allows an employee with any explicit workspace membership', async () => {
-    const { service } = setup({ membership: { role: WorkspaceRole.EMPLOYEE } });
+  it('allows a content manager with an explicit assignment to this site', async () => {
+    const { service } = setup({
+      membership: {
+        role: WorkspaceRole.SITE_CONTENT_MANAGER,
+        siteIds: ['site-1'],
+      },
+    });
     await expect(
       service.get('site-1', {
         userId: 'employee',
         platformRole: PlatformRole.EMPLOYEE,
       }),
     ).resolves.toMatchObject({ siteId: 'site-1' });
+  });
+
+  it('denies privacy data on a neighboring site in the same workspace', async () => {
+    const { service } = setup({
+      membership: {
+        role: WorkspaceRole.SITE_CONTENT_MANAGER,
+        siteIds: ['site-2'],
+      },
+    });
+    await expect(
+      service.get('site-1', {
+        userId: 'employee',
+        platformRole: PlatformRole.EMPLOYEE,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('uses the latest legal model when initializing a missing policy state', async () => {

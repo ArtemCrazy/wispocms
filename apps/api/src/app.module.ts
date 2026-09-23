@@ -15,6 +15,7 @@ import { ContentModule } from './content/content.module';
 import { createDataSourceOptions } from './database/data-source';
 import { AuditModule } from './audit/audit.module';
 import { PrivacyModule } from './privacy/privacy.module';
+import { ContentCenterModule } from './content-center/content-center.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { PrivacyModule } from './privacy/privacy.module';
     ContentModule,
     AuditModule,
     PrivacyModule,
+    ContentCenterModule,
   ],
   controllers: [AppController],
   providers: [AppService, BootstrapService],

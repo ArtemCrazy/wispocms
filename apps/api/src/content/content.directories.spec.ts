@@ -22,9 +22,10 @@ describe('ContentService directories', () => {
       }),
     };
     const memberships = {
-      findOne: jest
-        .fn()
-        .mockResolvedValue({ role: WorkspaceRole.CONTENT_MANAGER }),
+      findOne: jest.fn().mockResolvedValue({
+        role: WorkspaceRole.SITE_CONTENT_MANAGER,
+        siteIds: ['site-id'],
+      }),
     };
     const categories = {
       findOne: jest.fn(),
@@ -41,6 +42,7 @@ describe('ContentService directories', () => {
       save: jest.fn((value: unknown) => Promise.resolve(value)),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      remove: jest.fn().mockResolvedValue(undefined),
       upsert: jest.fn().mockResolvedValue(undefined),
     };
     Object.assign(categories, {
@@ -58,6 +60,21 @@ describe('ContentService directories', () => {
     };
     const articles = { count: jest.fn() };
     const media = { existsBy: jest.fn().mockResolvedValue(true) };
+    const revisions = {
+      current: jest.fn().mockResolvedValue(null),
+      importPublishedBaseline: jest.fn(),
+      saveDraft: jest
+        .fn()
+        .mockResolvedValue({ id: 'draft-id', versionNumber: 1 }),
+      saveDraftUsingManager: jest
+        .fn()
+        .mockResolvedValue({ id: 'draft-id', versionNumber: 1 }),
+    };
+    const redirects = {
+      existsBy: jest.fn().mockResolvedValue(false),
+      findOne: jest.fn(),
+      find: jest.fn().mockResolvedValue([]),
+    };
     const emptyRepository = {};
     const service = new ContentService(
       sites as never,
@@ -69,6 +86,16 @@ describe('ContentService directories', () => {
       media as never,
       emptyRepository as never,
       emptyRepository as never,
+      undefined,
+      undefined,
+      redirects as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      revisions as never,
     );
     return {
       service,
@@ -79,6 +106,7 @@ describe('ContentService directories', () => {
       articles,
       media,
       categoryManager,
+      revisions,
     };
   }
 
@@ -103,6 +131,7 @@ describe('ContentService directories', () => {
         name: '  Кейсы  ',
         slug: '  cases  ',
         color: '#112233',
+        expectedDraftRevisionId: null,
       }),
     ).resolves.toMatchObject({
       name: 'Кейсы',
@@ -122,6 +151,7 @@ describe('ContentService directories', () => {
         name: 'Новости',
         slug: 'news',
         color: '#112233',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
@@ -183,6 +213,7 @@ describe('ContentService directories', () => {
         name: 'Новости',
         slug: 'news',
         parentId: 'child-id',
+        expectedDraftRevisionId: null,
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -245,6 +276,7 @@ describe('ContentService directories', () => {
         fullName: '  Анна Соколова  ',
         email: null,
         bio: null,
+        expectedDraftRevisionId: null,
       }),
     ).resolves.toMatchObject({
       fullName: 'Анна Соколова',
@@ -265,10 +297,11 @@ describe('ContentService directories', () => {
     expect(authors.remove).toHaveBeenCalledWith(author);
   });
 
-  it('lets an assigned approver edit directories', async () => {
-    const { service, memberships, authors } = setup();
+  it('lets the site owner edit directories', async () => {
+    const { service, memberships, authors, revisions } = setup();
     memberships.findOne.mockResolvedValue({
-      role: WorkspaceRole.CLIENT_APPROVER,
+      role: WorkspaceRole.SITE_OWNER,
+      siteIds: ['site-id'],
     });
     const author = {
       id: 'author-id',
@@ -284,10 +317,22 @@ describe('ContentService directories', () => {
         'site-id',
         'author-id',
         { userId: 'member-id', platformRole: PlatformRole.MEMBER },
-        { fullName: 'Анна Соколова', email: null, bio: null },
+        {
+          fullName: 'Анна Соколова',
+          email: null,
+          bio: null,
+          expectedDraftRevisionId: null,
+        },
       ),
     ).resolves.toMatchObject({ fullName: 'Анна Соколова' });
-    expect(authors.save).toHaveBeenCalledWith(author);
+    expect(authors.save).not.toHaveBeenCalled();
+    expect(revisions.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceType: 'author',
+        entityId: 'author-id',
+        expectedDraftRevisionId: null,
+      }),
+    );
   });
 
   it('does not let an unassigned member edit directories', async () => {
@@ -303,5 +348,23 @@ describe('ContentService directories', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(authors.findOne).not.toHaveBeenCalled();
+  });
+
+  it('does not let a content manager remove a public category redirect', async () => {
+    const { service, categoryManager } = setup();
+    categoryManager.findOne.mockResolvedValue({
+      id: 'redirect-id',
+      siteId: 'site-id',
+      categoryId: 'category-id',
+      fromSlug: 'old-category',
+    });
+
+    await expect(
+      service.deleteCategoryRedirect('site-id', 'category-id', 'redirect-id', {
+        userId: 'manager-id',
+        platformRole: PlatformRole.MEMBER,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(categoryManager.remove).not.toHaveBeenCalled();
   });
 });

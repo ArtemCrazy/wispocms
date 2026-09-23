@@ -50,18 +50,27 @@ describe('ContentService media article lifecycle', () => {
     articles.manager.transaction.mockImplementation(async (work) =>
       work(manager),
     );
-    const media = { existsBy: jest.fn().mockResolvedValue(true) };
+    const categories = {
+      existsBy: jest.fn().mockResolvedValue(true),
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn(),
+    };
+    const authors = {
+      existsBy: jest.fn().mockResolvedValue(true),
+      findOne: jest.fn(),
+    };
+    const media = {
+      existsBy: jest.fn().mockResolvedValue(true),
+      findOne: jest.fn(),
+    };
     const pages = { find: jest.fn().mockResolvedValue([]) };
     const banners = { find: jest.fn().mockResolvedValue([]) };
     const redirects = { findOne: jest.fn() };
     const service = new ContentService(
       sites as never,
       {} as never,
-      {
-        existsBy: jest.fn().mockResolvedValue(true),
-        find: jest.fn().mockResolvedValue([]),
-      } as never,
-      { existsBy: jest.fn().mockResolvedValue(true) } as never,
+      categories as never,
+      authors as never,
       articles as never,
       activities as never,
       media as never,
@@ -70,7 +79,15 @@ describe('ContentService media article lifecycle', () => {
       undefined,
       redirects as never,
     );
-    return { service, articles, manager, media, redirects };
+    return {
+      service,
+      articles,
+      manager,
+      media,
+      categories,
+      authors,
+      redirects,
+    };
   }
 
   it('uses scheduled visibility and deterministic public ordering', async () => {
@@ -154,6 +171,299 @@ describe('ContentService media article lifecycle', () => {
         article: expect.objectContaining({ id: 'article-id' }),
       }),
     );
+  });
+
+  it('saves a published article body as an unpublished revision', async () => {
+    const { service, articles } = setup();
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      body: 'Public body',
+      bodyDocument: { version: 1, blocks: [] },
+      documentVersion: 1,
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      deletedAt: null,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue(null),
+      importPublishedBaseline: jest.fn().mockResolvedValue({
+        id: 'baseline-id',
+        versionNumber: 1,
+      }),
+      saveDraft: jest.fn().mockResolvedValue({
+        id: 'draft-id',
+        versionNumber: 2,
+      }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        recordArticleChange: jest.fn(),
+      },
+    });
+
+    const result = await service.updateArticleBody(
+      'site-id',
+      'article-id',
+      actor,
+      { body: 'Proposed body', expectedRevision: 3 },
+    );
+
+    expect(revisions.importPublishedBaseline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        siteId: 'site-id',
+        entityId: 'article-id',
+        snapshot: expect.objectContaining({ body: 'Public body' }),
+      }),
+    );
+    expect(revisions.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedDraftRevisionId: 'baseline-id',
+        snapshot: expect.objectContaining({
+          body: 'Proposed body',
+          revision: 4,
+        }),
+      }),
+    );
+    expect(articles.update).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({ revision: 4 }));
+  });
+
+  it('shows the latest article draft in CMS without changing the public row', async () => {
+    const { service, articles } = setup();
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      body: 'Public body',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      deletedAt: null,
+    };
+    articles.find.mockResolvedValue([article]);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: {
+          id: 'draft-id',
+          versionNumber: 2,
+          snapshot: { title: 'Live', body: 'Proposed body', revision: 4 },
+        },
+        approvedRevisionId: null,
+        publishedRevisionId: 'baseline-id',
+        reviewState: 'draft',
+      }),
+    };
+    Object.assign(service, { revisions });
+
+    const rows = await service.listArticles('site-id', actor);
+
+    expect(rows[0]).toEqual(
+      expect.objectContaining({
+        body: 'Proposed body',
+        revision: 4,
+        draftRevisionId: 'draft-id',
+      }),
+    );
+    expect(article.body).toBe('Public body');
+  });
+
+  it('loads draft category, author and images for the CMS preview', async () => {
+    const { service, articles, categories, authors, media } = setup();
+    articles.findOne.mockResolvedValue({
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      publicationState: PublicationState.PUBLISHED,
+      deletedAt: null,
+      categoryId: 'old-category',
+      category: { id: 'old-category' },
+      authorId: 'old-author',
+      author: { id: 'old-author' },
+      coverMediaId: 'old-cover',
+      coverMedia: { id: 'old-cover' },
+      previewMediaId: 'old-preview',
+      previewMedia: { id: 'old-preview' },
+    });
+    categories.findOne.mockResolvedValue({ id: 'new-category' });
+    authors.findOne.mockResolvedValue({ id: 'new-author' });
+    media.findOne.mockImplementation(async (options) => ({
+      id: options.where.id,
+    }));
+    Object.assign(service, {
+      revisions: {
+        current: jest.fn().mockResolvedValue({
+          draft: {
+            id: 'draft-id',
+            versionNumber: 2,
+            snapshot: {
+              categoryId: 'new-category',
+              authorId: 'new-author',
+              coverMediaId: 'new-cover',
+              previewMediaId: 'new-preview',
+            },
+          },
+          approvedRevisionId: null,
+          publishedRevisionId: 'baseline-id',
+          reviewState: 'draft',
+        }),
+      },
+    });
+
+    const preview = await service.getArticlePreview(
+      'site-id',
+      'article-id',
+      actor,
+    );
+
+    expect(preview.article.category.id).toBe('new-category');
+    expect(preview.article.author.id).toBe('new-author');
+    expect(preview.article.coverMedia.id).toBe('new-cover');
+    expect(preview.article.previewMedia.id).toBe('new-preview');
+  });
+
+  it('uses the draft in authenticated preview while public article lookup stays on the live row', async () => {
+    const { service, articles } = setup();
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      body: 'Public body',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      publishedAt: new Date('2026-01-01T00:00:00Z'),
+      deletedAt: null,
+      category: null,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: {
+          id: 'draft-id',
+          versionNumber: 2,
+          snapshot: { body: 'Proposed body', revision: 4 },
+        },
+        approvedRevisionId: null,
+        publishedRevisionId: 'baseline-id',
+        reviewState: 'draft',
+      }),
+    };
+    Object.assign(service, { revisions });
+
+    const preview = await service.getArticlePreview(
+      'site-id',
+      'article-id',
+      actor,
+    );
+    const publicResult = await service.getPublicArticle('media', 'live');
+
+    expect(preview.article.body).toBe('Proposed body');
+    expect(publicResult.article.body).toBe('Public body');
+    expect(revisions.current).toHaveBeenCalledTimes(1);
+  });
+
+  it('stages published article parameters instead of changing its public row', async () => {
+    const { service, articles } = setup();
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      body: 'Public body',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      deletedAt: null,
+      sortOrder: 0,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue(null),
+      importPublishedBaseline: jest.fn().mockResolvedValue({
+        id: 'baseline-id',
+        versionNumber: 1,
+      }),
+      saveDraft: jest.fn().mockResolvedValue({
+        id: 'draft-id',
+        versionNumber: 2,
+      }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        assertTemplate: jest.fn(),
+      },
+    });
+
+    const result = await service.updateArticle('site-id', 'article-id', actor, {
+      title: 'Proposed',
+      slug: 'proposed',
+      expectedDraftRevisionId: null,
+    });
+
+    expect(revisions.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedDraftRevisionId: 'baseline-id',
+        snapshot: expect.objectContaining({
+          title: 'Proposed',
+          slug: 'proposed',
+          revision: 4,
+        }),
+      }),
+    );
+    expect(articles.update).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        title: 'Proposed',
+        draftRevisionId: 'draft-id',
+      }),
+    );
+  });
+
+  it('rejects stale published article parameters without replacing the current draft', async () => {
+    const { service, articles } = setup();
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      body: 'Public body',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      deletedAt: null,
+      sortOrder: 0,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: { id: 'newer-draft', snapshot: { ...article, title: 'Newer' } },
+      }),
+      importPublishedBaseline: jest.fn(),
+      saveDraft: jest.fn().mockResolvedValue({ id: 'overwritten-draft' }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        assertTemplate: jest.fn(),
+      },
+    });
+
+    const staleUpdate = {
+      title: 'Stale',
+      slug: 'live',
+      expectedDraftRevisionId: null,
+    };
+    await expect(
+      service.updateArticle('site-id', 'article-id', actor, staleUpdate),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(revisions.saveDraft).not.toHaveBeenCalled();
   });
 
   it('updates a changed slug and its redirect in one transaction', async () => {

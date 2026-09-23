@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { configureMaterialBodyParser } from './content-center/material-body-parser';
 import {
   createOriginProtection,
   normalizeOrigins,
@@ -19,6 +20,7 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
   app.use(cookieParser());
   app.use(createOriginProtection(webOrigins));
+  configureMaterialBodyParser(app);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors({
     origin: webOrigins,

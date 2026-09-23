@@ -96,4 +96,28 @@ describe('audit logging', () => {
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
+
+  it('does not expose audit history for another site in an assigned workspace', async () => {
+    const service = new AuditService(
+      { find: jest.fn().mockResolvedValue([]) } as never,
+      {} as never,
+      {
+        findOne: jest
+          .fn()
+          .mockResolvedValue({ id: 'site-id', workspaceId: 'workspace-id' }),
+      } as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          role: 'site_owner',
+          siteIds: ['other-site-id'],
+        }),
+      } as never,
+    );
+    await expect(
+      service.listSite('site-id', {
+        userId: 'owner-id',
+        platformRole: PlatformRole.EMPLOYEE,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
