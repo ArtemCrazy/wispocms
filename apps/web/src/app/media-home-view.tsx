@@ -356,7 +356,8 @@ export function MediaHomeView({
   }) => void;
   hasBannerSlots?: boolean;
 }) {
-  const [tab, setTab] = useState<HomeTab>(hasBannerSlots ? "banners" : "seo");
+  const [tab, setTab] = useState<HomeTab>("banners");
+  const activeTab = tab === "banners" && !hasBannerSlots ? "seo" : tab;
   return (
     <section className="media-module-shell media-home-module-shell">
       <header className="media-module-heading">
@@ -379,23 +380,25 @@ export function MediaHomeView({
             <button
               key={id}
               type="button"
-              className={tab === id ? "active" : ""}
-              aria-current={tab === id ? "page" : undefined}
+              className={activeTab === id ? "active" : ""}
+              aria-current={activeTab === id ? "page" : undefined}
               onClick={() => setTab(id)}
             >
               {label}
             </button>
           ))}
       </nav>
-      {tab === "banners" && hasBannerSlots ? (
+      {activeTab === "banners" && hasBannerSlots ? (
         <PageBannerAssignmentsView
           siteId={siteId}
           canEdit={canEdit}
           onOpenLibrary={onOpenBanners}
         />
       ) : null}
-      {tab === "seo" ? <HomepageSeo siteId={siteId} canEdit={canEdit} /> : null}
-      {tab === "history" ? <PageHistory siteId={siteId} /> : null}
+      {activeTab === "seo" ? (
+        <HomepageSeo siteId={siteId} canEdit={canEdit} />
+      ) : null}
+      {activeTab === "history" ? <PageHistory siteId={siteId} /> : null}
     </section>
   );
 }

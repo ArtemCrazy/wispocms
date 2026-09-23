@@ -43,6 +43,7 @@ describe('banner slot registry', () => {
 
   it('accepts local and HTTP links but rejects executable or protocol-relative links', () => {
     expect(isAllowedBannerLink('/articles/example')).toBe(true);
+    expect(isAllowedBannerLink('#consultation')).toBe(true);
     expect(isAllowedBannerLink('https://example.ru/path')).toBe(true);
     expect(isAllowedBannerLink('javascript:alert(1)')).toBe(false);
     expect(isAllowedBannerLink('data:text/html,unsafe')).toBe(false);

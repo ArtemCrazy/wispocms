@@ -15,7 +15,13 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class UpdatePrivacyCompanyDto {
+export class PrivacyRevisionCommandDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+}
+
+export class UpdatePrivacyCompanyDto extends PrivacyRevisionCommandDto {
   @IsOptional()
   @IsIn(['', 'ip', 'ooo', 'self_employed', 'other'])
   organizationType?: '' | 'ip' | 'ooo' | 'self_employed' | 'other';
@@ -41,7 +47,7 @@ export class UpdatePrivacyCompanyDto {
   legalAddress?: string;
 }
 
-export class UpdatePrivacySettingsDto {
+export class UpdatePrivacySettingsDto extends PrivacyRevisionCommandDto {
   @IsOptional()
   @IsArray()
   @ArrayUnique()
@@ -102,20 +108,20 @@ export class UpdatePrivacySettingsDto {
   cookies?: boolean;
 }
 
-export class GeneratePrivacyDocumentDto {
+export class GeneratePrivacyDocumentDto extends PrivacyRevisionCommandDto {
   @IsOptional()
   @IsBoolean()
   confirmManualReset?: boolean;
 }
 
-export class UpdatePrivacyManualDocumentDto {
+export class UpdatePrivacyManualDocumentDto extends PrivacyRevisionCommandDto {
   @IsString()
   @MinLength(1)
   @MaxLength(100000)
   text!: string;
 }
 
-export class ResetPrivacyDocumentDto {
+export class ResetPrivacyDocumentDto extends PrivacyRevisionCommandDto {
   @Equals(true)
   confirm!: true;
 }
@@ -207,12 +213,12 @@ export class ApprovePrivacyLegalModelDto {
   changeSummary!: string;
 }
 
-export class SelectPrivacyLegalModelDto {
+export class SelectPrivacyLegalModelDto extends PrivacyRevisionCommandDto {
   @IsUUID()
   modelId!: string;
 }
 
-export class UpdatePrivacyTemplateDto {
+export class UpdatePrivacyTemplateDto extends PrivacyRevisionCommandDto {
   @IsIn(['system-policy', 'compact-policy'])
   key!: 'system-policy' | 'compact-policy';
 

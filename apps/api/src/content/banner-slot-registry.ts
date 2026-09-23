@@ -96,6 +96,7 @@ export function bannerSlotsForPage(page: {
 export function isAllowedBannerLink(value: string | null | undefined) {
   const link = value?.trim();
   if (!link) return true;
+  if (/^#[A-Za-z0-9][A-Za-z0-9_-]*$/.test(link)) return true;
   if (link.startsWith('/') && !link.startsWith('//')) return true;
   try {
     const parsed = new URL(link);

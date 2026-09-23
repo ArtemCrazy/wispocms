@@ -533,7 +533,7 @@ describe('PlatformService workspace and site management', () => {
     },
   );
 
-  it('lets a workspace administrator add a site only to their project', async () => {
+  it('does not let a legacy workspace administrator create a site', async () => {
     workspaces.existsBy.mockResolvedValue(true);
     memberships.findOne.mockResolvedValue({
       role: WorkspaceRole.WORKSPACE_ADMIN,
@@ -550,42 +550,11 @@ describe('PlatformService workspace and site management', () => {
           siteType: 'media' as never,
         },
       ),
-    ).resolves.toEqual(
-      expect.objectContaining({
-        workspaceId: 'workspace-id',
-        name: 'New media',
-        slug: 'new-media',
-        createdByUserId: 'client-admin-id',
-      }),
-    );
-    expect(memberships.findOne).toHaveBeenCalledWith({
-      select: { id: true },
-      where: { userId: 'client-admin-id', workspaceId: 'workspace-id' },
-    });
-    expect(pages.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        siteId: 'site-id',
-        kind: 'homepage',
-        status: 'draft',
-      }),
-    );
-    expect(pages.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        siteId: 'site-id',
-        slug: 'privacy-policy',
-        noIndex: false,
-      }),
-    );
-    expect(pages.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        siteId: 'site-id',
-        slug: '404',
-        noIndex: true,
-      }),
-    );
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(sites.save).not.toHaveBeenCalled();
   });
 
-  it('lets any assigned employee create a site in their project', async () => {
+  it('does not let an assigned content manager create a site', async () => {
     workspaces.existsBy.mockResolvedValue(true);
     memberships.findOne.mockResolvedValue({
       role: WorkspaceRole.CONTENT_MANAGER,
@@ -597,10 +566,8 @@ describe('PlatformService workspace and site management', () => {
         { userId: 'manager-id', platformRole: PlatformRole.MEMBER },
         { name: 'New media', slug: 'new-media', siteType: 'media' as never },
       ),
-    ).resolves.toEqual(
-      expect.objectContaining({ workspaceId: 'workspace-id' }),
-    );
-    expect(sites.save).toHaveBeenCalled();
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(sites.save).not.toHaveBeenCalled();
   });
 
   it('lets a Wispo administrator add a site without project membership', async () => {
@@ -626,6 +593,27 @@ describe('PlatformService workspace and site management', () => {
     expect(memberships.findOne).not.toHaveBeenCalled();
   });
 
+  it('does not let a site owner create another site in the same workspace', async () => {
+    workspaces.existsBy.mockResolvedValue(true);
+    memberships.findOne.mockResolvedValue({
+      role: WorkspaceRole.SITE_OWNER,
+      siteIds: ['owned-site-id'],
+    });
+
+    await expect(
+      service.createWorkspaceSite(
+        'workspace-id',
+        { userId: 'owner-id', platformRole: PlatformRole.EMPLOYEE },
+        {
+          name: 'Second site',
+          slug: 'second-site',
+          siteType: 'media' as never,
+        },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(sites.save).not.toHaveBeenCalled();
+  });
+
   it('rejects a legacy agency member without project membership', async () => {
     workspaces.existsBy.mockResolvedValue(true);
     sites.existsBy.mockResolvedValue(false);
@@ -641,7 +629,7 @@ describe('PlatformService workspace and site management', () => {
         { name: 'Media', slug: 'media', siteType: 'media' as never },
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(memberships.findOne).toHaveBeenCalled();
+    expect(memberships.findOne).not.toHaveBeenCalled();
   });
 });
 

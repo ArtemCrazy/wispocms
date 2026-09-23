@@ -262,11 +262,13 @@ test("microphone permission is scoped to the CMS shell, not public previews", ()
     new URL("../../../deploy/nginx.preview.conf", import.meta.url),
     "utf8",
   );
-  const cms = /location = \/ \{([\s\S]*?)\n    \}/.exec(nginx)?.[1];
-  assert.match(cms, /microphone=\(self\)/);
-  assert.equal((nginx.match(/microphone=\(self\)/g) ?? []).length, 1);
-  assert.match(
-    nginx.slice(0, nginx.indexOf("location /api/")),
-    /microphone=\(\)/,
-  );
+  // Each TLS hostname has its own server block and CMS root location.
+  const tlsServers = nginx.split(/^server \{/m).filter((block) => /listen 443 ssl/.test(block));
+  assert.equal(tlsServers.length, 2);
+  for (const server of tlsServers) {
+    const cms = /location = \/ \{([\s\S]*?)\n    \}/.exec(server)?.[1];
+    assert.match(cms, /microphone=\(self\)/);
+    assert.equal((server.match(/microphone=\(self\)/g) ?? []).length, 1);
+    assert.match(server.slice(0, server.indexOf("location /api/")), /microphone=\(\)/);
+  }
 });

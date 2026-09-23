@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type SiteSeo = {
   siteId: string;
@@ -9,6 +10,7 @@ type SiteSeo = {
   canonicalUrl: string | null;
   seoImageMediaId: string | null;
   noIndex: boolean;
+  draftRevisionId: string | null;
 };
 
 type MediaItem = { id: string; originalName: string; altText: string | null };
@@ -42,12 +44,14 @@ export function SiteSeoView({
   siteName,
   siteSlug,
   canEdit = true,
+  canApprove = false,
   onDirtyChange,
 }: {
   siteId?: string;
   siteName?: string;
   siteSlug?: string;
   canEdit?: boolean;
+  canApprove?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [seo, setSeo] = useState<SiteSeo | null>(null);
@@ -66,7 +70,7 @@ export function SiteSeoView({
   const load = useCallback(async () => {
     if (!siteId) return;
     const [seoData, mediaData] = await Promise.all([
-      request<SiteSeo>(`/api/sites/${siteId}/content/seo`),
+      request<SiteSeo>(`/api/sites/${siteId}/content/versioned/seo`),
       request<MediaItem[]>(`/api/sites/${siteId}/content/media`),
     ]);
     setSeo(seoData);
@@ -111,22 +115,25 @@ export function SiteSeoView({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!siteId || !canEdit) return;
+    if (!siteId || !canEdit || !seo) return;
     if (!event.currentTarget.reportValidity()) return;
     const nullable = (value: string) => value.trim() || null;
     setSaving(true);
     setMessage("");
     try {
       const updated = await request<SiteSeo>(
-        `/api/sites/${siteId}/content/seo`,
+        `/api/sites/${siteId}/content/versioned/seo`,
         {
-          method: "PATCH",
+          method: "PUT",
           body: JSON.stringify({
-            seoTitle: nullable(draft.seoTitle),
-            seoDescription: nullable(draft.seoDescription),
-            canonicalUrl: nullable(draft.canonicalUrl),
-            seoImageMediaId: nullable(draft.seoImageMediaId),
-            noIndex: draft.noIndex,
+            expectedDraftRevisionId: seo.draftRevisionId,
+            snapshot: {
+              seoTitle: nullable(draft.seoTitle),
+              seoDescription: nullable(draft.seoDescription),
+              canonicalUrl: nullable(draft.canonicalUrl),
+              seoImageMediaId: nullable(draft.seoImageMediaId),
+              noIndex: draft.noIndex,
+            },
           }),
         },
       );
@@ -139,7 +146,7 @@ export function SiteSeoView({
         noIndex: updated.noIndex,
       });
       setDirty(false);
-      setMessage("SEO-настройки сохранены");
+      setMessage("SEO сохранено как новая версия черновика");
     } catch (reason) {
       setMessage(
         reason instanceof Error ? reason.message : "Не удалось сохранить SEO",
@@ -322,6 +329,18 @@ export function SiteSeoView({
           </div>
         ) : null}
       </form>
+      {siteId ? (
+        <SiteSettingsRevisionPanel
+          siteId={siteId}
+          resource="seo"
+          label="SEO"
+          canEdit={canEdit}
+          canApprove={canApprove}
+          dirty={dirty}
+          refreshToken={seo.draftRevisionId}
+          onChanged={load}
+        />
+      ) : null}
     </section>
   );
 }

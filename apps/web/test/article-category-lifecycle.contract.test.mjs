@@ -58,8 +58,9 @@ test("category level has persistent URL state and three internal settings tabs",
   for (const label of ["Параметры", "SEO", "История изменений"])
     assert.match(content, new RegExp(`\\["[a-z]+", "${label}"\\]`));
   assert.doesNotMatch(content, /category-panel-scrim/);
-  assert.match(content, /delete-summary/);
-  assert.match(content, /restoreFromTrash\(type: "articles" \| "categories"/);
+  assert.match(content, /categoryRevisionApiBase/);
+  assert.match(content, /changeCategoryRevision/);
+  assert.match(content, /restoreCategoryRevision/);
 });
 
 test("articles root owns list template settings and Content is real child navigation", () => {

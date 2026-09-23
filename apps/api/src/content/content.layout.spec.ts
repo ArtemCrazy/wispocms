@@ -22,12 +22,46 @@ describe('ContentService site layout', () => {
       save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
     };
     const memberships = {
-      findOne: jest.fn().mockResolvedValue(role ? { role } : null),
+      findOne: jest
+        .fn()
+        .mockResolvedValue(role ? { role, siteIds: ['site-id'] } : null),
     };
     const emptyRepository = {};
     const media = { existsBy: jest.fn().mockResolvedValue(logoExists) };
     const lifecycle = {
       assertTemplate: jest.fn().mockResolvedValue(undefined),
+    };
+    const revisions = {
+      current: jest
+        .fn()
+        .mockImplementation((_siteId: string, resourceType: string) =>
+          Promise.resolve({
+            draft: {
+              id: `${resourceType}-draft-id`,
+              versionNumber: 2,
+              snapshot:
+                resourceType === 'site_footer'
+                  ? {
+                      footerDescription: 'О проекте',
+                      showContacts: true,
+                      showSocials: true,
+                    }
+                  : {
+                      logoText: 'Wispo',
+                      showPages: true,
+                      showArticles: true,
+                    },
+            },
+            approvedRevisionId: null,
+            publishedRevisionId: `${resourceType}-published-id`,
+            reviewState: 'draft',
+          }),
+        ),
+      saveDraft: jest.fn().mockResolvedValue({
+        id: 'layout-next-id',
+        versionNumber: 3,
+      }),
+      importPublishedBaseline: jest.fn(),
     };
     const service = new ContentService(
       sites as never,
@@ -44,32 +78,37 @@ describe('ContentService site layout', () => {
       undefined,
       undefined,
       lifecycle as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      revisions as never,
     );
-    return { service, site, sites, media, lifecycle };
+    return { service, site, sites, media, lifecycle, revisions };
   }
 
   it('updates header settings without losing footer settings', async () => {
-    const { service, site, sites } = setup(WorkspaceRole.CONTENT_MANAGER);
+    const { service, site, sites } = setup(WorkspaceRole.SITE_CONTENT_MANAGER);
 
     await expect(
-      service.updateSiteLayout('site-id', actor, {
+      service.updateSiteLayoutSection('site-id', 'header', actor, {
         logoText: '  Wispo Journal  ',
         showPages: false,
         ctaLabel: ' Связаться ',
         ctaUrl: '#contact',
+        expectedDraftRevisionId: 'site_header-draft-id',
       }),
     ).resolves.toMatchObject({
       logoText: 'Wispo Journal',
       showPages: false,
       ctaLabel: 'Связаться',
-      footerDescription: 'О проекте',
     });
     expect(site.layoutSettings.footerDescription).toBe('О проекте');
-    expect(sites.save).toHaveBeenCalledWith(site);
+    expect(sites.save).not.toHaveBeenCalled();
   });
 
   it('uses read permission for viewing layout settings', async () => {
-    const { service } = setup(WorkspaceRole.CLIENT_APPROVER);
+    const { service } = setup(WorkspaceRole.SITE_OWNER);
 
     await expect(
       service.getSiteLayout('site-id', actor),
@@ -80,20 +119,24 @@ describe('ContentService site layout', () => {
   });
 
   it('allows an assigned approver to change layout settings', async () => {
-    const { service, sites } = setup(WorkspaceRole.CLIENT_APPROVER);
+    const { service, sites } = setup(WorkspaceRole.SITE_OWNER);
 
     await expect(
-      service.updateSiteLayout('site-id', actor, { showPages: false }),
+      service.updateSiteLayoutSection('site-id', 'header', actor, {
+        showPages: false,
+        expectedDraftRevisionId: 'site_header-draft-id',
+      }),
     ).resolves.toMatchObject({ showPages: false });
-    expect(sites.save).toHaveBeenCalled();
+    expect(sites.save).not.toHaveBeenCalled();
   });
 
   it('binds a workspace media item as the shared logo', async () => {
-    const { service, media } = setup(WorkspaceRole.CONTENT_MANAGER);
+    const { service, media } = setup(WorkspaceRole.SITE_CONTENT_MANAGER);
 
     await expect(
-      service.updateSiteLayout('site-id', actor, {
+      service.updateSiteLayoutSection('site-id', 'header', actor, {
         logoMediaId: '11111111-1111-4111-8111-111111111111',
+        expectedDraftRevisionId: 'site_header-draft-id',
       }),
     ).resolves.toMatchObject({
       logoMediaId: '11111111-1111-4111-8111-111111111111',
@@ -105,17 +148,18 @@ describe('ContentService site layout', () => {
   });
 
   it('rejects a logo outside the workspace media library', async () => {
-    const { service } = setup(WorkspaceRole.CONTENT_MANAGER, false);
+    const { service } = setup(WorkspaceRole.SITE_CONTENT_MANAGER, false);
 
     await expect(
-      service.updateSiteLayout('site-id', actor, {
+      service.updateSiteLayoutSection('site-id', 'header', actor, {
         logoMediaId: '11111111-1111-4111-8111-111111111111',
+        expectedDraftRevisionId: 'site_header-draft-id',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('validates and persists selected Media header and footer templates', async () => {
-    const { service, site, lifecycle } = setup(WorkspaceRole.CONTENT_MANAGER);
+    const { service, site, lifecycle } = setup(WorkspaceRole.SITE_DEVELOPER);
 
     await expect(
       service.updateSiteLayout('site-id', actor, {
@@ -154,10 +198,23 @@ describe('ContentService site layout', () => {
     });
   });
 
+  it('does not allow a content manager to change template bindings', async () => {
+    const { service, sites } = setup(WorkspaceRole.SITE_CONTENT_MANAGER);
+    await expect(
+      service.updateSiteLayout('site-id', actor, {
+        headerTemplateKey: 'compact-header',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(sites.save).not.toHaveBeenCalled();
+  });
+
   it('does not allow an unassigned member to change layout settings', async () => {
     const { service } = setup(null);
     await expect(
-      service.updateSiteLayout('site-id', actor, { showPages: false }),
+      service.updateSiteLayoutSection('site-id', 'header', actor, {
+        showPages: false,
+        expectedDraftRevisionId: 'site_header-draft-id',
+      }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

@@ -47,12 +47,14 @@ type PlatformUser = {
   email: string;
   fullName: string;
   platformRole: string;
+  accountKind: "legacy" | "wispo" | "site";
   isActive: boolean;
   memberships: Array<{
     id: string;
     workspaceId: string;
     workspaceName: string;
     role: string;
+    siteIds: string[];
   }>;
 };
 
@@ -154,7 +156,7 @@ export function AllProjectsView({
     .filter((group) => group.projects.length > 0);
 
   const selectedWorkspace = settingsContext?.workspace ?? null;
-  const employeeUsers = users.filter((user) => user.platformRole !== "wispo_admin");
+  const employeeUsers = users.filter((user) => user.accountKind === "wispo" && user.platformRole !== "wispo_admin");
 
   async function openSettings(context: SettingsContext) {
     setSettingsContext(context);
@@ -228,17 +230,17 @@ export function AllProjectsView({
   }
 
   async function toggleTeamMember(user: PlatformUser, assigned: boolean) {
-    if (!selectedWorkspace || busy) return;
+    if (!settingsContext?.site || busy) return;
     setBusy(true);
     setMessage("");
     try {
-      const workspaceIds = user.memberships
-        .map((membership) => membership.workspaceId)
-        .filter((workspaceId) => workspaceId !== selectedWorkspace.id);
-      if (!assigned) workspaceIds.push(selectedWorkspace.id);
-      await api(`/api/platform/users/${user.id}/workspaces`, {
+      const siteIds = user.memberships
+        .flatMap((membership) => membership.siteIds)
+        .filter((siteId) => siteId !== settingsContext.site!.id);
+      if (!assigned) siteIds.push(settingsContext.site.id);
+      await api(`/api/platform/users/${user.id}/sites`, {
         method: "PUT",
-        body: JSON.stringify({ workspaceIds }),
+        body: JSON.stringify({ siteIds }),
       });
       setMessage(
         assigned
@@ -454,12 +456,12 @@ export function AllProjectsView({
               </form>
             )}
 
-            {!settingsContext.site ? <section className="project-settings-section">
-              <div><h3>Сотрудники</h3><p>Назначьте отдельные аккаунты, которым доступно это рабочее пространство.</p></div>
+            {settingsContext.site ? <section className="project-settings-section">
+              <div><h3>Сотрудники Wispo</h3><p>Назначьте сотрудников, которым доступен этот сайт.</p></div>
               {loadingUsers ? <p className="project-settings-loading">Загружаем сотрудников…</p> : employeeUsers.length ? (
                 <div className="project-settings-team">
                   {employeeUsers.map((user) => {
-                    const assigned = user.memberships.some((membership) => membership.workspaceId === settingsContext.workspace.id);
+                    const assigned = user.memberships.some((membership) => membership.siteIds?.includes(settingsContext.site!.id));
                     return <label key={user.id}><span><i>{initials(user.fullName)}</i><b>{user.fullName}</b><small>{user.email}</small></span><input type="checkbox" checked={assigned} disabled={busy} onChange={() => void toggleTeamMember(user, assigned)} /></label>;
                   })}
                 </div>

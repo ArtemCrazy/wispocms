@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CodeResourcesEditor } from "./code-resources-editor";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type TemplateTarget =
   "homepage-template" | "articles" | "layout" | "404" | "privacy-policy";
@@ -31,6 +33,7 @@ type LayoutSettings = {
   footerTemplateKey?: string;
   footerTemplateVersion?: string;
   footerTemplateConfig?: Record<string, unknown>;
+  draftRevisionId: string | null;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -52,10 +55,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function MediaTemplatesView({
   siteId,
   canEdit,
+  canApprove,
   onOpen,
 }: {
   siteId: string;
   canEdit: boolean;
+  canApprove: boolean;
   onOpen: (target: TemplateTarget) => void;
 }) {
   const [rows, setRows] = useState<
@@ -64,6 +69,11 @@ export function MediaTemplatesView({
   const [templates, setTemplates] = useState<ContentTemplate[]>([]);
   const [headerIdentity, setHeaderIdentity] = useState("");
   const [footerIdentity, setFooterIdentity] = useState("");
+  const [savedHeaderIdentity, setSavedHeaderIdentity] = useState("");
+  const [savedFooterIdentity, setSavedFooterIdentity] = useState("");
+  const [layoutDraftRevisionId, setLayoutDraftRevisionId] = useState<
+    string | null
+  >(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -95,12 +105,19 @@ export function MediaTemplatesView({
       return template ? `${template.name} · ${template.version}` : "Не выбран";
     };
     setTemplates(contentTemplates);
-    setHeaderIdentity(
-      identity(siteLayout.headerTemplateKey, siteLayout.headerTemplateVersion),
+    const nextHeaderIdentity = identity(
+      siteLayout.headerTemplateKey,
+      siteLayout.headerTemplateVersion,
     );
-    setFooterIdentity(
-      identity(siteLayout.footerTemplateKey, siteLayout.footerTemplateVersion),
+    const nextFooterIdentity = identity(
+      siteLayout.footerTemplateKey,
+      siteLayout.footerTemplateVersion,
     );
+    setHeaderIdentity(nextHeaderIdentity);
+    setFooterIdentity(nextFooterIdentity);
+    setSavedHeaderIdentity(nextHeaderIdentity);
+    setSavedFooterIdentity(nextFooterIdentity);
+    setLayoutDraftRevisionId(siteLayout.draftRevisionId);
     const homepage = pages.find((page) => page.kind === "homepage");
     setRows([
       {
@@ -183,6 +200,7 @@ export function MediaTemplatesView({
           footerTemplateKey: footer.key,
           footerTemplateVersion: footer.version,
           footerTemplateConfig: footer.config,
+          expectedDraftRevisionId: layoutDraftRevisionId,
         }),
       });
       await load();
@@ -272,6 +290,24 @@ export function MediaTemplatesView({
         ))}
         {!rows.length && !message ? <p>Загружаем шаблоны…</p> : null}
       </div>
+      <SiteSettingsRevisionPanel
+        siteId={siteId}
+        basePath={`metadata/layout-bindings/${siteId}`}
+        label="Шаблоны шапки и подвала"
+        canEdit={canEdit}
+        canApprove={canApprove}
+        dirty={
+          headerIdentity !== savedHeaderIdentity ||
+          footerIdentity !== savedFooterIdentity
+        }
+        refreshToken={layoutDraftRevisionId}
+        onChanged={load}
+      />
+      <CodeResourcesEditor
+        siteId={siteId}
+        canEdit={canEdit}
+        canApprove={canApprove}
+      />
     </section>
   );
 }

@@ -14,6 +14,7 @@ import { PlatformService } from './platform.service';
 import { WorkspaceController } from './workspace.controller';
 import { PlatformPromptsController } from './platform-prompts.controller';
 import { PlatformPromptsService } from './platform-prompts.service';
+import { SiteUsersController } from './site-users.controller';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { PlatformPromptsService } from './platform-prompts.service';
     PlatformController,
     WorkspaceController,
     PlatformPromptsController,
+    SiteUsersController,
   ],
   providers: [PlatformService, PlatformAdminGuard, PlatformPromptsService],
 })

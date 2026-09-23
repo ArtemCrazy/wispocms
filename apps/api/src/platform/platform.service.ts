@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { hash } from 'bcryptjs';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   DomainStatus,
   ContentTemplateKind,
@@ -25,6 +25,7 @@ import {
 import { normalizeHostnameInput } from './site-domain';
 import {
   CreateSiteDto,
+  CreateSiteUserDto,
   CreateUserDto,
   CreateWorkspaceDto,
   ResetUserPasswordDto,
@@ -345,14 +346,10 @@ export class PlatformService {
     if (!(await this.workspaces.existsBy({ id: workspaceId })))
       throw new NotFoundException('Рабочее пространство не найдено');
 
-    if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
-      const membership = await this.memberships.findOne({
-        select: { id: true },
-        where: { userId: actor.userId, workspaceId },
-      });
-      if (!membership)
-        throw new ForbiddenException('Нет доступа к рабочему пространству');
-    }
+    if (actor.platformRole !== PlatformRole.WISPO_ADMIN)
+      throw new ForbiddenException(
+        'Создавать сайты может только администратор Wispo',
+      );
 
     return this.createSite(workspaceId, dto, actor.userId);
   }
@@ -450,13 +447,14 @@ export class PlatformService {
   }
 
   async setWorkspaceMember(workspaceId: string, userId: string) {
-    const [workspaceExists, user] = await Promise.all([
-      this.workspaces.existsBy({ id: workspaceId }),
-      this.users.findOneBy({ id: userId }),
-    ]);
-    if (!workspaceExists)
-      throw new NotFoundException('Рабочее пространство не найдено');
+    const user = await this.users.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('Пользователь не найден');
+    if (user.accountKind && user.accountKind !== 'legacy')
+      throw new BadRequestException(
+        'Назначайте этому пользователю конкретные сайты',
+      );
+    if (!(await this.workspaces.existsBy({ id: workspaceId })))
+      throw new NotFoundException('Рабочее пространство не найдено');
     if (user.platformRole === PlatformRole.WISPO_ADMIN)
       throw new BadRequestException(
         'Администратор Wispo уже имеет доступ ко всем проектам',
@@ -503,8 +501,11 @@ export class PlatformService {
         id: membership.id,
         workspaceId: membership.workspaceId,
         workspaceName: membership.workspace.name,
-        role: WorkspaceRole.EMPLOYEE,
+        role: membership.role,
+        siteIds: membership.siteIds,
       })),
+      accountKind: user.accountKind,
+      homeSiteId: user.homeSiteId,
     }));
   }
 
@@ -512,12 +513,37 @@ export class PlatformService {
     const email = dto.email.trim().toLowerCase();
     if (await this.users.existsBy({ email }))
       throw new ConflictException('Пользователь с такой почтой уже существует');
-    const uniqueWorkspaceIds = [...new Set(dto.workspaceIds)];
-    const workspaceChecks = await Promise.all(
-      uniqueWorkspaceIds.map((id) => this.workspaces.existsBy({ id })),
-    );
-    if (workspaceChecks.some((exists) => !exists))
-      throw new NotFoundException('Одно из рабочих пространств не найдено');
+    const siteIds = [...new Set(dto.siteIds)];
+    const siteAccounts = [
+      WorkspaceRole.SITE_OWNER,
+      WorkspaceRole.SITE_CONTENT_MANAGER,
+      WorkspaceRole.SITE_DEVELOPER,
+    ];
+    const wispoAccounts = [
+      WorkspaceRole.WISPO_MANAGER,
+      WorkspaceRole.WISPO_DEVELOPER,
+    ];
+    if (!siteAccounts.includes(dto.role) && !wispoAccounts.includes(dto.role))
+      throw new BadRequestException('Недопустимая роль пользователя');
+    const isSiteAccount = siteAccounts.includes(dto.role);
+    if (isSiteAccount && siteIds.length !== 1)
+      throw new BadRequestException(
+        'Пользователь сайта может работать только с одним сайтом',
+      );
+    if (!siteIds.length)
+      throw new BadRequestException('Укажите хотя бы один сайт');
+    const sites = await this.sites.find({
+      where: { id: In(siteIds) },
+      select: { id: true, workspaceId: true },
+    });
+    if (sites.length !== siteIds.length)
+      throw new NotFoundException('Один из сайтов не найден');
+    const sitesByWorkspace = new Map<string, string[]>();
+    for (const site of sites) {
+      const assigned = sitesByWorkspace.get(site.workspaceId) ?? [];
+      assigned.push(site.id);
+      sitesByWorkspace.set(site.workspaceId, assigned);
+    }
 
     const user = await this.users.save(
       this.users.create({
@@ -525,30 +551,162 @@ export class PlatformService {
         fullName: dto.fullName.trim(),
         passwordHash: await hash(dto.password, 12),
         platformRole: PlatformRole.EMPLOYEE,
+        accountKind: isSiteAccount ? 'site' : 'wispo',
+        homeSiteId: isSiteAccount ? siteIds[0] : null,
         isActive: true,
       }),
     );
-    if (uniqueWorkspaceIds.length)
-      await this.memberships.save(
-        uniqueWorkspaceIds.map((workspaceId) =>
-          this.memberships.create({
-            userId: user.id,
-            workspaceId,
-            role: WorkspaceRole.EMPLOYEE,
-          }),
-        ),
-      );
+    await this.memberships.save(
+      [...sitesByWorkspace.entries()].map(([workspaceId, assignedSiteIds]) =>
+        this.memberships.create({
+          userId: user.id,
+          workspaceId,
+          role: dto.role,
+          siteIds: assignedSiteIds,
+        }),
+      ),
+    );
     return {
       id: user.id,
       email: user.email,
       fullName: user.fullName,
       platformRole: user.platformRole,
+      accountKind: user.accountKind,
+      homeSiteId: user.homeSiteId,
     };
+  }
+
+  async createSiteUser(
+    siteId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+    dto: CreateSiteUserDto,
+  ) {
+    if (
+      dto.role !== WorkspaceRole.SITE_CONTENT_MANAGER &&
+      dto.role !== WorkspaceRole.SITE_DEVELOPER
+    )
+      throw new BadRequestException(
+        'Владелец может создать только менеджера контента или разработчика',
+      );
+    await this.assertSiteOwner(siteId, actor);
+    return this.createUser({ ...dto, siteIds: [siteId] });
+  }
+
+  private async assertSiteOwner(
+    siteId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+  ) {
+    const site = (
+      await this.sites.find({
+        where: { id: In([siteId]) },
+        select: { id: true, workspaceId: true },
+      })
+    )[0];
+    if (!site) throw new NotFoundException('Сайт не найден');
+    if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
+      const membership = await this.memberships.findOne({
+        where: { userId: actor.userId, workspaceId: site.workspaceId },
+        select: { role: true, siteIds: true },
+      });
+      if (
+        membership?.role !== WorkspaceRole.SITE_OWNER ||
+        !membership.siteIds?.includes(siteId)
+      )
+        throw new ForbiddenException(
+          'Недостаточно прав для управления пользователями сайта',
+        );
+    }
+    return site;
+  }
+
+  async listSiteUsers(
+    siteId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+  ) {
+    await this.assertSiteOwner(siteId, actor);
+    const users = await this.users.find({
+      where: { accountKind: 'site', homeSiteId: siteId },
+      relations: { memberships: true },
+      order: { fullName: 'ASC' },
+    });
+    return users.flatMap((user) => {
+      const role = user.memberships.find((membership) =>
+        membership.siteIds?.includes(siteId),
+      )?.role;
+      if (
+        role !== WorkspaceRole.SITE_CONTENT_MANAGER &&
+        role !== WorkspaceRole.SITE_DEVELOPER
+      )
+        return [];
+      return [
+        {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          isActive: user.isActive,
+          role,
+        },
+      ];
+    });
+  }
+
+  private async assertManageableSiteUser(
+    siteId: string,
+    userId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+  ) {
+    const site = await this.assertSiteOwner(siteId, actor);
+    const user = await this.users.findOneBy({ id: userId });
+    if (!user || user.accountKind !== 'site' || user.homeSiteId !== siteId)
+      throw new ForbiddenException('Пользователь не принадлежит этому сайту');
+    const membership = await this.memberships.findOne({
+      where: { userId, workspaceId: site.workspaceId },
+    });
+    if (
+      !membership?.siteIds?.includes(siteId) ||
+      (membership.role !== WorkspaceRole.SITE_CONTENT_MANAGER &&
+        membership.role !== WorkspaceRole.SITE_DEVELOPER)
+    )
+      throw new ForbiddenException('Этого пользователя нельзя изменить');
+  }
+
+  async updateSiteUserStatus(
+    siteId: string,
+    userId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+    dto: UpdateUserStatusDto,
+  ) {
+    await this.assertManageableSiteUser(siteId, userId, actor);
+    return this.updateUserStatus(userId, actor.userId, dto);
+  }
+
+  async updateSiteUserProfile(
+    siteId: string,
+    userId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+    dto: UpdateUserProfileDto,
+  ) {
+    await this.assertManageableSiteUser(siteId, userId, actor);
+    return this.updateUserProfile(userId, dto);
+  }
+
+  async resetSiteUserPassword(
+    siteId: string,
+    userId: string,
+    actor: { userId: string; platformRole: PlatformRole },
+    dto: ResetUserPasswordDto,
+  ) {
+    await this.assertManageableSiteUser(siteId, userId, actor);
+    return this.resetUserPassword(userId, actor.userId, dto);
   }
 
   async updateUserWorkspaces(userId: string, workspaceIds: string[]) {
     const user = await this.users.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('Пользователь не найден');
+    if (user.accountKind && user.accountKind !== 'legacy')
+      throw new BadRequestException(
+        'Для этого аккаунта назначайте конкретные сайты, а не пространства',
+      );
     if (user.platformRole === PlatformRole.WISPO_ADMIN)
       throw new BadRequestException(
         'Администратор Wispo уже имеет доступ ко всем проектам',
@@ -581,6 +739,58 @@ export class PlatformService {
     });
 
     return { userId, workspaceIds: uniqueWorkspaceIds };
+  }
+
+  async updateUserSites(userId: string, siteIds: string[]) {
+    const user = await this.users.findOneBy({ id: userId });
+    if (!user) throw new NotFoundException('Пользователь не найден');
+    if (
+      user.accountKind !== 'wispo' ||
+      user.platformRole === PlatformRole.WISPO_ADMIN
+    )
+      throw new BadRequestException(
+        'Менять список сайтов можно только сотруднику Wispo',
+      );
+    const membership = await this.memberships.findOne({ where: { userId } });
+    if (
+      membership?.role !== WorkspaceRole.WISPO_MANAGER &&
+      membership?.role !== WorkspaceRole.WISPO_DEVELOPER
+    )
+      throw new BadRequestException(
+        'У аккаунта нет допустимой роли сотрудника Wispo',
+      );
+    const uniqueSiteIds = [...new Set(siteIds)];
+    const sites = uniqueSiteIds.length
+      ? await this.sites.find({
+          where: { id: In(uniqueSiteIds) },
+          select: { id: true, workspaceId: true },
+        })
+      : [];
+    if (sites.length !== uniqueSiteIds.length)
+      throw new NotFoundException('Один из сайтов не найден');
+    const sitesByWorkspace = new Map<string, string[]>();
+    for (const site of sites) {
+      const assigned = sitesByWorkspace.get(site.workspaceId) ?? [];
+      assigned.push(site.id);
+      sitesByWorkspace.set(site.workspaceId, assigned);
+    }
+    await this.memberships.manager.transaction(async (manager) => {
+      await manager.delete(WorkspaceMembershipEntity, { userId });
+      if (sitesByWorkspace.size)
+        await manager.save(
+          WorkspaceMembershipEntity,
+          [...sitesByWorkspace.entries()].map(
+            ([workspaceId, assignedSiteIds]) =>
+              manager.create(WorkspaceMembershipEntity, {
+                userId,
+                workspaceId,
+                role: membership.role,
+                siteIds: assignedSiteIds,
+              }),
+          ),
+        );
+    });
+    return { userId, siteIds: uniqueSiteIds };
   }
 
   async updateUserStatus(

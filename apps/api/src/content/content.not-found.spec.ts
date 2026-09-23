@@ -1,5 +1,14 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { PageKind, PageStatus, PlatformRole } from '../database/entities';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  PageKind,
+  PageStatus,
+  PlatformRole,
+  WorkspaceRole,
+} from '../database/entities';
 import { ContentService } from './content.service';
 
 const actor = { userId: 'admin', platformRole: PlatformRole.WISPO_ADMIN };
@@ -40,9 +49,10 @@ function setup(overrides: Record<string, unknown> = {}) {
   const articles = { find: jest.fn().mockResolvedValue([]) };
   const categories = { find: jest.fn().mockResolvedValue([]) };
   const banners = { find: jest.fn().mockResolvedValue([]) };
+  const memberships = { findOne: jest.fn() };
   const service = new ContentService(
     sites as never,
-    {} as never,
+    memberships as never,
     categories as never,
     {} as never,
     articles as never,
@@ -51,7 +61,7 @@ function setup(overrides: Record<string, unknown> = {}) {
     pages as never,
     banners as never,
   );
-  return { service, page, pages };
+  return { service, page, pages, memberships };
 }
 
 describe('404 system page contracts', () => {
@@ -69,6 +79,22 @@ describe('404 system page contracts', () => {
       }),
     );
     expect(pages.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a content manager change the 404 template', async () => {
+    const { service, pages, memberships } = setup();
+    memberships.findOne.mockResolvedValue({
+      role: WorkspaceRole.SITE_CONTENT_MANAGER,
+      siteIds: ['site-1'],
+    });
+    await expect(
+      service.updateNotFoundTemplate(
+        'site-1',
+        { userId: 'manager', platformRole: PlatformRole.EMPLOYEE },
+        { templateKey: 'editorial' },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(pages.save).not.toHaveBeenCalled();
   });
 
   it('activates an immutable published template reference separately', async () => {

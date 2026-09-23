@@ -41,6 +41,12 @@ import { YouTubeTranscriptions1791177600000 } from './migrations/1791177600000-Y
 import { PreparationGeneralPrompts1791264000000 } from './migrations/1791264000000-PreparationGeneralPrompts';
 import { RemoveLegacyCompetitorStarter1791350400000 } from './migrations/1791350400000-RemoveLegacyCompetitorStarter';
 import { PreparationCheckpoints1791436800000 } from './migrations/1791436800000-PreparationCheckpoints';
+import { SiteScopedRoles1790017200000 } from './migrations/1790017200000-SiteScopedRoles';
+import { CmsRevisionLedger1790103600000 } from './migrations/1790103600000-CmsRevisionLedger';
+import { ProtectCmsRevisionHistory1790107200000 } from './migrations/1790107200000-ProtectCmsRevisionHistory';
+import { ExpandCmsRevisionResourceTypes1790190000000 } from './migrations/1790190000000-ExpandCmsRevisionResourceTypes';
+import { CompleteCmsRevisionResourceTypes1790200000000 } from './migrations/1790200000000-CompleteCmsRevisionResourceTypes';
+import { RemainingMetadataRevisionTypes1790210000000 } from './migrations/1790210000000-RemainingMetadataRevisionTypes';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -88,6 +94,12 @@ export function createDataSourceOptions(): DataSourceOptions {
       PreparationGeneralPrompts1791264000000,
       RemoveLegacyCompetitorStarter1791350400000,
       PreparationCheckpoints1791436800000,
+      SiteScopedRoles1790017200000,
+      CmsRevisionLedger1790103600000,
+      ProtectCmsRevisionHistory1790107200000,
+      ExpandCmsRevisionResourceTypes1790190000000,
+      CompleteCmsRevisionResourceTypes1790200000000,
+      RemainingMetadataRevisionTypes1790210000000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

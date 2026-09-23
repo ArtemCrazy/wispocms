@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ContentView } from "./content-view";
+import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type Section = "root" | "content";
 type Template = {
@@ -15,6 +16,7 @@ type ArticleSettings = {
   listTemplateKey: string;
   listTemplateVersion: string;
   listTemplateConfig: Record<string, unknown>;
+  draftRevisionId: string | null;
 };
 
 function sectionFromUrl(): Section {
@@ -42,6 +44,7 @@ export function MediaArticlesView({
   siteName,
   siteSlug,
   canEdit,
+  canEditCode,
   canApprove,
   canEditPublished,
   onCountChange,
@@ -55,6 +58,7 @@ export function MediaArticlesView({
   siteName: string;
   siteSlug: string;
   canEdit: boolean;
+  canEditCode: boolean;
   canApprove: boolean;
   canEditPublished: boolean;
   onCountChange?: (count: number) => void;
@@ -84,20 +88,28 @@ export function MediaArticlesView({
     return () => window.removeEventListener("popstate", restore);
   }, []);
 
-  useEffect(() => {
+  const loadSettings = useCallback(async () => {
     if (section !== "root") return;
-    Promise.all([
+    const [templateRows, current] = await Promise.all([
       request<Template[]>(`/api/sites/${siteId}/content/templates`),
       request<ArticleSettings | null>(
         `/api/sites/${siteId}/content/articles/settings`,
       ),
-    ])
-      .then(([templateRows, current]) => {
-        setTemplates(templateRows);
-        setSettings(current);
-      })
-      .catch((error) => setMessage((error as Error).message));
+    ]);
+    setTemplates(templateRows);
+    setSettings(current);
   }, [section, siteId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () =>
+        void loadSettings().catch((error) =>
+          setMessage((error as Error).message),
+        ),
+      0,
+    );
+    return () => window.clearTimeout(timer);
+  }, [loadSettings]);
 
   function navigate(next: Section) {
     const url = new URL(window.location.href);
@@ -108,6 +120,7 @@ export function MediaArticlesView({
   }
 
   async function saveTemplate(template: Template) {
+    if (!canEditCode) return;
     try {
       const saved = await request<ArticleSettings>(
         `/api/sites/${siteId}/content/articles/settings`,
@@ -117,6 +130,7 @@ export function MediaArticlesView({
             templateKey: template.key,
             templateVersion: template.version,
             config: settings?.listTemplateConfig ?? {},
+            expectedDraftRevisionId: settings?.draftRevisionId ?? null,
           }),
         },
       );
@@ -176,7 +190,7 @@ export function MediaArticlesView({
             Шаблон
             <select
               value={`${settings?.listTemplateKey ?? "editorial-feed"}@${settings?.listTemplateVersion ?? "1"}`}
-              disabled={!canEdit}
+              disabled={!canEditCode}
               onChange={(event) => {
                 const template = listTemplates.find(
                   (item) =>
@@ -200,6 +214,16 @@ export function MediaArticlesView({
           </a>
         </div>
       </article>
+      <SiteSettingsRevisionPanel
+        siteId={siteId}
+        basePath={`metadata/article-list/${siteId}`}
+        label="Шаблон списка статей"
+        canEdit={canEditCode}
+        canApprove={canApprove}
+        dirty={false}
+        refreshToken={settings?.draftRevisionId ?? null}
+        onChanged={loadSettings}
+      />
       <div className="media-entry-grid">
         <button type="button" onClick={() => navigate("content")}>
           <span className="media-entry-icon">≡</span>

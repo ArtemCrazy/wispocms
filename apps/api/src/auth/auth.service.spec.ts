@@ -129,6 +129,55 @@ describe('AuthService login protection', () => {
 });
 
 describe('AuthService workspace access', () => {
+  it('shows a site owner only the assigned site, not its workspace neighbors', async () => {
+    const workspace = { id: 'workspace-id', name: 'Client', slug: 'client' };
+    const ownerMembership = {
+      workspaceId: workspace.id,
+      workspace,
+      role: 'site_owner',
+      siteIds: ['site-a'],
+    };
+    const memberships = {
+      find: jest
+        .fn()
+        .mockResolvedValueOnce([ownerMembership])
+        .mockResolvedValueOnce([]),
+    };
+    const sites = {
+      createQueryBuilder: jest.fn(() => ({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          { id: 'site-a', workspaceId: workspace.id, name: 'Own site' },
+          { id: 'site-b', workspaceId: workspace.id, name: 'Other site' },
+        ]),
+      })),
+    };
+    const service = new AuthService(
+      {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'owner-id',
+          email: 'owner@example.test',
+          fullName: 'Owner',
+          platformRole: PlatformRole.EMPLOYEE,
+          isActive: true,
+        }),
+      } as never,
+      { find: jest.fn() } as never,
+      sites as never,
+      memberships as never,
+      {} as never,
+    );
+
+    const session = await service.getSession('owner-id');
+    expect(session.workspaces).toHaveLength(1);
+    expect(session.workspaces[0].role).toBe('site_owner');
+    expect(session.workspaces[0].sites.map((site) => site.id)).toEqual([
+      'site-a',
+    ]);
+  });
+
   it('returns no projects to a legacy agency member without memberships', async () => {
     const workspace = { id: 'workspace-id', name: 'Client', slug: 'client' };
     const site = {
@@ -216,15 +265,19 @@ describe('AuthService workspace access', () => {
     ]);
   });
 
-  it('returns exactly multiple assigned workspaces to an employee', async () => {
+  it('returns exactly the workspaces containing assigned sites for a Wispo manager', async () => {
     const assigned = [
       {
         workspaceId: 'workspace-a',
         workspace: { id: 'workspace-a', name: 'A', slug: 'a' },
+        role: 'wispo_manager',
+        siteIds: ['site-a'],
       },
       {
         workspaceId: 'workspace-c',
         workspace: { id: 'workspace-c', name: 'C', slug: 'c' },
+        role: 'wispo_manager',
+        siteIds: ['site-c'],
       },
     ];
     const memberships = {

@@ -20,7 +20,9 @@ describe('ContentService site SEO', () => {
       save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
     };
     const memberships = {
-      findOne: jest.fn().mockResolvedValue(role ? { role } : null),
+      findOne: jest
+        .fn()
+        .mockResolvedValue(role ? { role, siteIds: ['site-id'] } : null),
     };
     const media = { existsBy: jest.fn().mockResolvedValue(mediaExists) };
     const emptyRepository = {};
@@ -39,7 +41,7 @@ describe('ContentService site SEO', () => {
   }
 
   it('normalizes and saves site SEO settings', async () => {
-    const { service, site, sites } = setup(WorkspaceRole.CONTENT_MANAGER);
+    const { service, site, sites } = setup(WorkspaceRole.SITE_CONTENT_MANAGER);
 
     await expect(
       service.updateSiteSeo('site-id', actor, {
@@ -59,7 +61,7 @@ describe('ContentService site SEO', () => {
   });
 
   it('rejects an image from outside the site media library', async () => {
-    const { service } = setup(WorkspaceRole.CONTENT_MANAGER, false);
+    const { service } = setup(WorkspaceRole.SITE_CONTENT_MANAGER, false);
 
     await expect(
       service.updateSiteSeo('site-id', actor, {
@@ -69,7 +71,7 @@ describe('ContentService site SEO', () => {
   });
 
   it('allows an approver to read SEO settings', async () => {
-    const { service } = setup(WorkspaceRole.CLIENT_APPROVER);
+    const { service } = setup(WorkspaceRole.SITE_OWNER);
     await expect(service.getSiteSeo('site-id', actor)).resolves.toMatchObject({
       siteId: 'site-id',
       noIndex: false,
@@ -77,7 +79,7 @@ describe('ContentService site SEO', () => {
   });
 
   it('allows an assigned approver to edit SEO settings', async () => {
-    const { service, sites } = setup(WorkspaceRole.CLIENT_APPROVER);
+    const { service, sites } = setup(WorkspaceRole.SITE_OWNER);
     await expect(
       service.updateSiteSeo('site-id', actor, { noIndex: true }),
     ).resolves.toMatchObject({ noIndex: true });

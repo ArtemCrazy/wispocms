@@ -12,6 +12,10 @@ import {
   skinovaBannerPreviewContexts,
 } from "./skinova-banner-preview-context";
 import { SkinovaBannerPreviewFrame } from "./skinova-banner-preview-frame";
+import {
+  revisionActions,
+  type ArticleRevisionCurrent as BannerRevisionCurrent,
+} from "./article-revision-actions";
 
 type MediaItem = {
   id: string;
@@ -41,6 +45,13 @@ export type MediaBanner = {
   mobileMedia: MediaItem | null;
   isActive: boolean;
   updatedAt: string;
+  draftRevisionId?: string | null;
+};
+
+type BannerRevisionVersion = {
+  id: string;
+  versionNumber: number;
+  createdAt: string;
 };
 
 type BannerAssignment = {
@@ -86,6 +97,7 @@ export function MediaBannerLibraryView({
   siteId,
   siteName,
   canEdit = true,
+  canApprove = false,
   onBackToAssignments,
   createOnOpenKey,
   initialPreviewRenderer,
@@ -93,6 +105,7 @@ export function MediaBannerLibraryView({
   siteId?: string;
   siteName?: string;
   canEdit?: boolean;
+  canApprove?: boolean;
   onBackToAssignments?: () => void;
   createOnOpenKey?: number;
   initialPreviewRenderer?: string;
@@ -106,6 +119,12 @@ export function MediaBannerLibraryView({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [revisionCurrent, setRevisionCurrent] = useState<
+    BannerRevisionCurrent | null | undefined
+  >(undefined);
+  const [versions, setVersions] = useState<BannerRevisionVersion[]>([]);
+  const [revisionPreview, setRevisionPreview] = useState<Draft | null>(null);
   const [slots, setSlots] = useState<BannerSlotDefinition[]>([]);
   const [assignments, setAssignments] = useState<BannerAssignment[]>([]);
   const [previewRenderers, setPreviewRenderers] = useState<
@@ -113,21 +132,41 @@ export function MediaBannerLibraryView({
   >({});
   const hydrated = useRef(false);
   const createdForKey = useRef<number | undefined>(undefined);
+  const revisionRef = useRef<BannerRevisionCurrent | null | undefined>(
+    undefined,
+  );
   const saveQueue = useRef<LatestValueQueue<BannerSaveJob> | null>(null);
-  if (saveQueue.current == null)
+  useEffect(() => {
     saveQueue.current = new LatestValueQueue(async (job) => {
       setSaving(true);
       try {
         const updated = await request<MediaBanner>(
           `/api/sites/${job.siteId}/content/banners/${job.bannerId}`,
-          { method: "PATCH", body: JSON.stringify(job.draft) },
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              ...job.draft,
+              expectedDraftRevisionId: revisionRef.current?.draft?.id ?? null,
+            }),
+          },
         );
         setItems((current) =>
           current.map((item) =>
             item.id === updated.id ? { ...item, ...updated } : item,
           ),
         );
-        setMessage("Все изменения сохранены");
+        const revisionBase = `/api/sites/${job.siteId}/content/banners/${job.bannerId}/revisions`;
+        const current = await request<BannerRevisionCurrent | null>(
+          `${revisionBase}/current`,
+        );
+        const history = current
+          ? await request<BannerRevisionVersion[]>(revisionBase)
+          : [];
+        revisionRef.current = current;
+        setRevisionCurrent(current);
+        setVersions(history);
+        setRevisionPreview(null);
+        setMessage("Новая версия баннера сохранена");
       } catch (error) {
         setMessage(
           error instanceof Error
@@ -138,6 +177,27 @@ export function MediaBannerLibraryView({
         setSaving(false);
       }
     });
+    return () => {
+      saveQueue.current = null;
+    };
+  }, []);
+
+  const reloadRevision = useCallback(
+    async (bannerId: string) => {
+      if (!siteId) return;
+      const revisionBase = `/api/sites/${siteId}/content/banners/${bannerId}/revisions`;
+      const current = await request<BannerRevisionCurrent | null>(
+        `${revisionBase}/current`,
+      );
+      const history = current
+        ? await request<BannerRevisionVersion[]>(revisionBase)
+        : [];
+      revisionRef.current = current;
+      setRevisionCurrent(current);
+      setVersions(history);
+    },
+    [siteId],
+  );
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -235,12 +295,18 @@ export function MediaBannerLibraryView({
           ...current,
           [active.id]: current[active.id] ?? chosen.renderer,
         }));
+      await reloadRevision(active.id);
+    } else {
+      revisionRef.current = null;
+      setRevisionCurrent(null);
+      setVersions([]);
     }
     hydrated.current = true;
   }, [
     canEdit,
     createOnOpenKey,
     initialPreviewRenderer,
+    reloadRevision,
     selectedId,
     siteId,
   ]);
@@ -256,7 +322,14 @@ export function MediaBannerLibraryView({
   }, [siteId]);
 
   useEffect(() => {
-    if (!siteId || !selectedId || !draft || !hydrated.current || !canEdit)
+    if (
+      !siteId ||
+      !selectedId ||
+      !draft ||
+      !hydrated.current ||
+      !canEdit ||
+      revisionRef.current === undefined
+    )
       return;
     const timer = window.setTimeout(() => {
       saveQueue.current?.enqueue({
@@ -270,6 +343,10 @@ export function MediaBannerLibraryView({
 
   function select(item: MediaBanner) {
     hydrated.current = false;
+    revisionRef.current = undefined;
+    setRevisionCurrent(undefined);
+    setVersions([]);
+    setRevisionPreview(null);
     setSelectedId(item.id);
     setDraft({
       name: item.name,
@@ -297,9 +374,17 @@ export function MediaBannerLibraryView({
         ...current,
         [item.id]: chosen.renderer,
       }));
-    window.setTimeout(() => {
-      hydrated.current = true;
-    }, 0);
+    void reloadRevision(item.id)
+      .catch((error) =>
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Не удалось загрузить версию баннера",
+        ),
+      )
+      .finally(() => {
+        hydrated.current = true;
+      });
   }
 
   async function create() {
@@ -335,7 +420,7 @@ export function MediaBannerLibraryView({
     if (
       !siteId ||
       !selectedId ||
-      !canEdit ||
+      !canApprove ||
       !window.confirm("Удалить этот баннер?")
     )
       return;
@@ -352,6 +437,130 @@ export function MediaBannerLibraryView({
       setMessage(
         error instanceof Error ? error.message : "Не удалось удалить баннер",
       );
+    }
+  }
+
+  async function changeBannerRevision(
+    action: "submit" | "approve" | "request-changes" | "publish",
+  ) {
+    if (!siteId || !selectedId || !revisionCurrent?.draft) return;
+    setWorkflowBusy(true);
+    try {
+      await saveQueue.current?.idle();
+      const revisionBase = `/api/sites/${siteId}/content/banners/${selectedId}/revisions`;
+      const openedRevisionId = revisionCurrent.draft.id;
+      const latest = await request<BannerRevisionCurrent | null>(
+        `${revisionBase}/current`,
+      );
+      if (!latest?.draft || latest.draft.id !== openedRevisionId) {
+        await reloadRevision(selectedId);
+        throw new Error(
+          "Черновик уже изменён. Загружена актуальная версия баннера",
+        );
+      }
+      const available = revisionActions(latest, { canEdit, canApprove });
+      const allowed =
+        action === "request-changes" ? available.requestChanges : available[action];
+      if (!allowed) throw new Error("Действие больше недоступно");
+      const reason =
+        action === "request-changes"
+          ? window.prompt("Укажите причину возврата баннера на доработку")
+          : null;
+      if (action === "request-changes" && !reason?.trim()) return;
+      if (
+        action === "publish" &&
+        !window.confirm("Опубликовать одобренную версию баннера?")
+      )
+        return;
+      await request(
+        `${revisionBase}/${encodeURIComponent(openedRevisionId)}/${action}`,
+        {
+          method: "POST",
+          ...(reason
+            ? { body: JSON.stringify({ reason: reason.trim() }) }
+            : {}),
+        },
+      );
+      await reloadRevision(selectedId);
+      if (action === "submit")
+        setMessage("Версия баннера отправлена владельцу сайта на проверку");
+      else if (action === "approve")
+        setMessage("Версия баннера одобрена. Теперь её можно опубликовать");
+      else if (action === "request-changes")
+        setMessage("Версия баннера возвращена на доработку");
+      else {
+        setItems((current) =>
+          current.map((item) =>
+            item.id === selectedId && draft ? { ...item, ...draft } : item,
+          ),
+        );
+        setMessage("Одобренная версия баннера опубликована");
+      }
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось изменить состояние версии баннера",
+      );
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
+
+  async function previewBannerRevision() {
+    if (!siteId || !selectedId || !revisionCurrent?.draft) return;
+    setWorkflowBusy(true);
+    try {
+      await saveQueue.current?.idle();
+      const preview = await request<MediaBanner>(
+        `/api/sites/${siteId}/content/banners/${selectedId}/revisions/${revisionCurrent.draft.id}/preview`,
+      );
+      setRevisionPreview({
+        name: preview.name,
+        title: preview.title,
+        subtitle: preview.subtitle,
+        buttonText: preview.buttonText,
+        linkUrl: preview.linkUrl,
+        mediaId: preview.mediaId,
+        mobileMediaId: preview.mobileMediaId,
+        isActive: preview.isActive,
+      });
+      setMessage(`Открыта сохранённая версия №${revisionCurrent.draft.versionNumber}`);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось открыть версию баннера",
+      );
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }
+
+  async function restoreBannerRevision(version: BannerRevisionVersion) {
+    if (!siteId || !selectedId || !revisionCurrent?.draft || !canEdit) return;
+    setWorkflowBusy(true);
+    try {
+      await saveQueue.current?.idle();
+      await request(
+        `/api/sites/${siteId}/content/banners/${selectedId}/revisions/${version.id}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedDraftRevisionId: revisionCurrent.draft.id,
+          }),
+        },
+      );
+      await load();
+      setMessage(`Версия №${version.versionNumber} восстановлена как новый черновик`);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Не удалось восстановить версию баннера",
+      );
+    } finally {
+      setWorkflowBusy(false);
     }
   }
 
@@ -373,6 +582,10 @@ export function MediaBannerLibraryView({
     selectedAssignedContexts,
     selectedId ? previewRenderers[selectedId] : null,
   );
+  const currentRevisionActions = revisionCurrent
+    ? revisionActions(revisionCurrent, { canEdit, canApprove })
+    : null;
+  const canEditDraft = canEdit && revisionCurrent !== undefined;
 
   function previewPayload(
     item: MediaBanner,
@@ -494,13 +707,130 @@ export function MediaBannerLibraryView({
         {draft ? (
           <aside className="media-editor-card media-banner-editor">
             <div className="autosave-indicator">
-              {saving ? "Сохраняем…" : "Автосохранение включено"}
+              {revisionCurrent === undefined
+                ? "Загружаем версию…"
+                : saving
+                  ? "Сохраняем…"
+                  : "Автосохранение черновика включено"}
             </div>
+            <section className="workflow-panel">
+              <strong>
+                Версия баннера{" "}
+                {revisionCurrent?.draft
+                  ? `№${revisionCurrent.draft.versionNumber}`
+                  : "не создана"}
+              </strong>
+              <p className="publication-hint">
+                {revisionCurrent?.draft
+                  ? `Состояние: ${revisionCurrent.reviewState}. Публичный баннер не меняется до выпуска одобренной версии.`
+                  : revisionCurrent === undefined
+                    ? "Загружаем состояние согласования."
+                    : "Измените баннер, чтобы создать первую версию."}
+              </p>
+              <div className="workflow-actions">
+                {currentRevisionActions?.submit ? (
+                  <button
+                    type="button"
+                    disabled={workflowBusy || saving}
+                    onClick={() => void changeBannerRevision("submit")}
+                  >
+                    Отправить владельцу на проверку
+                  </button>
+                ) : null}
+                {currentRevisionActions?.requestChanges ? (
+                  <button
+                    type="button"
+                    className="changes"
+                    disabled={workflowBusy || saving}
+                    onClick={() => void changeBannerRevision("request-changes")}
+                  >
+                    Вернуть на доработку
+                  </button>
+                ) : null}
+                {currentRevisionActions?.approve ? (
+                  <button
+                    type="button"
+                    className="publish"
+                    disabled={workflowBusy || saving}
+                    onClick={() => void changeBannerRevision("approve")}
+                  >
+                    Одобрить версию
+                  </button>
+                ) : null}
+                {currentRevisionActions?.publish ? (
+                  <button
+                    type="button"
+                    className="publish"
+                    disabled={workflowBusy || saving}
+                    onClick={() => void changeBannerRevision("publish")}
+                  >
+                    Опубликовать одобренную версию
+                  </button>
+                ) : null}
+              </div>
+              {revisionCurrent?.draft ? (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={workflowBusy || saving}
+                  onClick={() => void previewBannerRevision()}
+                >
+                  Просмотреть выбранную версию
+                </button>
+              ) : null}
+              {revisionPreview && selectedBanner && selectedPreviewContext ? (
+                <div
+                  className="media-banner-revision-preview"
+                  role="region"
+                  aria-label="Предпросмотр версии баннера"
+                >
+                  <SkinovaBannerPreviewFrame
+                    compact
+                    label={`${revisionPreview.name}: сохранённая версия`}
+                    payload={previewPayload(
+                      selectedBanner,
+                      revisionPreview,
+                      selectedPreviewContext.renderer,
+                      selectedPreviewContext.emptyHint,
+                      "desktop",
+                    )}
+                  />
+                </div>
+              ) : null}
+              {versions.length ? (
+                <div className="activity-list">
+                  <strong>История версий</strong>
+                  {versions.map((version) => (
+                    <article key={version.id}>
+                      <div>
+                        <strong>Версия №{version.versionNumber}</strong>
+                        <small>
+                          {new Intl.DateTimeFormat("ru", {
+                            dateStyle: "medium",
+                            timeStyle: "short",
+                          }).format(new Date(version.createdAt))}
+                        </small>
+                      </div>
+                      {canEdit &&
+                      version.id !== revisionCurrent?.draft?.id ? (
+                        <button
+                          type="button"
+                          disabled={workflowBusy || saving}
+                          onClick={() => void restoreBannerRevision(version)}
+                        >
+                          Восстановить как новый черновик
+                        </button>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </section>
             <label>
               Внутреннее название
               <input
                 value={draft.name}
-                readOnly={!canEdit}
+                readOnly={!canEditDraft}
                 onChange={(event) => field("name", event.target.value)}
               />
             </label>
@@ -581,7 +911,7 @@ export function MediaBannerLibraryView({
                   : "Изображение для компьютера"}
                 <select
                   value={draft.mediaId ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEditDraft}
                   onChange={(event) =>
                     field("mediaId", event.target.value || null)
                   }
@@ -605,7 +935,7 @@ export function MediaBannerLibraryView({
                 Изображение для телефона
                 <select
                   value={draft.mobileMediaId ?? ""}
-                  disabled={!canEdit}
+                  disabled={!canEditDraft}
                   onChange={(event) =>
                     field("mobileMediaId", event.target.value || null)
                   }
@@ -633,7 +963,7 @@ export function MediaBannerLibraryView({
                   draft.linkUrl,
                   links.map((item) => item.value),
                 )}
-                disabled={!canEdit}
+                disabled={!canEditDraft}
                 onChange={(event) =>
                   field(
                     "linkUrl",
@@ -662,7 +992,7 @@ export function MediaBannerLibraryView({
                   type="url"
                   placeholder="https://example.ru"
                   value={draft.linkUrl ?? ""}
-                  readOnly={!canEdit}
+                  readOnly={!canEditDraft}
                   onChange={(event) => field("linkUrl", event.target.value)}
                 />
               </label>
@@ -671,7 +1001,7 @@ export function MediaBannerLibraryView({
               Заголовок
               <input
                 value={draft.title ?? ""}
-                readOnly={!canEdit}
+                readOnly={!canEditDraft}
                 onChange={(event) => field("title", event.target.value || null)}
               />
             </label>
@@ -680,7 +1010,7 @@ export function MediaBannerLibraryView({
               <textarea
                 rows={3}
                 value={draft.subtitle ?? ""}
-                readOnly={!canEdit}
+                readOnly={!canEditDraft}
                 onChange={(event) =>
                   field("subtitle", event.target.value || null)
                 }
@@ -690,7 +1020,7 @@ export function MediaBannerLibraryView({
               Текст кнопки
               <input
                 value={draft.buttonText ?? ""}
-                readOnly={!canEdit}
+                readOnly={!canEditDraft}
                 onChange={(event) =>
                   field("buttonText", event.target.value || null)
                 }
@@ -700,12 +1030,12 @@ export function MediaBannerLibraryView({
               <input
                 type="checkbox"
                 checked={draft.isActive}
-                disabled={!canEdit}
+                disabled={!canEditDraft}
                 onChange={(event) => field("isActive", event.target.checked)}
               />
               <span>Баннер активен</span>
             </label>
-            {canEdit ? (
+            {canApprove ? (
               <button
                 type="button"
                 className="danger"

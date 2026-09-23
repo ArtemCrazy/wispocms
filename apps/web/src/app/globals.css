@@ -8763,6 +8763,19 @@ input[type="checkbox"] {
   border-color: #d8d1ff;
   background: #fbfaff;
 }
+.author-edit-form {
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.85fr);
+  align-items: start;
+}
+.author-edit-form > .author-fields {
+  display: grid;
+  grid-column: 1;
+  gap: 10px;
+}
+.author-edit-form > .workflow-panel {
+  grid-column: 2;
+  grid-row: 1;
+}
 .directory-empty {
   grid-column: 1 / -1;
   padding: 32px;
@@ -11056,6 +11069,11 @@ input[type="checkbox"] {
   }
   .directory-form {
     grid-template-columns: 1fr;
+  }
+  .author-edit-form > .author-fields,
+  .author-edit-form > .workflow-panel {
+    grid-column: 1;
+    grid-row: auto;
   }
   .directory-grid,
   .authors-grid {

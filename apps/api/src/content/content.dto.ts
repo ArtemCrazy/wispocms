@@ -3,6 +3,7 @@ import {
   ArrayUnique,
   IsArray,
   IsBoolean,
+  IsDefined,
   IsEmail,
   IsEnum,
   IsHexColor,
@@ -18,6 +19,7 @@ import {
   Max,
   MinLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -153,9 +155,17 @@ export class CreateAuthorDto {
   bio?: string | null;
 }
 
-export class UpdateCategoryDto extends CreateCategoryDto {}
+export class UpdateCategoryDto extends CreateCategoryDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+}
 
-export class UpdateAuthorDto extends CreateAuthorDto {}
+export class UpdateAuthorDto extends CreateAuthorDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+}
 
 export class CreateArticleDto {
   @IsString()
@@ -286,6 +296,14 @@ export class UpdateMediaDto {
   @IsString()
   @MaxLength(300)
   altText?: string | null;
+
+  @IsBoolean()
+  isDecorative!: boolean;
+
+  @IsDefined()
+  @ValidateIf((_object, value) => value !== null)
+  @IsUUID()
+  expectedDraftRevisionId!: string | null;
 }
 
 export enum PageBlockType {
@@ -412,7 +430,17 @@ export class CreatePageDto {
   redirects?: PageRedirectDto[];
 }
 
-export class UpdatePageDto extends CreatePageDto {}
+export class UpdatePageDto extends CreatePageDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+}
+
+export class RestorePageRevisionDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId!: string | null;
+}
 
 export class ChangePageStatusDto {
   @IsEnum(PageStatus)
@@ -435,7 +463,7 @@ export class SubmitContactRequestDto {
   @IsOptional()
   @IsEmail()
   @MaxLength(255)
-  email?: string;
+  email?: string | null;
 
   @IsOptional()
   @IsString()
@@ -463,7 +491,11 @@ export class SearchPublicContentDto {
   q!: string;
 }
 
-export class UpdateArticleDto extends CreateArticleDto {}
+export class UpdateArticleDto extends CreateArticleDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+}
 
 export class UpdateArticleBodyDto {
   @IsOptional()
@@ -543,6 +575,10 @@ export class UpdateSiteSeoDto {
 
 export class UpdateSiteGlobalsDto {
   @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+
+  @IsOptional()
   @IsString()
   @MaxLength(200)
   companyName?: string;
@@ -590,15 +626,19 @@ export class UpdateSiteGlobalsDto {
   @IsOptional()
   @IsUrl({ require_protocol: true })
   @MaxLength(500)
-  telegramUrl?: string;
+  telegramUrl?: string | null;
 
   @IsOptional()
   @IsUrl({ require_protocol: true })
   @MaxLength(500)
-  vkUrl?: string;
+  vkUrl?: string | null;
 }
 
 export class UpdateSiteLayoutDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(120)
@@ -606,7 +646,7 @@ export class UpdateSiteLayoutDto {
 
   @IsOptional()
   @IsUUID()
-  logoMediaId?: string;
+  logoMediaId?: string | null;
 
   @IsOptional()
   @IsBoolean()
@@ -765,6 +805,10 @@ export class UpdateBannerDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId?: string | null;
 }
 
 export class CreateSiteVariableDto {
@@ -793,6 +837,16 @@ export class AssignPageBannerDto {
 
   @IsUUID()
   bannerId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId!: string | null;
+}
+
+export class UnassignPageBannerDto {
+  @IsOptional()
+  @IsUUID()
+  expectedDraftRevisionId!: string | null;
 }
 
 export class PopularSearchQueryDto {
@@ -878,6 +932,11 @@ export class UpdateRelatedArticlesDto {
   @ArrayUnique()
   @IsUUID('4', { each: true })
   articleIds!: string[];
+
+  @IsDefined()
+  @ValidateIf((_object, value) => value !== null)
+  @IsUUID()
+  expectedDraftRevisionId!: string | null;
 }
 
 export class DuplicateContentDto {
@@ -900,6 +959,18 @@ export class RestoreArticleVersionDto {
   expectedRevision!: number;
 }
 
+export class RequestArticleRevisionChangesDto {
+  @IsString()
+  @Matches(/\S/)
+  @MaxLength(2000)
+  reason!: string;
+}
+
+export class RestoreArticleRevisionDto {
+  @IsUUID()
+  expectedDraftRevisionId!: string;
+}
+
 export class UpdateArticleSectionSettingsDto {
   @IsString()
   @MaxLength(80)
@@ -912,4 +983,9 @@ export class UpdateArticleSectionSettingsDto {
   @IsOptional()
   @IsObject()
   config?: Record<string, unknown>;
+
+  @IsDefined()
+  @ValidateIf((_object, value) => value !== null)
+  @IsUUID()
+  expectedDraftRevisionId!: string | null;
 }

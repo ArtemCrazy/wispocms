@@ -16,9 +16,28 @@ describe('ContentService site globals', () => {
       save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
     };
     const memberships = {
-      findOne: jest.fn().mockResolvedValue(role ? { role } : null),
+      findOne: jest
+        .fn()
+        .mockResolvedValue(role ? { role, siteIds: ['site-id'] } : null),
     };
     const emptyRepository = {};
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: {
+          id: 'globals-draft-id',
+          versionNumber: 2,
+          snapshot: { phone: '+7 900 000-00-00' },
+        },
+        approvedRevisionId: null,
+        publishedRevisionId: 'globals-published-id',
+        reviewState: 'draft',
+      }),
+      saveDraft: jest.fn().mockResolvedValue({
+        id: 'globals-next-id',
+        versionNumber: 3,
+      }),
+      importPublishedBaseline: jest.fn(),
+    };
     const service = new ContentService(
       sites as never,
       memberships as never,
@@ -29,12 +48,22 @@ describe('ContentService site globals', () => {
       emptyRepository as never,
       emptyRepository as never,
       emptyRepository as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      revisions as never,
     );
-    return { service, site, sites };
+    return { service, site, sites, revisions };
   }
 
   it('allows a content manager to update shared site data', async () => {
-    const { service, site, sites } = setup(WorkspaceRole.CONTENT_MANAGER);
+    const { service, site, sites } = setup(WorkspaceRole.SITE_CONTENT_MANAGER);
 
     await expect(
       service.updateSiteGlobals('site-id', actor, {
@@ -42,41 +71,39 @@ describe('ContentService site globals', () => {
         phone: ' +7 999 111-22-33 ',
         email: ' INFO@WISPO.RU ',
         address: '',
+        expectedDraftRevisionId: 'globals-draft-id',
       }),
     ).resolves.toMatchObject({
       companyName: 'Wispo Media',
       phone: '+7 999 111-22-33',
       email: 'info@wispo.ru',
     });
-    expect(site.globalData).toEqual({
-      companyName: 'Wispo Media',
-      phone: '+7 999 111-22-33',
-      email: 'info@wispo.ru',
-      address: undefined,
-      telegramUrl: undefined,
-      vkUrl: undefined,
-    });
-    expect(sites.save).toHaveBeenCalledWith(site);
+    expect(site.globalData).toEqual({ phone: '+7 900 000-00-00' });
+    expect(sites.save).not.toHaveBeenCalled();
   });
 
-  it('allows an approver to read shared site data', async () => {
-    const { service } = setup(WorkspaceRole.CLIENT_APPROVER);
+  it('allows the site owner to read shared site data', async () => {
+    const { service } = setup(WorkspaceRole.SITE_OWNER);
 
-    await expect(service.getSiteGlobals('site-id', actor)).resolves.toEqual({
-      siteId: 'site-id',
-      phone: '+7 900 000-00-00',
-    });
+    await expect(service.getSiteGlobals('site-id', actor)).resolves.toEqual(
+      expect.objectContaining({
+        siteId: 'site-id',
+        phone: '+7 900 000-00-00',
+        draftRevisionId: 'globals-draft-id',
+      }),
+    );
   });
 
-  it('allows an assigned approver to edit shared site data', async () => {
-    const { service, sites } = setup(WorkspaceRole.CLIENT_APPROVER);
+  it('allows the site owner to edit shared site data', async () => {
+    const { service, sites } = setup(WorkspaceRole.SITE_OWNER);
 
     await expect(
       service.updateSiteGlobals('site-id', actor, {
         phone: '+7 999 111-22-33',
+        expectedDraftRevisionId: 'globals-draft-id',
       }),
     ).resolves.toMatchObject({ phone: '+7 999 111-22-33' });
-    expect(sites.save).toHaveBeenCalled();
+    expect(sites.save).not.toHaveBeenCalled();
   });
 
   it('does not allow an unassigned member to edit shared site data', async () => {
@@ -84,6 +111,7 @@ describe('ContentService site globals', () => {
     await expect(
       service.updateSiteGlobals('site-id', actor, {
         phone: '+7 999 111-22-33',
+        expectedDraftRevisionId: 'globals-draft-id',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });

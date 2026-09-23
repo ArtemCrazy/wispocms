@@ -2,6 +2,7 @@
 .env.local
 deploy/.env.preview
 node_modules/
+.pnpm-store/
 .next/
 dist/
 coverage/

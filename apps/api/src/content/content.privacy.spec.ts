@@ -5,7 +5,10 @@ import { ContentService } from './content.service';
 
 const actor = { userId: 'admin', platformRole: PlatformRole.WISPO_ADMIN };
 
-function setup(privacyState: Record<string, unknown>) {
+function setup(
+  privacyState: Record<string, unknown>,
+  options: { revisions?: Record<string, unknown> } = {},
+) {
   const page = {
     id: 'page-1',
     siteId: 'site-1',
@@ -53,11 +56,33 @@ function setup(privacyState: Record<string, unknown>) {
     pages as never,
     empty as never,
     privacyStates as never,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.revisions as never,
   );
   return { service, page, pages, privacyStates };
 }
 
 describe('privacy policy contracts', () => {
+  it('blocks the legacy privacy status route when revision workflow is enabled', async () => {
+    const { service, pages } = setup(
+      { legalModel: { version: 'approved-1', status: 'approved' } },
+      { revisions: {} },
+    );
+    await expect(
+      service.changePageStatus('site-1', 'page-1', actor, {
+        status: PageStatus.PUBLISHED,
+      }),
+    ).rejects.toThrow('согласованную ревизию');
+    expect(pages.save).not.toHaveBeenCalled();
+  });
+
   it('blocks a direct publish attempt while the selected legal model is draft', async () => {
     const { service, pages } = setup({
       legalModel: { version: 'draft-1', status: 'draft' },

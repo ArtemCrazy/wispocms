@@ -2,7 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { PlatformRole, SiteType, WorkspaceRole } from '../database/entities';
 import { ContentService } from './content.service';
 
-describe('ContentService workspace boundary', () => {
+describe('ContentService site boundary', () => {
   const articles = { find: jest.fn().mockResolvedValue([]) };
   const sites = {
     findOne: jest.fn().mockResolvedValue({
@@ -26,14 +26,35 @@ describe('ContentService workspace boundary', () => {
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('allows full content access inside an assigned workspace', async () => {
-    memberships.findOne.mockResolvedValue({ role: WorkspaceRole.EMPLOYEE });
+  it('allows reading a site explicitly assigned to a content manager', async () => {
+    memberships.findOne.mockResolvedValue({
+      role: WorkspaceRole.SITE_CONTENT_MANAGER,
+      siteIds: ['site-id'],
+    });
     await expect(
       service.listArticles('site-id', {
         userId: 'employee-id',
         platformRole: PlatformRole.EMPLOYEE,
       }),
     ).resolves.toEqual([]);
+  });
+
+  it('denies a different site in the same workspace', async () => {
+    sites.findOne.mockResolvedValueOnce({
+      id: 'other-site-id',
+      workspaceId: 'workspace-id',
+      siteType: SiteType.MEDIA,
+    });
+    memberships.findOne.mockResolvedValue({
+      role: WorkspaceRole.SITE_CONTENT_MANAGER,
+      siteIds: ['site-id'],
+    });
+    await expect(
+      service.listArticles('other-site-id', {
+        userId: 'employee-id',
+        platformRole: PlatformRole.EMPLOYEE,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('returns 403 outside employee assignments', async () => {
