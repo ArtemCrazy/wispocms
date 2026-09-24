@@ -4,7 +4,11 @@ name: wispo-cms-customer
 
 services:
   api:
+    networks:
+      - default
+      - ipv6_egress
     environment:
+      NODE_OPTIONS: --dns-result-order=ipv6first
       WEB_ORIGIN: https://wispo-cms.129.101.122.78.nip.io,https://cms.kpbox.ru
       PUBLIC_DOMAIN_TARGETS: 129.101.122.78
       WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io,cms.kpbox.ru
@@ -12,3 +16,8 @@ services:
     environment:
       PUBLIC_APP_URL: https://wispo-cms.129.101.122.78.nip.io
       WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io,cms.kpbox.ru
+
+networks:
+  ipv6_egress:
+    external: true
+    name: wispo-cms-ipv6-egress
