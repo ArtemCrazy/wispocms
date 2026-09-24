@@ -1,0 +1,14 @@
+# Customer-owned server overlay. Use together with compose.preview.yaml and
+# a private .env.customer copied from the current installation.
+name: wispo-cms-customer
+
+services:
+  api:
+    environment:
+      WEB_ORIGIN: https://wispo-cms.129.101.122.78.nip.io,https://cms.kpbox.ru
+      PUBLIC_DOMAIN_TARGETS: 129.101.122.78
+      WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io,cms.kpbox.ru
+  web:
+    environment:
+      PUBLIC_APP_URL: https://wispo-cms.129.101.122.78.nip.io
+      WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io,cms.kpbox.ru
