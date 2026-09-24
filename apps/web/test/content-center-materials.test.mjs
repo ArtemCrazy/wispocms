@@ -52,6 +52,12 @@ test('site row has no novice helper text while keeping its add action', () => {
   assert.match(html, /aria-label="Добавить ссылку: Сайты"/);
 });
 
+test('project materials hint is concise and keeps the 10 MB limit', () => {
+  const html = render([]);
+  assert.match(html, /Файлы, тексты и ссылки · до 10 МБ/);
+  assert.doesNotMatch(html, /дополнительные ссылки|10 МБ на файл/);
+});
+
 test('category hints sit directly under muted labels, before source actions', () => {
   const html = render([]);
   assert.match(source, /<div className=\{styles\.sourceLabel\}>[\s\S]*?<span className=\{styles\.sourceHint\}>/);

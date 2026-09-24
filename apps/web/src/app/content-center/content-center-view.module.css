@@ -757,6 +757,10 @@
 .sourceRow:last-child {
   border-bottom: 0;
   padding-bottom: 0;
+  grid-template-columns: 250px minmax(0, 1fr);
+}
+.sourceRow:last-child .sourceHint {
+  white-space: nowrap;
 }
 .sourceLabel {
   display: grid;
