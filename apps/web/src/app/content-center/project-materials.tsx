@@ -134,6 +134,8 @@ export function ProjectMaterials({
                       {(m.site_checked_at ||
                         m.url_category === "site" ||
                         m.url_category === "maps" ||
+                        (m.url_category === "marketplace" &&
+                          marketplaceForUrl(m.source_url ?? "") === "ozon") ||
                         isSocialFeedMaterial(m)) &&
                         showSources && (
                           <button

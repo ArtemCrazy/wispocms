@@ -37,6 +37,11 @@ import {
   GoogleMapSourceClient,
   GoogleMapSourceError,
 } from './google-maps-source';
+import {
+  isOzonSellerUrl,
+  OzonSourceClient,
+  OzonSourceError,
+} from './ozon-source';
 import type {
   PreparationInput,
   PreparationProgress,
@@ -60,6 +65,7 @@ export class PreparationCollectionService {
     private readonly yandexMaps: YandexMapSourceClient = new YandexMapSourceClient(),
     private readonly twoGisMaps: TwoGisMapSourceClient = new TwoGisMapSourceClient(),
     private readonly googleMaps: GoogleMapSourceClient = new GoogleMapSourceClient(),
+    private readonly ozon: OzonSourceClient = new OzonSourceClient(),
   ) {}
 
   async collect(
@@ -121,6 +127,9 @@ export class PreparationCollectionService {
         material.urlCategory === 'maps' && is2GisMapsUrl(material.sourceUrl);
       const googleMapsSource =
         material.urlCategory === 'maps' && isGoogleMapsUrl(material.sourceUrl);
+      const ozonSource =
+        material.urlCategory === 'marketplace' &&
+        isOzonSellerUrl(material.sourceUrl);
       if (material.sourceUrl && vkSource) {
         snapshot.mode = 'social-feed';
         try {
@@ -251,6 +260,40 @@ export class PreparationCollectionService {
                   : 'Google Maps',
               status: 'failed',
               recommended: true,
+              error: message,
+            },
+          ];
+        }
+      } else if (material.sourceUrl && ozonSource) {
+        try {
+          const collected = await this.ozon.collect(
+            material.sourceUrl,
+            signal,
+            (completed, total) =>
+              progress({
+                stage: 'collecting',
+                message: `Ozon: проверено товаров ${completed} из ${total}`,
+                completed,
+                total,
+              }),
+          );
+          snapshot.pages = collected.pages;
+          snapshot.warnings = collected.warnings;
+          snapshot.coverage = collected.coverage;
+        } catch (error) {
+          signal.throwIfAborted();
+          const message =
+            error instanceof OzonSourceError
+              ? error.message
+              : 'Не удалось прочитать публичный магазин Ozon. Предыдущий сбор сохранён.';
+          if (options.allowUnread) throw new AiProviderError(message);
+          snapshot.pages = [
+            {
+              url: material.sourceUrl,
+              title: material.title,
+              group: 'Ozon',
+              recommended: true,
+              status: 'failed',
               error: message,
             },
           ];
@@ -420,6 +463,7 @@ export class PreparationCollectionService {
           yandexMapsSource ||
           twoGisMapsSource ||
           googleMapsSource ||
+          ozonSource ||
           vkSource ||
           telegramSource ||
           instagramSource ||

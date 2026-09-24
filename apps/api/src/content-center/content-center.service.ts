@@ -49,6 +49,7 @@ import {
 import { isYandexMapsUrl } from './yandex-map-source';
 import { is2GisMapsUrl } from './2gis-map-source';
 import { isGoogleMapsUrl } from './google-maps-source';
+import { isOzonSellerUrl, ozonSellerAddress } from './ozon-source';
 import { wouldLoseGoogleReviews } from './google-maps-refresh';
 
 type Actor = NonNullable<AuthenticatedRequest['auth']>;
@@ -300,12 +301,14 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             (isVkUrl(material.source_url) ||
               isTelegramUrl(material.source_url) ||
               isSocialUrl(material.source_url, 'instagram') ||
-              isSocialUrl(material.source_url, 'youtube')))
+              isSocialUrl(material.source_url, 'youtube'))) ||
+          (material.url_category === 'marketplace' &&
+            isOzonSellerUrl(material.source_url))
         ) ||
         !material.source_url
       )
         throw new BadRequestException(
-          'Обновить сбор можно для сайта, Яндекс Карт, 2ГИС, Google Maps, VK, Telegram, Instagram или YouTube',
+          'Обновить сбор можно для сайта, Яндекс Карт, 2ГИС, Google Maps, VK, Telegram, Instagram, YouTube или магазина Ozon',
         );
       if (material.revision !== revision)
         throw new ConflictException(
@@ -431,15 +434,19 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         dto.urlCategory === 'maps' && is2GisMapsUrl(dto.sourceUrl);
       const googleMapsSource =
         dto.urlCategory === 'maps' && isGoogleMapsUrl(dto.sourceUrl);
+      const ozonSource =
+        dto.urlCategory === 'marketplace' && isOzonSellerUrl(dto.sourceUrl);
       if (vkSource) vkCommunityAddress(dto.sourceUrl!);
       if (telegramSource) telegramChannel(dto.sourceUrl!);
       if (instagramSource) instagramUsername(dto.sourceUrl!);
       if (youtubeSource) youtubeChannel(dto.sourceUrl!);
+      if (ozonSource) ozonSellerAddress(dto.sourceUrl!);
       if (
         dto.urlCategory === 'site' ||
         yandexMapsSource ||
         twoGisMapsSource ||
         googleMapsSource ||
+        ozonSource ||
         vkSource ||
         telegramSource ||
         instagramSource ||
@@ -937,7 +944,10 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
             const snapshot = resolved.sources?.[0];
             if (!snapshot)
               throw new AiProviderError('Не удалось получить результат сбора');
-            if (snapshot.map?.provider === 'google') {
+            if (
+              snapshot.map?.provider === 'google' ||
+              isOzonSellerUrl(snapshot.sourceUrl)
+            ) {
               const [material] = await manager.query<
                 Array<{ site_pages: SourceSnapshot | null }>
               >(
@@ -949,6 +959,21 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
               )
                 throw new AiProviderError(
                   'Google Maps временно не показал отзывы. Предыдущий сбор сохранён; повторите обновление позже.',
+                );
+              const oldOzonReviews =
+                material?.site_pages?.pages.filter(
+                  (page) =>
+                    page.group === 'Отзывы о товарах Ozon' &&
+                    page.status === 'loaded',
+                ).length ?? 0;
+              const newOzonReviews = snapshot.pages.filter(
+                (page) =>
+                  page.group === 'Отзывы о товарах Ozon' &&
+                  page.status === 'loaded',
+              ).length;
+              if (oldOzonReviews > 0 && newOzonReviews === 0)
+                throw new AiProviderError(
+                  'Ozon временно не показал отзывы о товарах. Предыдущий сбор сохранён; повторите обновление позже.',
                 );
             }
             await manager.query(

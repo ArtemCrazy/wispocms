@@ -14,6 +14,11 @@ services:
       WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io
       # Outbound mail is intentionally disabled until the customer provides SMTP.
       SMTP_HOST: 127.0.0.1
+      # Public Ozon pages are blocked from the VDS network. Credentials stay in
+      # the private .env.customer file; do not put them in Git or browser code.
+      OZON_PROXY_SERVER: ${OZON_PROXY_SERVER:-}
+      OZON_PROXY_USERNAME: ${OZON_PROXY_USERNAME:-}
+      OZON_PROXY_PASSWORD: ${OZON_PROXY_PASSWORD:-}
   web:
     environment:
       PUBLIC_APP_URL: https://wispo-cms.129.101.122.78.nip.io
