@@ -1,6 +1,42 @@
 export type PreparationStatus =
   "queued" | "processing" | "succeeded" | "failed";
 
+export const PREPARATION_STAGES = [
+  { key: "collecting", label: "Источники" },
+  { key: "analysing", label: "Анализ" },
+  { key: "synthesizing", label: "Итог" },
+] as const;
+
+export type PreparationProgress = {
+  stage?: (typeof PREPARATION_STAGES)[number]["key"];
+  message?: string;
+  completed?: number;
+  total?: number;
+};
+
+export function preparationStageIndex(stage?: PreparationProgress["stage"]) {
+  return PREPARATION_STAGES.findIndex((item) => item.key === stage);
+}
+
+/** A percentage of the current counted operation, never of the whole AI run. */
+export function preparationOperation(progress?: PreparationProgress | null) {
+  const completed = progress?.completed;
+  const total = progress?.total;
+  if (
+    !Number.isFinite(completed) ||
+    !Number.isFinite(total) ||
+    completed === undefined ||
+    total === undefined ||
+    total <= 0
+  )
+    return null;
+  return {
+    completed: Math.max(0, Math.min(total, Math.floor(completed))),
+    total: Math.floor(total),
+    percent: Math.max(0, Math.min(100, Math.floor((completed / total) * 100))),
+  };
+}
+
 /** Keep the latest server-confirmed state readable beside the run button. */
 export function preparationRunLabel(
   status: PreparationStatus,

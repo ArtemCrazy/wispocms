@@ -283,6 +283,73 @@
   border-radius: 50%;
   animation: runSpin 0.8s linear infinite;
 }
+.runProgress {
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid #e8e4fa;
+  border-radius: 10px;
+  background: #faf9ff;
+}
+.runStages {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.runStages li {
+  min-width: 0;
+  padding-top: 7px;
+  border-top: 3px solid #e2deef;
+  color: #7a7b8a;
+  font-size: 12px;
+}
+.runStages li[data-state="done"] {
+  border-top-color: #53a985;
+  color: #276349;
+}
+.runStages li[data-state="active"] {
+  border-top-color: #674ad3;
+  color: #454354;
+  font-weight: 600;
+}
+.runProgressHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 12px;
+  color: #454354;
+  font-size: 13px;
+}
+.runProgressHeading span {
+  color: #674ad3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.runProgressBar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 8px;
+  accent-color: #674ad3;
+}
+.runProgressDetail {
+  margin: 9px 0 0;
+  color: #626878;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.runProgressCount {
+  display: block;
+  margin-top: 5px;
+  color: #74798a;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 @keyframes runSpin {
   to { transform: rotate(360deg); }
 }

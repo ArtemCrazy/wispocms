@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import {
   appendDictation,
   collectDictation,
+  preparationOperation,
   preparationRunLabel,
+  preparationStageIndex,
   speechErrorMessage,
 } from "../src/app/content-center/preparation-state.ts";
 import {
@@ -216,6 +218,27 @@ test("inline run status reflects only server-confirmed states and preserves fail
   assert.equal(preparationRunLabel("succeeded"), "Готово — версия доступна в истории");
   assert.match(preparationRunLabel("failed", "DeepSeek вернул неполный результат"), /Не завершено: DeepSeek вернул неполный результат/);
   assert.match(preparationRunLabel("failed", null), /Последняя версия сохранена/);
+});
+
+test("live preparation shows real stages and a percentage only for a counted operation", () => {
+  const view = readFileSync(
+    new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.equal(preparationStageIndex("collecting"), 0);
+  assert.equal(preparationStageIndex("analysing"), 1);
+  assert.equal(preparationStageIndex("synthesizing"), 2);
+  assert.equal(preparationStageIndex(), -1);
+  assert.deepEqual(preparationOperation({ completed: 5, total: 22 }), {
+    completed: 5,
+    total: 22,
+    percent: 22,
+  });
+  assert.equal(preparationOperation({ stage: "synthesizing" }), null);
+  assert.equal(preparationOperation({ completed: 0, total: 0 }), null);
+  assert.match(view, /aria-label="Ход обработки материалов"/);
+  assert.match(view, /≈ \{currentOperation\.percent\}% текущей операции/);
+  assert.match(view, /runProgress\?\.message/);
 });
 
 test("a failed run can be continued explicitly without silently starting a fresh paid run", () => {

@@ -39,7 +39,14 @@ import {
   type SourceCategory,
   type SourceSnapshot,
 } from "./materials";
-import { appendDictation, preparationRunLabel } from "./preparation-state";
+import {
+  appendDictation,
+  PREPARATION_STAGES,
+  preparationOperation,
+  preparationRunLabel,
+  preparationStageIndex,
+  type PreparationProgress,
+} from "./preparation-state";
 import {
   CONTENT_CENTER_SECTIONS,
   parseContentCenterScreen,
@@ -75,7 +82,7 @@ type Overview = {
     resumable?: boolean;
     materialIds?: string[] | null;
     error: string | null;
-    progress?: { message: string } | null;
+    progress?: PreparationProgress | null;
   } | null;
   ai: { connected: boolean };
   draft: {
@@ -280,6 +287,9 @@ export function ContentCenterView({
 
   const running =
     data?.run?.status === "queued" || data?.run?.status === "processing";
+  const runProgress = data?.run?.progress;
+  const currentStage = preparationStageIndex(runProgress?.stage);
+  const currentOperation = preparationOperation(runProgress);
   useEffect(() => {
     if (!running) return;
     const timer = window.setInterval(() => {
@@ -625,6 +635,52 @@ export function ContentCenterView({
                       </span>
                     )}
                   </div>
+                  {running && (
+                    <div className={styles.runProgress} role="group" aria-label="Ход обработки материалов">
+                      <ol className={styles.runStages}>
+                        {PREPARATION_STAGES.map((stage, index) => (
+                          <li
+                            key={stage.key}
+                            data-state={
+                              currentStage < 0
+                                ? "pending"
+                                : index < currentStage
+                                  ? "done"
+                                  : index === currentStage
+                                    ? "active"
+                                    : "pending"
+                            }
+                          >
+                            {stage.label}
+                          </li>
+                        ))}
+                      </ol>
+                      <div className={styles.runProgressHeading}>
+                        <strong>
+                          {currentStage >= 0
+                            ? PREPARATION_STAGES[currentStage].label
+                            : "Ожидаем начала"}
+                        </strong>
+                        {currentOperation && (
+                          <span>≈ {currentOperation.percent}% текущей операции</span>
+                        )}
+                      </div>
+                      <progress
+                        className={styles.runProgressBar}
+                        max={100}
+                        value={currentOperation?.percent}
+                        aria-label="Ход текущей операции"
+                      />
+                      <p className={styles.runProgressDetail}>
+                        {runProgress?.message || "Задача принята и ожидает обработки."}
+                      </p>
+                      {currentOperation && (
+                        <span className={styles.runProgressCount}>
+                          {currentOperation.completed} из {currentOperation.total}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </article>
                 <article className={styles.card}>
                   <div>
