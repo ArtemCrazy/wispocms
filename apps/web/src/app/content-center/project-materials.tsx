@@ -14,12 +14,18 @@ import {
   type SourceCategory,
 } from "./materials";
 import styles from "./content-center-view.module.css";
-import { MapIcon, SocialIcon, WebsiteIcon } from "./social-icon";
+import { MapIcon, MarketplaceIcon, SocialIcon, WebsiteIcon } from "./social-icon";
 import { mapProviderForUrl } from "./map-material-fields";
+import { marketplaceForUrl } from "./marketplace-material-fields";
 
 function MapSourceIcon({ sourceUrl }: { sourceUrl: string | null }) {
   const provider = mapProviderForUrl(sourceUrl ?? "");
   return provider === "other" ? null : <MapIcon provider={provider} />;
+}
+
+function MarketplaceSourceIcon({ sourceUrl }: { sourceUrl: string | null }) {
+  const marketplace = marketplaceForUrl(sourceUrl ?? "");
+  return marketplace === "other" ? null : <MarketplaceIcon marketplace={marketplace} />;
 }
 
 function FileTypeBadge({
@@ -114,6 +120,8 @@ export function ProjectMaterials({
                           <WebsiteIcon />
                         ) : m.url_category === "maps" ? (
                           <MapSourceIcon sourceUrl={m.source_url} />
+                        ) : m.url_category === "marketplace" ? (
+                          <MarketplaceSourceIcon sourceUrl={m.source_url} />
                         ) : (
                           <SocialIcon network={socialIconNetwork(m)} />
                         )}

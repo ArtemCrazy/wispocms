@@ -25,6 +25,12 @@ import {
   socialSourceUrl,
   type SocialNetwork,
 } from "./social-material-fields";
+import {
+  MarketplaceMaterialFields,
+  marketplaceForUrl,
+  marketplaceSourceUrl,
+  type Marketplace,
+} from "./marketplace-material-fields";
 import { SourceRegistry } from "./source-registry";
 import { SourceRefresh } from "./source-refresh";
 import { ResearchView } from "./research-view";
@@ -230,8 +236,10 @@ export function ContentCenterView({
   const [siteMaterialMode, setSiteMaterialMode] = useState(false);
   const [socialMaterialMode, setSocialMaterialMode] = useState(false);
   const [mapMaterialMode, setMapMaterialMode] = useState(false);
+  const [marketplaceMaterialMode, setMarketplaceMaterialMode] = useState(false);
   const [socialNetwork, setSocialNetwork] = useState<SocialNetwork>("vk");
   const [mapProvider, setMapProvider] = useState<MapProvider>("yandex");
+  const [marketplace, setMarketplace] = useState<Marketplace>("ozon");
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
@@ -554,6 +562,10 @@ export function ContentCenterView({
                       kind === "url" && urlCategory === "maps",
                     );
                     setMapProvider("yandex");
+                    setMarketplaceMaterialMode(
+                      kind === "url" && urlCategory === "marketplace",
+                    );
+                    setMarketplace("ozon");
                     setSiteMaterialMode(
                       kind === "url" && urlCategory === "site",
                     );
@@ -574,6 +586,10 @@ export function ContentCenterView({
                       setMapMaterialMode(
                         row.kind === "url" && row.url_category === "maps",
                       );
+                      setMarketplaceMaterialMode(
+                        row.kind === "url" && row.url_category === "marketplace",
+                      );
+                      setMarketplace(marketplaceForUrl(row.source_url ?? ""));
                       setMapProvider(mapProviderForUrl(row.source_url ?? ""));
                       setSocialNetwork(
                         socialNetworkForUrl(row.source_url ?? ""),
@@ -1012,6 +1028,10 @@ export function ContentCenterView({
                 ? material.id
                   ? "Изменить социальную сеть"
                   : "Добавить социальную сеть"
+              : marketplaceMaterialMode
+                ? material.id
+                  ? "Изменить маркетплейс"
+                  : "Добавить маркетплейс"
                 : material.id
                   ? "Изменить материал"
                   : "Добавить материал"
@@ -1073,6 +1093,19 @@ export function ContentCenterView({
                               material.title ||
                               siteMaterialTitle(material.sourceUrl),
                           }
+                      : marketplaceMaterialMode
+                        ? {
+                            ...normalizedMaterial,
+                            kind: "url",
+                            urlCategory: "marketplace",
+                            sourceUrl: marketplaceSourceUrl(
+                              material.sourceUrl,
+                              marketplace,
+                            ),
+                            title:
+                              material.title ||
+                              siteMaterialTitle(material.sourceUrl),
+                          }
                       : normalizedMaterial,
                 );
                 await load();
@@ -1120,6 +1153,19 @@ export function ContentCenterView({
                   sourceUrl={material.sourceUrl}
                   onNetworkChange={(network) => {
                     setSocialNetwork(network);
+                    setDialogError("");
+                  }}
+                  onChange={(sourceUrl) => {
+                    setMaterial({ ...material, sourceUrl });
+                    setDialogError("");
+                  }}
+                />
+              ) : marketplaceMaterialMode ? (
+                <MarketplaceMaterialFields
+                  marketplace={marketplace}
+                  sourceUrl={material.sourceUrl}
+                  onMarketplaceChange={(value) => {
+                    setMarketplace(value);
                     setDialogError("");
                   }}
                   onChange={(sourceUrl) => {
@@ -1267,6 +1313,8 @@ export function ContentCenterView({
                       ? "Сохранить сайт"
                       : socialMaterialMode
                         ? "Сохранить"
+                        : marketplaceMaterialMode
+                          ? "Сохранить"
                         : "Сохранить материал"}
                 </button>
                 <button

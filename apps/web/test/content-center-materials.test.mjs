@@ -16,7 +16,7 @@ const websiteIconSource = await readFile(new URL('../public/icons/source/website
 const iconCompiled = ts.transpileModule(iconSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } });
 const iconTarget = { exports: {} };
 new Function('require', 'module', 'exports', iconCompiled.outputText)(id => id.endsWith('.css') ? { default: {} } : require(id), iconTarget, iconTarget.exports);
-new Function('require', 'module', 'exports', compiled.outputText)(id => id === './social-icon' ? iconTarget.exports : id === './materials' ? materials : id === './map-material-fields' ? { mapProviderForUrl() { return 'other'; } } : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
+new Function('require', 'module', 'exports', compiled.outputText)(id => id === './social-icon' ? iconTarget.exports : id === './materials' ? materials : id === './map-material-fields' ? { mapProviderForUrl() { return 'other'; } } : id === './marketplace-material-fields' ? { marketplaceForUrl(value) { return value.includes('ozon.ru') ? 'ozon' : value.includes('wildberries.ru') ? 'wildberries' : value.includes('market.yandex.ru') ? 'yandex-market' : 'other'; } } : id.endsWith('.css') ? { default: {} } : require(id), target, target.exports);
 const render = (items, props = {}) => renderToStaticMarkup(React.createElement(target.exports.ProjectMaterials, { materials: items, busy: false, base: '/api/workspaces/one/content-center', add() {}, edit() {}, remove() {}, upload() {}, ...props }));
 
 test('social source chips show the matching brand without changing actions or lookalike domains', () => {
@@ -27,6 +27,13 @@ test('social source chips show the matching brand without changing actions or lo
     assert.match(html, /Изменить ссылку/);
     assert.match(html, /Удалить ссылку/);
     assert.ok(html.includes(`>${materials.displaySourceChipUrl(source_url)}</span>`));
+  }
+});
+
+test('marketplace source chips show the selected brand', () => {
+  for (const [source_url, brand] of [['https://www.ozon.ru/seller/nonton/', 'ozon'], ['https://www.wildberries.ru/seller/123', 'wildberries'], ['https://market.yandex.ru/business/123', 'yandex-market']]) {
+    const html = render([{ id: brand, title: brand, kind: 'url', url_category: 'marketplace', source_url }]);
+    assert.ok(html.includes(`src="/icons/marketplace/${brand}.png"`));
   }
 });
 
