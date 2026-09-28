@@ -36,7 +36,6 @@ import { SourceRefresh } from "./source-refresh";
 import { ResearchView } from "./research-view";
 import { CreationView } from "./creation-view";
 import {
-  SOURCE_CATEGORIES,
   isVkMaterial,
   isSocialFeedMaterial,
   displayMaterialUrl,
@@ -1032,9 +1031,13 @@ export function ContentCenterView({
                 ? material.id
                   ? "Изменить маркетплейс"
                   : "Добавить маркетплейс"
-                : material.id
-                  ? "Изменить материал"
-                  : "Добавить материал"
+                : material.kind === "url"
+                  ? material.id
+                    ? "Изменить ссылку"
+                    : "Добавить ссылку"
+                  : material.id
+                    ? "Изменить текст"
+                    : "Добавить текст"
           }
           busy={busy}
           close={() => setMaterial(null)}
@@ -1175,24 +1178,6 @@ export function ContentCenterView({
                 />
               ) : (
                 <>
-                  {!material.id && (
-                    <div className={styles.actions}>
-                      {(["text", "url"] as const).map((kind) => (
-                        <button
-                          type="button"
-                          key={kind}
-                          className={
-                            material.kind === kind ? styles.selected : ""
-                          }
-                          onClick={() =>
-                            setMaterial({ ...blankMaterial(), kind })
-                          }
-                        >
-                          {{ text: "Текст", url: "Ссылка", file: "Файл" }[kind]}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                   <label className={styles.field}>
                     Название
                     <input
@@ -1207,24 +1192,6 @@ export function ContentCenterView({
                   </label>
                   {material.kind === "url" ? (
                     <>
-                      <label className={styles.field}>
-                        Категория источника
-                        <select
-                          value={material.urlCategory ?? "other"}
-                          onChange={(event) =>
-                            setMaterial({
-                              ...material,
-                              urlCategory: event.target.value as SourceCategory,
-                            })
-                          }
-                        >
-                          {SOURCE_CATEGORIES.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
                       <label className={styles.field}>
                         {material.urlCategory === "site"
                           ? "Адрес сайта"
@@ -1292,8 +1259,7 @@ export function ContentCenterView({
                         />
                       </label>
                       <p className={styles.muted}>
-                        Документы и изображения загружаются в разделе «Файлы и
-                        тексты проекта».
+                        Файлы загружаются кнопкой «+ Файл» в материалах проекта.
                       </p>
                     </>
                   )}
@@ -1313,9 +1279,11 @@ export function ContentCenterView({
                       ? "Сохранить сайт"
                       : socialMaterialMode
                         ? "Сохранить"
-                        : marketplaceMaterialMode
-                          ? "Сохранить"
-                        : "Сохранить материал"}
+                      : marketplaceMaterialMode
+                        ? "Сохранить"
+                        : material.kind === "url"
+                          ? "Сохранить ссылку"
+                          : "Сохранить текст"}
                 </button>
                 <button
                   type="button"

@@ -66,6 +66,15 @@ test("manual material input does not impose the old 40k character cap", () => {
   assert.doesNotMatch(view, /maxLength=\{40000\}|40 000 символов/);
 });
 
+test("material buttons open their own form without a redundant kind or category choice", () => {
+  const view = readFileSync(new URL("../src/app/content-center/content-center-view.tsx", import.meta.url), "utf8");
+  assert.match(view, /setMaterial\(\{ \.\.\.blankMaterial\(\), kind, urlCategory \}\)/);
+  assert.doesNotMatch(view, /setMaterial\(\{ \.\.\.blankMaterial\(\), kind \}\)/);
+  assert.doesNotMatch(view, /Категория источника/);
+  assert.match(view, /"Добавить ссылку"/);
+  assert.match(view, /"Добавить текст"/);
+});
+
 test("an empty material list is accepted without a separate confirmation", () => {
   const view = readFileSync(
     new URL("../src/app/content-center/content-center-view.tsx", import.meta.url),
