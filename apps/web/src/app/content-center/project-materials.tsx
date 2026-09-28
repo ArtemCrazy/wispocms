@@ -232,6 +232,15 @@ export function ProjectMaterials({
                     </div>
                   </div>
                 ))}
+              {category.id === "other" && (
+                <button
+                  disabled={busy || materials.length >= 50}
+                  onClick={() => add("text")}
+                  aria-label="Добавить текст проекта"
+                >
+                  + Текст
+                </button>
+              )}
               <button
                 disabled={busy || materials.length >= 50}
                 onClick={() => add("url", category.id)}
@@ -260,13 +269,6 @@ export function ProjectMaterials({
                     aria-label="Загрузить файл проекта"
                   >
                     + Файл
-                  </button>
-                  <button
-                    disabled={busy || materials.length >= 50}
-                    onClick={() => add("text")}
-                    aria-label="Добавить текст проекта"
-                  >
-                    + Текст
                   </button>
                 </>
               )}

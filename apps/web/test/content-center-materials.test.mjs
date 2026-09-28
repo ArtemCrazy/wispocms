@@ -131,6 +131,8 @@ test('materials row exposes links, file upload and text input without a separate
   assert.doesNotMatch(html, /из 50 МБ/);
   assert.doesNotMatch(html, /Текст — UTF-8|40 000 символов/);
   assert.match(html, /Добавить текст проекта/);
+  assert.ok(html.indexOf('Добавить текст проекта') < html.indexOf('Добавить ссылку: Материалы проекта'));
+  assert.ok(html.indexOf('Добавить ссылку: Материалы проекта') < html.indexOf('Загрузить файл проекта'));
   assert.doesNotMatch(html, /Текстовые материалы/);
   assert.match(html, /Материалы проекта/);
   assert.doesNotMatch(html, /Другие источники/);
