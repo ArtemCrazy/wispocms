@@ -25,12 +25,17 @@ import {
   socialSourceUrl,
   type SocialNetwork,
 } from "./social-material-fields";
+import {
+  MarketplaceMaterialFields,
+  marketplaceForUrl,
+  marketplaceSourceUrl,
+  type Marketplace,
+} from "./marketplace-material-fields";
 import { SourceRegistry } from "./source-registry";
 import { SourceRefresh } from "./source-refresh";
 import { ResearchView } from "./research-view";
 import { CreationView } from "./creation-view";
 import {
-  SOURCE_CATEGORIES,
   isVkMaterial,
   isSocialFeedMaterial,
   displayMaterialUrl,
@@ -39,7 +44,14 @@ import {
   type SourceCategory,
   type SourceSnapshot,
 } from "./materials";
-import { appendDictation, preparationRunLabel } from "./preparation-state";
+import {
+  appendDictation,
+  PREPARATION_STAGES,
+  preparationOperation,
+  preparationRunLabel,
+  preparationStageIndex,
+  type PreparationProgress,
+} from "./preparation-state";
 import {
   CONTENT_CENTER_SECTIONS,
   parseContentCenterScreen,
@@ -75,7 +87,7 @@ type Overview = {
     resumable?: boolean;
     materialIds?: string[] | null;
     error: string | null;
-    progress?: { message: string } | null;
+    progress?: PreparationProgress | null;
   } | null;
   ai: { connected: boolean };
   draft: {
@@ -223,8 +235,10 @@ export function ContentCenterView({
   const [siteMaterialMode, setSiteMaterialMode] = useState(false);
   const [socialMaterialMode, setSocialMaterialMode] = useState(false);
   const [mapMaterialMode, setMapMaterialMode] = useState(false);
+  const [marketplaceMaterialMode, setMarketplaceMaterialMode] = useState(false);
   const [socialNetwork, setSocialNetwork] = useState<SocialNetwork>("vk");
   const [mapProvider, setMapProvider] = useState<MapProvider>("yandex");
+  const [marketplace, setMarketplace] = useState<Marketplace>("ozon");
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [dialogError, setDialogError] = useState("");
   const [restoreVersion, setRestoreVersion] = useState<Version | null>(null);
@@ -280,6 +294,9 @@ export function ContentCenterView({
 
   const running =
     data?.run?.status === "queued" || data?.run?.status === "processing";
+  const runProgress = data?.run?.progress;
+  const currentStage = preparationStageIndex(runProgress?.stage);
+  const currentOperation = preparationOperation(runProgress);
   useEffect(() => {
     if (!running) return;
     const timer = window.setInterval(() => {
@@ -544,6 +561,10 @@ export function ContentCenterView({
                       kind === "url" && urlCategory === "maps",
                     );
                     setMapProvider("yandex");
+                    setMarketplaceMaterialMode(
+                      kind === "url" && urlCategory === "marketplace",
+                    );
+                    setMarketplace("ozon");
                     setSiteMaterialMode(
                       kind === "url" && urlCategory === "site",
                     );
@@ -564,6 +585,10 @@ export function ContentCenterView({
                       setMapMaterialMode(
                         row.kind === "url" && row.url_category === "maps",
                       );
+                      setMarketplaceMaterialMode(
+                        row.kind === "url" && row.url_category === "marketplace",
+                      );
+                      setMarketplace(marketplaceForUrl(row.source_url ?? ""));
                       setMapProvider(mapProviderForUrl(row.source_url ?? ""));
                       setSocialNetwork(
                         socialNetworkForUrl(row.source_url ?? ""),
@@ -625,6 +650,52 @@ export function ContentCenterView({
                       </span>
                     )}
                   </div>
+                  {running && (
+                    <div className={styles.runProgress} role="group" aria-label="Ход обработки материалов">
+                      <ol className={styles.runStages}>
+                        {PREPARATION_STAGES.map((stage, index) => (
+                          <li
+                            key={stage.key}
+                            data-state={
+                              currentStage < 0
+                                ? "pending"
+                                : index < currentStage
+                                  ? "done"
+                                  : index === currentStage
+                                    ? "active"
+                                    : "pending"
+                            }
+                          >
+                            {stage.label}
+                          </li>
+                        ))}
+                      </ol>
+                      <div className={styles.runProgressHeading}>
+                        <strong>
+                          {currentStage >= 0
+                            ? PREPARATION_STAGES[currentStage].label
+                            : "Ожидаем начала"}
+                        </strong>
+                        {currentOperation && (
+                          <span>≈ {currentOperation.percent}% текущей операции</span>
+                        )}
+                      </div>
+                      <progress
+                        className={styles.runProgressBar}
+                        max={100}
+                        value={currentOperation?.percent}
+                        aria-label="Ход текущей операции"
+                      />
+                      <p className={styles.runProgressDetail}>
+                        {runProgress?.message || "Задача принята и ожидает обработки."}
+                      </p>
+                      {currentOperation && (
+                        <span className={styles.runProgressCount}>
+                          {currentOperation.completed} из {currentOperation.total}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </article>
                 <article className={styles.card}>
                   <div>
@@ -956,9 +1027,17 @@ export function ContentCenterView({
                 ? material.id
                   ? "Изменить социальную сеть"
                   : "Добавить социальную сеть"
-                : material.id
-                  ? "Изменить материал"
-                  : "Добавить материал"
+              : marketplaceMaterialMode
+                ? material.id
+                  ? "Изменить маркетплейс"
+                  : "Добавить маркетплейс"
+                : material.kind === "url"
+                  ? material.id
+                    ? "Изменить ссылку"
+                    : "Добавить ссылку"
+                  : material.id
+                    ? "Изменить текст"
+                    : "Добавить текст"
           }
           busy={busy}
           close={() => setMaterial(null)}
@@ -1012,6 +1091,19 @@ export function ContentCenterView({
                             sourceUrl: mapSourceUrl(
                               material.sourceUrl,
                               mapProvider,
+                            ),
+                            title:
+                              material.title ||
+                              siteMaterialTitle(material.sourceUrl),
+                          }
+                      : marketplaceMaterialMode
+                        ? {
+                            ...normalizedMaterial,
+                            kind: "url",
+                            urlCategory: "marketplace",
+                            sourceUrl: marketplaceSourceUrl(
+                              material.sourceUrl,
+                              marketplace,
                             ),
                             title:
                               material.title ||
@@ -1071,26 +1163,21 @@ export function ContentCenterView({
                     setDialogError("");
                   }}
                 />
+              ) : marketplaceMaterialMode ? (
+                <MarketplaceMaterialFields
+                  marketplace={marketplace}
+                  sourceUrl={material.sourceUrl}
+                  onMarketplaceChange={(value) => {
+                    setMarketplace(value);
+                    setDialogError("");
+                  }}
+                  onChange={(sourceUrl) => {
+                    setMaterial({ ...material, sourceUrl });
+                    setDialogError("");
+                  }}
+                />
               ) : (
                 <>
-                  {!material.id && (
-                    <div className={styles.actions}>
-                      {(["text", "url"] as const).map((kind) => (
-                        <button
-                          type="button"
-                          key={kind}
-                          className={
-                            material.kind === kind ? styles.selected : ""
-                          }
-                          onClick={() =>
-                            setMaterial({ ...blankMaterial(), kind })
-                          }
-                        >
-                          {{ text: "Текст", url: "Ссылка", file: "Файл" }[kind]}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                   <label className={styles.field}>
                     Название
                     <input
@@ -1105,24 +1192,6 @@ export function ContentCenterView({
                   </label>
                   {material.kind === "url" ? (
                     <>
-                      <label className={styles.field}>
-                        Категория источника
-                        <select
-                          value={material.urlCategory ?? "other"}
-                          onChange={(event) =>
-                            setMaterial({
-                              ...material,
-                              urlCategory: event.target.value as SourceCategory,
-                            })
-                          }
-                        >
-                          {SOURCE_CATEGORIES.map((category) => (
-                            <option key={category.id} value={category.id}>
-                              {category.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
                       <label className={styles.field}>
                         {material.urlCategory === "site"
                           ? "Адрес сайта"
@@ -1190,8 +1259,7 @@ export function ContentCenterView({
                         />
                       </label>
                       <p className={styles.muted}>
-                        Документы и изображения загружаются в разделе «Файлы и
-                        тексты проекта».
+                        Файлы загружаются кнопкой «+ Файл» в материалах проекта.
                       </p>
                     </>
                   )}
@@ -1211,7 +1279,11 @@ export function ContentCenterView({
                       ? "Сохранить сайт"
                       : socialMaterialMode
                         ? "Сохранить"
-                        : "Сохранить материал"}
+                      : marketplaceMaterialMode
+                        ? "Сохранить"
+                        : material.kind === "url"
+                          ? "Сохранить ссылку"
+                          : "Сохранить текст"}
                 </button>
                 <button
                   type="button"

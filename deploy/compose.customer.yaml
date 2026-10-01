@@ -1,0 +1,30 @@
+# Customer-owned server overlay. Use together with compose.preview.yaml and
+# a private .env.customer copied from the current installation.
+name: wispo-cms-customer
+
+services:
+  api:
+    networks:
+      - default
+      - ipv6_egress
+    environment:
+      NODE_OPTIONS: --dns-result-order=ipv6first
+      WEB_ORIGIN: https://wispo-cms.129.101.122.78.nip.io
+      PUBLIC_DOMAIN_TARGETS: 129.101.122.78
+      WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io
+      # Outbound mail is intentionally disabled until the customer provides SMTP.
+      SMTP_HOST: 127.0.0.1
+      # Public Ozon pages are blocked from the VDS network. Credentials stay in
+      # the private .env.customer file; do not put them in Git or browser code.
+      OZON_PROXY_SERVER: ${OZON_PROXY_SERVER:-}
+      OZON_PROXY_USERNAME: ${OZON_PROXY_USERNAME:-}
+      OZON_PROXY_PASSWORD: ${OZON_PROXY_PASSWORD:-}
+  web:
+    environment:
+      PUBLIC_APP_URL: https://wispo-cms.129.101.122.78.nip.io
+      WISPO_RESERVED_HOSTS: wispo-cms.129.101.122.78.nip.io
+
+networks:
+  ipv6_egress:
+    external: true
+    name: wispo-cms-ipv6-egress

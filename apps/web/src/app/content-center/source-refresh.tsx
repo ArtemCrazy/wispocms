@@ -11,6 +11,7 @@ import { VkConnection } from "./vk-connection";
 import { SocialConnection } from "./social-connection";
 import { SourceRegistry } from "./source-registry";
 import { YoutubeTranscriptionQueue } from "./youtube-transcription-queue";
+import { marketplaceForUrl } from "./marketplace-material-fields";
 import styles from "./content-center-view.module.css";
 
 export function SourceRefresh({
@@ -34,6 +35,8 @@ export function SourceRefresh({
   const instagram = isApiSocialMaterial(material, "instagram");
   const youtube = isApiSocialMaterial(material, "youtube");
   const mapSource = material.url_category === "maps";
+  const ozon = material.url_category === "marketplace" &&
+    marketplaceForUrl(material.source_url ?? "") === "ozon";
   const alive = useRef(true);
   const submittingRef = useRef(false);
   const running =
@@ -133,8 +136,15 @@ export function SourceRefresh({
           }}
         />
       )}
+      {ozon && (
+        <p className={styles.muted}>
+          Публичная выборка до 10 товаров и до 8 текстовых отзывов о каждом.
+          Отзывы о товаре не обязательно относятся к этому продавцу.
+        </p>
+      )}
       {(material.url_category === "site" ||
         mapSource ||
+        ozon ||
         vk ||
         telegram ||
         instagram ||

@@ -1,0 +1,3 @@
+# Daily local DB + media snapshot on the customer VDS (03:17 UTC).
+# Keep every archive until independent off-server storage and retention are configured.
+17 3 * * * /opt/wispo-cms/deploy/backup-customer.sh >> /var/log/wispo-cms-customer-backup.log 2>&1

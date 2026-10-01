@@ -36,6 +36,18 @@ alt text and are hidden from assistive technology. Unknown/social lookalike
 domains receive no brand icon. Icon assets alone do not imply collection support;
 actual integration status is shown separately in the source controls.
 
+Marketplace buttons and chips use local copies of each site's favicon (64 px,
+retrieved 2026-09-24 through Google's favicon cache for the official domain):
+
+| Local asset | Official domain |
+| --- | --- |
+| `apps/web/public/icons/marketplace/ozon.png` | https://www.ozon.ru/ |
+| `apps/web/public/icons/marketplace/wildberries.png` | https://www.wildberries.ru/ |
+| `apps/web/public/icons/marketplace/yandex-market.png` | https://market.yandex.ru/ |
+
+These are decorative source identifiers, not a claim of partnership or of
+unrestricted access to marketplace data.
+
 Website sources use the HTML icon from Trace Logo’s. It is stored locally as
 `apps/web/public/icons/source/website.svg` and remains decorative in the UI.
 Source page: https://trace-logos.ru/logos/dev/html/

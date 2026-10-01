@@ -38,3 +38,11 @@ export function MapIcon({
 }) {
   return <DecorativeSourceIcon src={`/icons/maps/${provider}.svg`} />;
 }
+
+export function MarketplaceIcon({
+  marketplace,
+}: {
+  marketplace: "ozon" | "wildberries" | "yandex-market";
+}) {
+  return <DecorativeSourceIcon src={`/icons/marketplace/${marketplace}.png`} />;
+}
