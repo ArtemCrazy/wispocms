@@ -33,6 +33,58 @@
   width: 100%;
   font-size: 14px;
 }
+.contentTableCard { min-width: 0; }
+.tableCount { color: #79758a; font-size: 13px; font-weight: 400; margin-left: 8px; }
+.visuallyHidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.contentTableFilters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
+.contentTableFilters .field { margin: 0; min-width: 0; }
+.contentTableSearch { grid-column: 1 / -1; }
+.tableSelection { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 12px; background: #f4f0ff; border-radius: 8px; font-size: 13px; }
+.contentTableScroll { max-width: 100%; overflow: auto; border: 1px solid #e8e5f1; border-radius: 9px; }
+.contentTableScroll:focus-visible { outline: 2px solid #7054ec; outline-offset: 3px; }
+.contentMatrix { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.45; }
+.view .contentMatrix th, .view .contentMatrix td { padding: 11px 10px; border-bottom: 1px solid #eeecf4; text-align: left; vertical-align: middle; font-size: 13px; }
+.view .contentMatrix tbody th { background: transparent; }
+.view .contentMatrix thead th { background: #f8f7fc; color: #777188; font-size: 12px; font-weight: 500; }
+.contentMatrix thead .matrixPlatformHead { text-align: center; color: #302744; font-size: 13px; font-weight: 600; border-left: 1px solid #e8e5f1; }
+.matrixPlatformHead small { display: block; color: #88808f; font-weight: 400; font-size: 11px; }
+.contentMatrix tbody tr:last-child > * { border-bottom: 0; }
+.contentMatrix .matrixCheck { width: 34px; min-width: 34px; text-align: center; }
+.matrixCheck input { width: 16px; height: 16px; accent-color: #7054ec; vertical-align: middle; }
+.contentMatrix .matrixTitle { min-width: 175px; max-width: 250px; font-weight: 400; }
+.matrixTitle button, .matrixArticle { text-align: left; overflow-wrap: anywhere; line-height: 1.45; }
+.contentMatrix .matrixDirection { min-width: 105px; max-width: 170px; overflow-wrap: anywhere; }
+.contentMatrix .matrixNumber { text-align: right; min-width: 74px; font-variant-numeric: tabular-nums; }
+.matrixIndex { color: #8b8596; font-variant-numeric: tabular-nums; }
+.matrixStatus { min-width: 136px; border-left: 1px solid #eeecf4; }
+.matrixRecommendation { min-width: 145px; }
+.view .matrixArticle { display: block; font-size: 12px; margin-bottom: 6px; max-width: 200px; }
+.matrixBadge { display: inline-block; border-radius: 5px; padding: 3px 8px; font-size: 12px; line-height: 1.45; font-weight: 400; }
+.matrixBadge[data-tone="success"] { color: #24724e; background: #e5f5ed; }
+.matrixBadge[data-tone="accent"] { color: #6242cd; background: #eee8ff; }
+.matrixBadge[data-tone="neutral"] { color: #716d7b; background: #f0eef4; }
+.matrixBadge[data-tone="danger"] { color: #b54548; background: #fdebec; }
+.matrixRecommendation summary { cursor: pointer; list-style: none; }
+.matrixRecommendation summary::-webkit-details-marker { display: none; }
+.matrixRecommendation summary::after { content: " ⌄"; opacity: .6; }
+.matrixRecommendation p { max-width: 240px; margin: 8px 0 0; font-size: 12px; color: #706a80; overflow-wrap: anywhere; }
+.view .contentMatrix .matrixGroup th { background: #f7f4fe; padding: 0; }
+.view .matrixGroup button { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 0; background: transparent; padding: 10px 12px; color: #3e3258; font-weight: 600; text-align: left; }
+.matrixGroup button > span:first-child { width: 18px; font-size: 18px; line-height: 1; }
+.matrixArchive { background: #fcfbfe; color: #9993a4; }
+.view .matrixArchive .matrixTitle button { color: #80758f; }
+.matrixEmpty { text-align: center; padding: 32px 16px; color: #736c81; }
+.matrixEmpty strong { color: #342c43; font-weight: 500; }
+.matrixEmpty p { margin: 8px auto 16px; max-width: 490px; font-size: 13px; }
+.matrixFooter { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 16px; font-size: 12px; color: #777188; }
+.matrixFooter label { display: flex; align-items: center; gap: 8px; }
+.view .matrixFooter select { width: auto; padding: 5px 25px 5px 8px; min-height: 32px; }
+.matrixFooter nav { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.view .matrixFooter nav button { min-width: 34px; padding: 4px 10px; font-size: 20px; }
+@media (max-width: 700px) {
+  .contentTableFilters { grid-template-columns: 1fr; }
+  .matrixFooter nav { margin-left: 0; }
+}
 .creationTable th {
   white-space: normal;
 }

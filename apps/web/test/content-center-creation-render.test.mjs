@@ -47,6 +47,21 @@ function load(name) {
   cache.set(name, module.exports);
   return module.exports;
 }
+test("creation table groups platforms, keeps archives read-only and renders article links", () => {
+  const clusters = [false, true].map((archived, i) => ({ id: `c${i}`, number: i + 1, title: archived ? "Архивный кластер" : "Уход за кожей", direction: "Косметология", queries: [{ text: "уход", general: 18400, exact: 7200, primary: true }], archived }));
+  const html = renderToStaticMarkup(React.createElement(load("creation-table").CreationTable, {
+    data: { clusters, settings: { platforms: [{ siteId: "site" }, { siteId: "second" }] }, sites: [{ id: "site", name: "Сайт" }, { id: "second", name: "Вторая площадка" }], articles: [{ id: "a", cluster_id: "c0", site_id: "site", title: "Практический гид", status: "published", recommendation: "keep", rationale: "Актуально" }] },
+    filtered: clusters, selected: [], filters: { search: "", direction: "", status: "", recommendation: "" }, setSelected() {}, setFilter() {}, onAdd() {}, onCluster() {}, onArticle() {}, onMerge() {},
+  }));
+  assert.match(html, /colSpan="2" scope="colgroup"[^>]*>Сайт/);
+  assert.match(html, /Практический гид/);
+  assert.match(html, /Актуальные кластеры/);
+  assert.match(html, /Архивные кластеры/);
+  assert.match(html, /Выбрать кластер 1/);
+  assert.doesNotMatch(html, /Выбрать кластер 2/);
+  assert.match(html, /Не создана/);
+  assert.match(html, /Страница 1 из 1/);
+});
 test("article exposes per-proposal decisions, unpublished current-version notice and separate publication", () => {
   const article = {
     id: "article",

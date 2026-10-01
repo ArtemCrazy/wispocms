@@ -26,6 +26,7 @@ import {
 import { CreationArticle } from "./creation-article";
 import { CreationHistory } from "./creation-history";
 import { RestructureClusters } from "./creation-restructure";
+import { CreationTable } from "./creation-table";
 import styles from "./content-center-view.module.css";
 const emptyLocation: CreationLocation = {
   screen: "table",
@@ -416,237 +417,27 @@ export function CreationView({
         )}
       {location.screen === "table" && (
         <>
-          <section className={styles.card}>
-            <div className={styles.cardHead}>
-              <div>
-                <h2>Кластеры и статьи</h2>
-                <p className={styles.muted}>
-                  Актуальные и архивные кластеры в одной таблице. Статус и
-                  рекомендация относятся к статье на конкретной площадке.
-                </p>
-              </div>
-              <button onClick={() => edit()}>Добавить кластер</button>
-            </div>
-            <div className={styles.creationFilters}>
-              <label className={styles.field}>
-                Поиск
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Кластер, запрос, статья…"
-                />
-              </label>
-              <label className={styles.field}>
-                Направление
-                <select
-                  value={direction}
-                  onChange={(e) => setDirection(e.target.value)}
-                >
-                  <option value="">Все направления</option>
-                  {[
-                    ...new Set(
-                      data.clusters.map((c) => c.direction).filter(Boolean),
-                    ),
-                  ].map((d) => (
-                    <option key={d}>{d}</option>
-                  ))}
-                </select>
-              </label>
-              <label className={styles.field}>
-                Статус статьи
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                >
-                  <option value="">Все статусы</option>
-                  {Object.entries(ARTICLE_STATUS).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className={styles.field}>
-                Рекомендация AI
-                <select
-                  value={recommendation}
-                  onChange={(e) => setRecommendation(e.target.value)}
-                >
-                  <option value="">Все рекомендации</option>
-                  {Object.entries(AI_RECOMMENDATION).map(([k, v]) => (
-                    <option key={k} value={k}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className={styles.tableWrap}>
-              <table className={styles.creationTable}>
-                <thead>
-                  <tr>
-                    <th>
-                      <input
-                        type="checkbox"
-                        aria-label="Выбрать показанные актуальные кластеры"
-                        checked={
-                          filtered.some((c) => !c.archived) &&
-                          filtered
-                            .filter((c) => !c.archived)
-                            .every((c) => selected.includes(c.id))
-                        }
-                        onChange={(e) =>
-                          setSelected(
-                            e.target.checked
-                              ? [
-                                  ...new Set([
-                                    ...selected,
-                                    ...filtered
-                                      .filter((c) => !c.archived)
-                                      .map((c) => c.id),
-                                  ]),
-                                ]
-                              : selected.filter(
-                                  (id) => !filtered.some((c) => c.id === id),
-                                ),
-                          )
-                        }
-                      />
-                    </th>
-                    <th>№</th>
-                    <th>Кластер / направление</th>
-                    <th>Запросов</th>
-                    <th>Общая частотность</th>
-                    <th>Точная частотность</th>
-                    <th>Площадка · статья · статус · рекомендация</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((c) => (
-                    <tr
-                      key={c.id}
-                      className={
-                        c.archived ? styles.creationArchived : undefined
-                      }
-                    >
-                      <td>
-                        <input
-                          aria-label={`Выбрать кластер ${c.number}`}
-                          type="checkbox"
-                          disabled={c.archived}
-                          checked={selected.includes(c.id)}
-                          onChange={(e) =>
-                            setSelected(
-                              e.target.checked
-                                ? [...selected, c.id]
-                                : selected.filter((id) => id !== c.id),
-                            )
-                          }
-                        />
-                      </td>
-                      <td>{c.number}</td>
-                      <td>
-                        <button
-                          className={styles.link}
-                          onClick={() =>
-                            navigate({ screen: "cluster", id: c.id })
-                          }
-                        >
-                          {c.title}
-                        </button>
-                        <div className={styles.muted}>
-                          {c.direction || "Без направления"}
-                        </div>
-                        {c.archived && (
-                          <span className={styles.badge}>Архив</span>
-                        )}
-                      </td>
-                      <td>{c.queries.length}</td>
-                      <td>
-                        {c.queries
-                          .reduce((s, q) => s + q.general, 0)
-                          .toLocaleString("ru-RU")}
-                      </td>
-                      <td>
-                        {c.queries
-                          .reduce((s, q) => s + q.exact, 0)
-                          .toLocaleString("ru-RU")}
-                      </td>
-                      <td>
-                        {platformRows(c, data).map((p) => (
-                          <div
-                            className={styles.creationPlatform}
-                            key={p.siteId}
-                          >
-                            <strong>{p.name}</strong>
-                            {p.article ? (
-                              <button
-                                className={styles.link}
-                                onClick={() =>
-                                  navigate({
-                                    screen: "article",
-                                    id: p.article!.id,
-                                  })
-                                }
-                              >
-                                {p.article.title}
-                              </button>
-                            ) : (
-                              <span>Статьи пока нет</span>
-                            )}
-                            <span>
-                              {ARTICLE_STATUS[p.article?.status ?? "missing"]}
-                            </span>
-                            <details>
-                              <summary>
-                                {
-                                  AI_RECOMMENDATION[
-                                    p.article?.recommendation ?? "create"
-                                  ]
-                                }
-                              </summary>
-                              {p.article?.rationale ??
-                                "Статья для этой площадки ещё не создана. AI определит релевантность при запуске."}
-                            </details>
-                          </div>
-                        ))}
-                        {!data.settings.platforms.length &&
-                          !platformRows(c, data).length && (
-                            <span className={styles.muted}>
-                              Подключите площадки
-                            </span>
-                          )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!filtered.length && (
-              <p className={styles.muted}>
-                {data.clusters.length
-                  ? "По этим условиям кластеры не найдены."
-                  : "Кластеров пока нет. Можно добавить подготовленные запросы вручную. Автоматическое формирование кластеров относится к отдельному исследовательскому процессу."}
-              </p>
-            )}
-            {selected.length > 0 && (
-              <div className={styles.actions}>
-                <span>Выбрано: {selected.length}</span>
-                <button onClick={() => setSelected([])}>Снять выбор</button>
-                <button
-                  disabled={selectedClusters.length < 2}
-                  onClick={() =>
-                    setRestructure({
-                      kind: "merge",
-                      clusters: selectedClusters,
-                    })
-                  }
-                >
-                  Объединить выбранные
-                </button>
-              </div>
-            )}
-          </section>
+          <CreationTable
+            data={data}
+            filtered={filtered}
+            selected={selected}
+            setSelected={setSelected}
+            filters={{ search, direction, status, recommendation }}
+            setFilter={(key, value) =>
+              ({
+                search: setSearch,
+                direction: setDirection,
+                status: setStatus,
+                recommendation: setRecommendation,
+              })[key](value)
+            }
+            onAdd={() => edit()}
+            onCluster={(id) => navigate({ screen: "cluster", id })}
+            onArticle={(id) => navigate({ screen: "article", id })}
+            onMerge={() =>
+              setRestructure({ kind: "merge", clusters: selectedClusters })
+            }
+          />
           <section className={styles.card}>
             <h2>Создать контент</h2>
             <CreationInstruction
