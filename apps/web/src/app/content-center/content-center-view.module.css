@@ -36,6 +36,38 @@
 .creationLayout { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .creationLayout > .creationTabs { flex-direction: row; flex: none; width: auto; padding: 0 0 14px; overflow: visible; }
 .creationLayout textarea { min-height: 120px; }
+.historyCard { min-width: 0; }
+.historyCard > .cardHead { flex-wrap: wrap; gap: 12px; }
+.historyTabs { display: flex; gap: 20px; border-bottom: 1px solid #e8e5f1; margin-top: 14px; }
+.view .historyTabs button { padding: 12px 6px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: #81798d; }
+.view .historyTabs .selected { border-bottom-color: #7054ec; color: #7054ec; }
+.historyFilters { display: grid; grid-template-columns: minmax(170px, 1.7fr) repeat(2, minmax(130px, .8fr)) repeat(2, minmax(150px, 1fr)); gap: 12px; margin: 20px 0 16px; }
+.historyFilters .field { margin: 0; min-width: 0; font-size: 12px; }
+.historyFilters input, .historyFilters select { box-sizing: border-box; width: 100%; min-width: 0; height: 42px; padding: 9px 10px; border: 1px solid #dedbe9; border-radius: 7px; background: white; color: #51495e; font: inherit; font-weight: 400; }
+.historyCard > .link { margin-bottom: 12px; }
+.historyTable { width: 100%; border-collapse: collapse; }
+.view .historyTable th, .view .historyTable td { padding: 14px 12px; border: 0; border-bottom: 1px solid #eeecf4; text-align: left; vertical-align: middle; height: auto; font-size: 13px; text-transform: none; letter-spacing: normal; white-space: normal; }
+.view .historyTable thead th { background: #f8f7fc; color: #81798d; font-weight: 500; }
+.historyTable tr[data-expanded="true"] { background: #f7f4fe; }
+.view .historyTable .historyDate { min-width: 155px; font-variant-numeric: tabular-nums; }
+.view .historyTable .historyTitle { min-width: 185px; max-width: 360px; overflow-wrap: anywhere; }
+.historyTitle button { text-align: left; }
+.view .historyTable .historyDisclosure { width: 35px; padding: 4px; }
+.view .historyDisclosure button { border: 0; background: transparent; color: #7054ec; padding: 6px 10px; font-size: 22px; }
+.historyActor { display: flex; align-items: center; gap: 10px; min-width: 150px; }
+.historyAvatar { display: grid; place-items: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%; background: #eee8ff; color: #6242cd; font-size: 12px; }
+.view .historyDetailsRow > td { padding: 20px; background: #f7f4fe; }
+.historyDetailsRow[hidden] { display: none; }
+.historyDetailsRow h3 { font-size: 15px; margin: 0 0 14px; }
+.historyComparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.historyComparison > div { min-width: 0; border: 1px solid #e8e5f1; border-radius: 8px; background: white; overflow: hidden; }
+.historyComparison h4 { margin: 0; padding: 12px 16px; background: #f4f0fc; font-size: 13px; }
+.historyComparison > div > p { padding: 0 16px; }
+.historyComparison .creationEventSnapshot { margin: 0; padding: 16px; border: 0; }
+.historyComparison .creationEventFields { grid-template-columns: minmax(100px, 1fr) minmax(0, 1fr); }
+.historyCard .matrixBadge[data-tone="warning"] { color: #99602b; background: #fff1de; }
+@media (max-width: 1150px) { .historyFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .historySearch { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .historyFilters, .historyComparison { grid-template-columns: 1fr; } .historyTabs { gap: 10px; } }
 .runPanels { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .runPanels .cardHead { flex-wrap: wrap; gap: 8px; }
 .runMeta, .runCounts { color: #81798d; font-size: 12px; margin: 8px 0 12px; }

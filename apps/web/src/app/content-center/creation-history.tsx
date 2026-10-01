@@ -1,31 +1,38 @@
 "use client";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
-  type Cluster,
   type CreationLocation,
   type History,
+  type HistoryEvent,
 } from "./creation-state";
 import {
   clusterSnapshots,
   historyLabels,
+  historyRows,
+  historyPage,
+  historyTone,
   publicationDetails,
+  type HistoryFilters,
 } from "./creation-history-state";
 import { creationDate } from "./creation-shared";
 import styles from "./content-center-view.module.css";
+
+type Navigate = (location: Partial<CreationLocation>) => void;
 
 function ClusterSnapshots({
   value,
   navigate,
 }: {
   value: unknown;
-  navigate: (l: Partial<CreationLocation>) => void;
+  navigate: Navigate;
 }) {
   const clusters = clusterSnapshots(value);
   if (!clusters.length)
     return <p className={styles.muted}>Кластер ещё не создан.</p>;
-  return clusters.map((cluster: Cluster) => (
+  return clusters.map((cluster) => (
     <section key={cluster.id} className={styles.creationEventSnapshot}>
       <button
+        type="button"
         className={styles.link}
         onClick={() => navigate({ screen: "cluster", id: cluster.id })}
       >
@@ -38,6 +45,18 @@ function ClusterSnapshots({
         <dd>{cluster.archived ? "В архиве" : "Актуальный"}</dd>
         <dt>Запросов</dt>
         <dd>{cluster.queries.length}</dd>
+        <dt>Общая частотность</dt>
+        <dd>
+          {cluster.queries
+            .reduce((sum, query) => sum + query.general, 0)
+            .toLocaleString("ru-RU")}
+        </dd>
+        <dt>Точная частотность</dt>
+        <dd>
+          {cluster.queries
+            .reduce((sum, query) => sum + query.exact, 0)
+            .toLocaleString("ru-RU")}
+        </dd>
       </dl>
       <div className={styles.tableWrap}>
         <table>
@@ -74,7 +93,7 @@ function PublicationDetails({
 }: {
   value: unknown;
   articleId: string | null;
-  navigate: (l: Partial<CreationLocation>) => void;
+  navigate: Navigate;
 }) {
   const publication = publicationDetails(value);
   return (
@@ -83,6 +102,7 @@ function PublicationDetails({
       <dd>
         {publication.version !== null && articleId ? (
           <button
+            type="button"
             className={styles.link}
             onClick={() =>
               navigate({
@@ -119,6 +139,76 @@ function PublicationDetails({
   );
 }
 
+function EventDetails({
+  event,
+  navigate,
+}: {
+  event: HistoryEvent;
+  navigate: Navigate;
+}) {
+  if (event.kind !== "cluster")
+    return (
+      <PublicationDetails
+        value={event.after}
+        articleId={event.article_id}
+        navigate={navigate}
+      />
+    );
+  const snapshots = [
+    ...clusterSnapshots(event.before),
+    ...clusterSnapshots(event.after),
+  ];
+  return (
+    <>
+      <h3>Изменение кластера</h3>
+      <div className={styles.historyComparison}>
+        <div>
+          <h4>Было</h4>
+          <ClusterSnapshots value={event.before} navigate={navigate} />
+        </div>
+        <div>
+          <h4>Стало</h4>
+          <ClusterSnapshots value={event.after} navigate={navigate} />
+        </div>
+      </div>
+      {(event.type === "split" || event.type === "merge") && (
+        <p className={styles.muted}>
+          Исходные кластеры перенесены в архив. Их статьи и история сохранены.
+        </p>
+      )}
+      {event.related_ids.length > 0 && (
+        <p>
+          Связанные кластеры:{" "}
+          {event.related_ids.map((id) => {
+            const cluster = snapshots.find((item) => item.id === id);
+            return (
+              <button
+                type="button"
+                className={styles.link}
+                key={id}
+                onClick={() => navigate({ screen: "cluster", id })}
+              >
+                {cluster
+                  ? `№ ${cluster.number} · ${cluster.title}`
+                  : "Открыть кластер"}{" "}
+                ↗{" "}
+              </button>
+            );
+          })}
+        </p>
+      )}
+    </>
+  );
+}
+
+const emptyFilters: HistoryFilters = {
+  search: "",
+  from: "",
+  to: "",
+  actor: "",
+  type: "",
+};
+
 export function CreationHistory({
   data,
   location,
@@ -126,66 +216,57 @@ export function CreationHistory({
 }: {
   data: History;
   location: CreationLocation;
-  navigate: (l: Partial<CreationLocation>) => void;
+  navigate: Navigate;
 }) {
-  const [search, setSearch] = useState(""),
-    [from, setFrom] = useState(""),
-    [to, setTo] = useState(""),
-    [actor, setActor] = useState(""),
-    [types, setTypes] = useState<
-      Partial<Record<CreationLocation["historyTab"], string>>
-    >({});
   const tab = location.historyTab;
-  const type = types[tab] ?? "";
+  const [filters, setFilters] = useState<
+    Partial<Record<CreationLocation["historyTab"], HistoryFilters>>
+  >({});
+  const [size, setSize] = useState(10);
+  const [ascending, setAscending] = useState(false);
+  const [paging, setPaging] = useState({ key: "", page: 1 });
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const current = filters[tab] ?? emptyFilters;
   const labels = historyLabels(tab);
-  const rows =
-    tab === "runs"
-      ? data.runs.map((r) => ({
-          id: r.id,
-          title: `Запуск № ${r.number}`,
-          type: r.status,
-          actor_name: r.actor_name,
-          created_at: r.created_at,
-          run: r,
-          event: null,
-        }))
-      : data.events
-          .filter(
-            (e) =>
-              e.kind === (tab === "clusters" ? "cluster" : "article") &&
-              (!location.clusterContext ||
-                e.cluster_id === location.clusterContext),
-          )
-          .map((e) => ({
-            id: e.id,
-            title: e.title,
-            type: e.type,
-            actor_name: e.actor_name,
-            created_at: e.created_at,
-            run: null,
-            event: e,
-          }));
-  const filtered = rows.filter((r) => {
-    const date = new Date(r.created_at);
-    const end = to ? new Date(`${to}T23:59:59.999`) : null;
-    return (
-      (!search ||
-        `${r.title} ${r.actor_name} ${labels[r.type] ?? r.type}`
-          .toLocaleLowerCase()
-          .includes(search.toLocaleLowerCase())) &&
-      (!actor || r.actor_name === actor) &&
-      (!type || r.type === type) &&
-      (!from || date >= new Date(`${from}T00:00:00`)) &&
-      (!end || date <= end)
-    );
-  });
+  const rows = historyRows(data, tab, location.clusterContext);
+  const pageKey = JSON.stringify([
+    tab,
+    location.clusterContext,
+    current,
+    size,
+    ascending,
+  ]);
+  const page = historyPage(
+    rows,
+    labels,
+    current,
+    paging.key === pageKey ? paging.page : 1,
+    size,
+    ascending,
+  );
+  const setFilter = (key: keyof HistoryFilters, value: string) =>
+    setFilters({ ...filters, [tab]: { ...current, [key]: value } });
+  const reset = () => setFilters({ ...filters, [tab]: { ...emptyFilters } });
+  const filtered = Object.values(current).some(Boolean);
+  const actors = [...new Set(rows.map((row) => row.actor_name))].sort((a, b) =>
+    a.localeCompare(b, "ru"),
+  );
+  const title =
+    tab === "runs" ? "Запуск" : tab === "clusters" ? "Кластер" : "Статья";
   return (
-    <>
-      <div
-        className={styles.creationTabs}
-        role="tablist"
-        aria-label="История создания контента"
-      >
+    <section className={`${styles.card} ${styles.historyCard}`}>
+      <div className={styles.cardHead}>
+        <h2>История</h2>
+        {location.clusterContext && (
+          <button
+            type="button"
+            onClick={() => navigate({ clusterContext: null })}
+          >
+            Показать все кластеры
+          </button>
+        )}
+      </div>
+      <div className={styles.historyTabs} aria-label="Разделы истории">
         {(
           [
             ["runs", "Запуски"],
@@ -194,218 +275,288 @@ export function CreationHistory({
           ] as const
         ).map(([id, name]) => (
           <button
-            role="tab"
-            aria-selected={tab === id}
+            type="button"
+            aria-current={tab === id ? "page" : undefined}
             className={tab === id ? styles.selected : undefined}
             key={id}
-            onClick={() => {
-              navigate({ screen: "history", historyTab: id });
-            }}
+            onClick={() => navigate({ screen: "history", historyTab: id })}
           >
             {name}
           </button>
         ))}
       </div>
-      <section className={styles.card}>
-        <div className={styles.cardHead}>
-          <h2>
-            История{" "}
-            {tab === "runs"
-              ? "запусков"
-              : tab === "clusters"
-                ? "кластеров"
-                : "статей"}
-          </h2>
-          {location.clusterContext && (
-            <button onClick={() => navigate({ clusterContext: null })}>
-              Показать все кластеры
-            </button>
-          )}
-        </div>
-        <div className={styles.creationFilters}>
-          <label className={styles.field}>
-            Поиск
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Название, номер, пользователь"
-            />
-          </label>
-          <label className={styles.field}>
-            С даты
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-            />
-          </label>
-          <label className={styles.field}>
-            По дату
-            <input
-              type="date"
-              value={to}
-              min={from}
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </label>
-          <label className={styles.field}>
-            Пользователь
-            <select value={actor} onChange={(e) => setActor(e.target.value)}>
-              <option value="">Все пользователи</option>
-              {[...new Set(rows.map((r) => r.actor_name))].map((a) => (
-                <option key={a}>{a}</option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            {tab === "runs" ? "Результат" : "Тип события"}
-            <select
-              value={type}
-              onChange={(e) => setTypes({ ...types, [tab]: e.target.value })}
-            >
-              <option value="">Все</option>
-              {Object.entries(labels).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className={styles.tableWrap}>
-          <table>
-            <thead>
-              <tr>
-                <th>Дата и время</th>
-                <th>
-                  {tab === "runs"
-                    ? "Запуск"
-                    : tab === "clusters"
-                      ? "Кластер"
-                      : "Статья"}
+      <div className={styles.historyFilters}>
+        <label className={`${styles.field} ${styles.historySearch}`}>
+          Поиск
+          <input
+            type="search"
+            value={current.search}
+            onChange={(e) => setFilter("search", e.target.value)}
+            placeholder={
+              tab === "runs"
+                ? "Номер запуска, пользователь…"
+                : "Название, пользователь…"
+            }
+          />
+        </label>
+        <label className={styles.field}>
+          С даты
+          <input
+            type="date"
+            value={current.from}
+            max={current.to || undefined}
+            onChange={(e) => setFilter("from", e.target.value)}
+          />
+        </label>
+        <label className={styles.field}>
+          По дату
+          <input
+            type="date"
+            value={current.to}
+            min={current.from || undefined}
+            onChange={(e) => setFilter("to", e.target.value)}
+          />
+        </label>
+        <label className={styles.field}>
+          {tab === "runs" ? "Результат" : "Тип события"}
+          <select
+            value={current.type}
+            onChange={(e) => setFilter("type", e.target.value)}
+          >
+            <option value="">
+              {tab === "runs" ? "Все результаты" : "Все типы изменений"}
+            </option>
+            {Object.entries(labels).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>
+          Пользователь
+          <select
+            value={current.actor}
+            onChange={(e) => setFilter("actor", e.target.value)}
+          >
+            <option value="">Все пользователи</option>
+            {actors.map((actor) => (
+              <option key={actor}>{actor}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {page.invalidRange && (
+        <p className={styles.error} role="alert">
+          Начальная дата должна быть не позже конечной.
+        </p>
+      )}
+      {filtered && (
+        <button type="button" className={styles.link} onClick={reset}>
+          Сбросить фильтры
+        </button>
+      )}
+      <div
+        className={styles.contentTableScroll}
+        role="region"
+        aria-label={`История: ${title}`}
+        tabIndex={0}
+      >
+        <table className={styles.historyTable}>
+          <thead>
+            <tr>
+              {tab !== "runs" && (
+                <th scope="col">
+                  <span className={styles.visuallyHidden}>Подробности</span>
                 </th>
-                <th>{tab === "runs" ? "Результат" : "Событие"}</th>
-                {tab === "runs" && <th>Кластеров</th>}
-                <th>Пользователь</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id}>
-                  <td>{creationDate(r.created_at)}</td>
-                  <td>
-                    {r.run ? (
-                      r.title
-                    ) : (
-                      <button
-                        className={styles.link}
-                        onClick={() =>
-                          navigate({
-                            screen:
-                              r.event!.kind === "cluster"
-                                ? "cluster"
-                                : "article",
-                            id: r.event!.article_id ?? r.event!.cluster_id,
-                          })
-                        }
-                      >
-                        {r.title}
-                      </button>
+              )}
+              <th
+                scope="col"
+                aria-sort={ascending ? "ascending" : "descending"}
+              >
+                <button
+                  type="button"
+                  className={styles.link}
+                  onClick={() => setAscending(!ascending)}
+                >
+                  Дата и время {ascending ? "↑" : "↓"}
+                </button>
+              </th>
+              <th scope="col">{title}</th>
+              {tab === "runs" && <th scope="col">Кластеров</th>}
+              <th scope="col">{tab === "runs" ? "Результат" : "Событие"}</th>
+              <th scope="col">Пользователь</th>
+            </tr>
+          </thead>
+          <tbody>
+            {page.rows.map((row) => {
+              const canExpand =
+                row.event &&
+                (row.event.kind === "cluster" ||
+                  row.event.type === "published");
+              const open = expanded.includes(row.id);
+              return (
+                <Fragment key={row.id}>
+                  <tr data-expanded={Boolean(canExpand && open)}>
+                    {tab !== "runs" && (
+                      <td className={styles.historyDisclosure}>
+                        {canExpand && (
+                          <button
+                            type="button"
+                            aria-label={`Подробности: ${row.title}`}
+                            aria-expanded={open}
+                            aria-controls={`history-event-${row.id}`}
+                            onClick={() =>
+                              setExpanded(
+                                open
+                                  ? expanded.filter((id) => id !== row.id)
+                                  : [...expanded, row.id],
+                              )
+                            }
+                          >
+                            {open ? "⌄" : "›"}
+                          </button>
+                        )}
+                      </td>
                     )}
-                    {r.event?.type === "version" && (
-                      <div>
-                        <button
-                          className={styles.link}
-                          onClick={() =>
-                            navigate({
-                              screen: "versions",
-                              id: r.event!.article_id,
-                            })
-                          }
-                        >
-                          История версий →
-                        </button>
-                      </div>
-                    )}
-                    {r.event &&
-                      (r.event.kind === "cluster" ||
-                        r.event.type === "published") && (
-                        <details className={styles.creationEvent}>
-                          <summary>
-                            Посмотреть{" "}
-                            {r.event.type === "published"
-                              ? "публикацию"
-                              : "изменение"}
-                          </summary>
-                          {r.event.kind === "cluster" ? (
-                            <>
-                              <b>Было</b>
-                              <ClusterSnapshots
-                                value={r.event.before}
-                                navigate={navigate}
-                              />
-                              <b>Стало</b>
-                              <ClusterSnapshots
-                                value={r.event.after}
-                                navigate={navigate}
-                              />
-                              {(r.event.type === "split" ||
-                                r.event.type === "merge") && (
-                                <p className={styles.muted}>
-                                  Исходные кластеры перенесены в архив. Их
-                                  статьи и история сохранены.
-                                </p>
-                              )}
-                              {r.event.related_ids.length > 0 && (
-                                <p>
-                                  Связанные кластеры:{" "}
-                                  {r.event.related_ids.map((id) => (
-                                    <button
-                                      className={styles.link}
-                                      key={id}
-                                      onClick={() =>
-                                        navigate({ screen: "cluster", id })
-                                      }
-                                    >
-                                      {(() => {
-                                        const cluster = [
-                                          ...clusterSnapshots(r.event!.before),
-                                          ...clusterSnapshots(r.event!.after),
-                                        ].find((item) => item.id === id);
-                                        return cluster
-                                          ? `№ ${cluster.number} · ${cluster.title}`
-                                          : "Открыть кластер";
-                                      })()}{" "}
-                                      ↗{" "}
-                                    </button>
-                                  ))}
-                                </p>
-                              )}
-                            </>
-                          ) : (
-                            <PublicationDetails
-                              value={r.event.after}
-                              articleId={r.event.article_id}
-                              navigate={navigate}
-                            />
+                    <td className={styles.historyDate}>
+                      {creationDate(row.created_at)}
+                    </td>
+                    <td className={styles.historyTitle}>
+                      {row.run ? (
+                        <strong>{row.title}</strong>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className={styles.link}
+                            onClick={() =>
+                              navigate({
+                                screen:
+                                  row.event!.kind === "cluster"
+                                    ? "cluster"
+                                    : "article",
+                                id:
+                                  row.event!.article_id ??
+                                  row.event!.cluster_id,
+                              })
+                            }
+                          >
+                            {row.title}
+                          </button>
+                          {row.event?.type === "version" && (
+                            <div>
+                              <button
+                                type="button"
+                                className={styles.link}
+                                onClick={() =>
+                                  navigate({
+                                    screen: "versions",
+                                    id: row.event!.article_id,
+                                  })
+                                }
+                              >
+                                История версий →
+                              </button>
+                            </div>
                           )}
-                        </details>
+                        </>
                       )}
-                  </td>
-                  <td>{labels[r.type] ?? r.type}</td>
-                  {r.run && <td>{r.run.cluster_count}</td>}
-                  <td>{r.actor_name}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!filtered.length && (
-          <p className={styles.muted}>
-            Записей по выбранным условиям пока нет.
+                    </td>
+                    {row.run && <td>{row.run.cluster_count}</td>}
+                    <td>
+                      <span
+                        className={styles.matrixBadge}
+                        data-tone={historyTone(row.type)}
+                      >
+                        {labels[row.type] ?? row.type}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={styles.historyActor}>
+                        <span
+                          className={styles.historyAvatar}
+                          aria-hidden="true"
+                        >
+                          {row.actor_name
+                            .trim()
+                            .split(/\s+/)
+                            .slice(0, 2)
+                            .map((part) => part[0])
+                            .join("")
+                            .toLocaleUpperCase()}
+                        </span>
+                        {row.actor_name}
+                      </span>
+                    </td>
+                  </tr>
+                  {canExpand && (
+                    <tr
+                      id={`history-event-${row.id}`}
+                      hidden={!open}
+                      className={styles.historyDetailsRow}
+                    >
+                      <td colSpan={5}>
+                        <EventDetails event={row.event!} navigate={navigate} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {!page.rows.length && (
+        <div className={styles.matrixEmpty}>
+          <strong>
+            {filtered ? "Записи не найдены" : "История пока пуста"}
+          </strong>
+          <p>
+            {filtered
+              ? "Измените поиск или фильтры."
+              : "Здесь появятся сохранённые события этого раздела."}
           </p>
-        )}
-      </section>
-    </>
+        </div>
+      )}
+      <div className={styles.matrixFooter}>
+        <span role="status">
+          Показано {page.total ? page.offset + 1 : 0}–
+          {Math.min(page.offset + size, page.total)} из {page.total}
+        </span>
+        <label>
+          На странице{" "}
+          <select
+            value={size}
+            onChange={(e) => setSize(Number(e.target.value))}
+          >
+            {[10, 25, 50].map((n) => (
+              <option key={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <nav aria-label="Страницы истории">
+          <button
+            type="button"
+            aria-label="Предыдущая страница"
+            disabled={page.page === 1}
+            onClick={() => setPaging({ key: pageKey, page: page.page - 1 })}
+          >
+            ‹
+          </button>
+          <span>
+            Страница {page.page} из {page.pages}
+          </span>
+          <button
+            type="button"
+            aria-label="Следующая страница"
+            disabled={page.page === page.pages}
+            onClick={() => setPaging({ key: pageKey, page: page.page + 1 })}
+          >
+            ›
+          </button>
+        </nav>
+      </div>
+    </section>
   );
 }

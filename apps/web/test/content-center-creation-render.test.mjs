@@ -252,6 +252,45 @@ const historyHtml = (tab, events) =>
     }),
   );
 
+test("history filtering is inclusive by day, sortable, paginated and preserves input", () => {
+  const { historyRows, historyPage, historyLabels } = load("creation-history-state");
+  const data = { runs: [], events: Array.from({ length: 26 }, (_, i) => event({ id: `e${String(i).padStart(2, "0")}`, title: `Кластер ${i}`, actor_name: i % 2 ? "Анна" : "Иван", created_at: `2026-10-02T12:${String(i).padStart(2, "0")}:00`, type: i % 2 ? "formed" : "changed" })) };
+  const rows = historyRows(data, "clusters", null);
+  const empty = { search: "", from: "", to: "", actor: "", type: "" };
+  const labels = historyLabels("clusters");
+  const first = historyPage(rows, labels, empty, 1, 10, false);
+  assert.equal(first.total, 26);
+  assert.equal(first.pages, 3);
+  assert.equal(first.rows[0].id, "e25");
+  assert.equal(rows[0].id, "e00");
+  assert.equal(historyPage(rows, labels, empty, 99, 10, false).rows.length, 6);
+  assert.equal(historyPage(rows, labels, empty, 1, 10, true).rows[0].id, "e00");
+  const filtered = historyPage(rows, labels, { ...empty, search: "  АнНа  ", actor: "Анна", type: "formed", from: "2026-10-02", to: "2026-10-02" }, 99, 25, false);
+  assert.equal(filtered.total, 13);
+  assert.equal(filtered.page, 1);
+  assert.equal(historyPage(rows, labels, { ...empty, from: "2026-10-03", to: "2026-10-02" }, 1, 10, false).invalidRange, true);
+  const edges = historyRows({ runs: [], events: [event({ id: "start", created_at: "2026-10-02T00:00:00" }), event({ id: "end", created_at: "2026-10-02T23:59:59.999" }), event({ id: "next", created_at: "2026-10-03T00:00:00" })] }, "clusters", null);
+  assert.equal(historyPage(edges, labels, { ...empty, from: "2026-10-02", to: "2026-10-02" }, 1, 10, false).total, 2);
+});
+
+test("cluster context includes linked restructure events, not unrelated article events", () => {
+  const { historyRows } = load("creation-history-state");
+  const events = [event({ id: "merge", type: "merge", cluster_id: "parent", related_ids: ["child"] }), event({ id: "own", cluster_id: "child" }), event({ id: "other" }), event({ id: "article", kind: "article", cluster_id: "parent", related_ids: ["child"] })];
+  assert.deepEqual(historyRows({ runs: [], events }, "clusters", "child").map((row) => row.id), ["merge", "own"]);
+  assert.deepEqual(historyRows({ runs: [], events }, "articles", "child"), []);
+});
+
+test("history details span the table and are collapsed with accessible controls; pages limit DOM rows", () => {
+  const html = historyHtml("clusters", Array.from({ length: 12 }, (_, i) => event({ id: `e${i}`, title: `Кластер ${i}`, after: cluster() })));
+  assert.match(html, /aria-expanded="false" aria-controls="history-event-/);
+  assert.match(html, /hidden=""[^>]*><td colSpan="5">/);
+  assert.match(html, /Общая частотность/);
+  assert.match(html, /aria-sort="descending"/);
+  assert.match(html, /Страница 1 из 2/);
+  assert.equal((html.match(/aria-expanded="false"/g) ?? []).length, 10);
+  assert.match(historyHtml("articles", []), /История пока пуста/);
+});
+
 test("cluster history uses human-readable immutable snapshots, real numbers and only cluster event filters", () => {
   const html = historyHtml("clusters", [
     event({
