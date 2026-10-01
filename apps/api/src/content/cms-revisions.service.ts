@@ -12,10 +12,15 @@ import {
   CmsRevisionEventEntity,
   CmsRevisionResourceEntity,
   PlatformRole,
+  SiteAccessEntity,
+  SiteRole,
   SiteEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
-import { hasSitePermission, SitePermission } from './content.permissions';
+import {
+  hasSitePermission,
+  type SiteAccessGrant,
+  SitePermission,
+} from './content.permissions';
 import {
   approveRevision,
   publishRevision,
@@ -54,8 +59,8 @@ export class CmsRevisionsService {
     private readonly dataSource: DataSource,
     @InjectRepository(SiteEntity)
     private readonly sites: Repository<SiteEntity>,
-    @InjectRepository(WorkspaceMembershipEntity)
-    private readonly memberships: Repository<WorkspaceMembershipEntity>,
+    @InjectRepository(SiteAccessEntity)
+    private readonly siteAccesses: Repository<SiteAccessEntity>,
   ) {}
 
   private permission(resourceType: CmsResourceType) {
@@ -72,7 +77,7 @@ export class CmsRevisionsService {
       resourceType === 'chunk' ||
       resourceType === 'site_layout_bindings' ||
       resourceType === 'site_article_list'
-      ? SitePermission.EDIT_CODE
+      ? SitePermission.VIEW_CODE
       : SitePermission.READ;
   }
 
@@ -80,19 +85,21 @@ export class CmsRevisionsService {
     siteId: string,
     actor: RevisionActor,
     permission: SitePermission,
-  ) {
+  ): Promise<SiteAccessGrant | null> {
     const site = await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');
-    if (actor.platformRole === PlatformRole.WISPO_ADMIN) return;
-    const membership = await this.memberships.findOne({
-      select: { role: true, siteIds: true },
-      where: { userId: actor.userId, workspaceId: site.workspaceId },
+    if (actor.platformRole === PlatformRole.WISPO_ADMIN) return null;
+    const access = await this.siteAccesses.findOne({
+      select: {
+        role: true,
+        canEditCode: true,
+        requiresApproval: true,
+      },
+      where: { userId: actor.userId, siteId },
     });
-    if (
-      !membership?.siteIds?.includes(siteId) ||
-      !hasSitePermission(actor.platformRole, membership.role, permission)
-    )
+    if (!access || !hasSitePermission(actor.platformRole, access, permission))
       throw new ForbiddenException('Недостаточно прав для этого сайта');
+    return access;
   }
 
   assertSitePermission(
@@ -247,7 +254,7 @@ export class CmsRevisionsService {
     return this.saveDraftInTransaction(db, input);
   }
 
-  /** Trusted publication adapter. Owner/admin intent is itself approval; never
+  /** Trusted publication adapter for actors allowed to publish directly; never
    * expose this as a generic route or let it overwrite an outstanding CMS draft.
    * Caller must hold the article lock and include the live write in this transaction.
    */
@@ -261,7 +268,6 @@ export class CmsRevisionsService {
       actor: RevisionActor;
     },
   ): Promise<void> {
-    await this.requireSite(input.siteId, input.actor, SitePermission.APPROVE);
     await this.requireSite(
       input.siteId,
       input.actor,
@@ -538,7 +544,7 @@ export class CmsRevisionsService {
       snapshot: Record<string, unknown>,
     ) => Promise<void>,
   ): Promise<void> {
-    await this.requireSite(
+    const access = await this.requireSite(
       siteId,
       actor,
       resourceType === 'template' ||
@@ -555,7 +561,13 @@ export class CmsRevisionsService {
         resourceType,
         entityId,
       );
-      const next = publishRevision(this.pointers(resource), revisionId);
+      const next = publishRevision(
+        this.pointers(resource),
+        revisionId,
+        access?.role === SiteRole.CONTENT_MANAGER
+          ? access.requiresApproval
+          : false,
+      );
       const revision = await db.findOne(CmsRevisionEntity, {
         where: { id: revisionId, resourceId: resource.id },
       });

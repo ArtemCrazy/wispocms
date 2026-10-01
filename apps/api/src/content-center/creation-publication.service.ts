@@ -68,7 +68,7 @@ export class CreationPublicationService {
       await this.revisions.assertSitePermission(
         dto.siteId,
         a,
-        SitePermission.APPROVE,
+        SitePermission.PUBLISH_CONTENT,
       );
       const item = await this.service.article(w, id, m);
       this.service.revision(item, dto.revision);
@@ -260,7 +260,7 @@ export class CreationPublicationService {
       await this.revisions.assertSitePermission(
         item.site_id,
         a,
-        SitePermission.APPROVE,
+        SitePermission.PUBLISH_CONTENT,
       );
       this.service.revision(item, revision);
       if (item.status !== 'published' || !item.cms_article_id)

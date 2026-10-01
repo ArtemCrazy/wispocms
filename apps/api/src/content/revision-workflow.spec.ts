@@ -85,11 +85,45 @@ describe('revision workflow', () => {
     });
   });
 
+  it('publishes the current draft directly when approval is disabled', () => {
+    expect(
+      publishRevision(
+        {
+          draftRevisionId: 'revision-3',
+          approvedRevisionId: null,
+          publishedRevisionId: 'revision-1',
+          reviewState: 'draft',
+        },
+        'revision-3',
+        false,
+      ),
+    ).toEqual({
+      draftRevisionId: 'revision-3',
+      approvedRevisionId: 'revision-3',
+      publishedRevisionId: 'revision-3',
+      reviewState: 'approved',
+    });
+  });
+
   it('refuses publication after review has been reopened', () => {
     expect(() =>
       publishRevision(
         { ...published, reviewState: 'changes_requested' },
         'revision-2',
+      ),
+    ).toThrow(ConflictException);
+  });
+
+  it('does not bypass a requested change when approval is disabled', () => {
+    expect(() =>
+      publishRevision(
+        {
+          ...published,
+          approvedRevisionId: null,
+          reviewState: 'changes_requested',
+        },
+        'revision-2',
+        false,
       ),
     ).toThrow(ConflictException);
   });

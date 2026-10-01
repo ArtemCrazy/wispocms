@@ -69,7 +69,22 @@ export function requestChanges(
 export function publishRevision(
   current: RevisionPointers,
   revisionId: string,
+  requiresApproval = true,
 ): RevisionPointers {
+  if (!requiresApproval) {
+    if (current.draftRevisionId !== revisionId)
+      throw new ConflictException('Выбрана неактуальная версия');
+    if (!['draft', 'approved'].includes(current.reviewState))
+      throw new ConflictException(
+        'Версию на проверке или доработке нельзя публиковать напрямую',
+      );
+    return {
+      ...current,
+      approvedRevisionId: revisionId,
+      publishedRevisionId: revisionId,
+      reviewState: 'approved',
+    };
+  }
   if (
     current.draftRevisionId !== revisionId ||
     current.approvedRevisionId !== revisionId ||

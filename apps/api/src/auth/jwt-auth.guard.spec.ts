@@ -20,10 +20,12 @@ describe('JwtAuthGuard', () => {
     jwt.verifyAsync.mockResolvedValue({
       sub: 'user-id',
       role: PlatformRole.WISPO_ADMIN,
+      sessionVersion: 3,
     });
     authService.getActiveIdentity.mockResolvedValue({
       id: 'user-id',
       platformRole: PlatformRole.MEMBER,
+      sessionVersion: 3,
     });
 
     await expect(guard.canActivate(context(request))).resolves.toBe(true);
@@ -44,6 +46,25 @@ describe('JwtAuthGuard', () => {
     await expect(
       guard.canActivate(
         context({ cookies: { wispo_session: 'old-valid-token' } }),
+      ),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('revokes an existing token after the password session version changes', async () => {
+    jwt.verifyAsync.mockResolvedValue({
+      sub: 'user-id',
+      role: PlatformRole.WISPO_ADMIN,
+      sessionVersion: 2,
+    });
+    authService.getActiveIdentity.mockResolvedValue({
+      id: 'user-id',
+      platformRole: PlatformRole.WISPO_ADMIN,
+      sessionVersion: 3,
+    });
+
+    await expect(
+      guard.canActivate(
+        context({ cookies: { wispo_session: 'superseded-token' } }),
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });

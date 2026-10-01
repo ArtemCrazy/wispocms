@@ -56,11 +56,13 @@ export function MediaTemplatesView({
   siteId,
   canEdit,
   canApprove,
+  canPublishDirectly,
   onOpen,
 }: {
   siteId: string;
   canEdit: boolean;
   canApprove: boolean;
+  canPublishDirectly: boolean;
   onOpen: (target: TemplateTarget) => void;
 }) {
   const [rows, setRows] = useState<
@@ -296,6 +298,7 @@ export function MediaTemplatesView({
         label="Шаблоны шапки и подвала"
         canEdit={canEdit}
         canApprove={canApprove}
+        canPublishDirectly={canPublishDirectly}
         dirty={
           headerIdentity !== savedHeaderIdentity ||
           footerIdentity !== savedFooterIdentity
@@ -307,6 +310,7 @@ export function MediaTemplatesView({
         siteId={siteId}
         canEdit={canEdit}
         canApprove={canApprove}
+        canPublishDirectly={canPublishDirectly}
       />
     </section>
   );

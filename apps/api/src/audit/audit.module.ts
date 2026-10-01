@@ -5,8 +5,8 @@ import { AuthModule } from '../auth/auth.module';
 import {
   AuditLogEntity,
   SiteEntity,
+  SiteAccessEntity,
   UserEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import { PlatformAdminGuard } from '../platform/platform-admin.guard';
 import { AuditController } from './audit.controller';
@@ -20,7 +20,7 @@ import { AuditService } from './audit.service';
       AuditLogEntity,
       UserEntity,
       SiteEntity,
-      WorkspaceMembershipEntity,
+      SiteAccessEntity,
     ]),
   ],
   controllers: [AuditController],

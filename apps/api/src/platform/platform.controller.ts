@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -18,12 +17,12 @@ import {
   CreateSiteDto,
   CreateUserDto,
   CreateWorkspaceDto,
+  UpdateManagedUserDto,
   ResetUserPasswordDto,
   UpdateSiteDto,
   UpdateUserStatusDto,
   UpdateUserProfileDto,
-  UpdateUserSitesDto,
-  UpdateUserWorkspacesDto,
+  UpdateUserSiteAccessesDto,
   UpdateWorkspaceDto,
 } from './platform.dto';
 import { PlatformService } from './platform.service';
@@ -82,6 +81,19 @@ export class PlatformController {
     return this.platformService.createUser(dto);
   }
 
+  @Patch('users/:userId')
+  updateManagedUser(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateManagedUserDto,
+  ) {
+    return this.platformService.updateManagedUser(
+      userId,
+      request.auth!.userId,
+      dto,
+    );
+  }
+
   @Patch('users/:userId/status')
   updateUserStatus(
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -103,36 +115,15 @@ export class PlatformController {
     return this.platformService.updateUserProfile(userId, dto);
   }
 
-  @Put('users/:userId/workspaces')
-  updateUserWorkspaces(
+  @Put('users/:userId/site-accesses')
+  updateUserSiteAccesses(
     @Param('userId', ParseUUIDPipe) userId: string,
-    @Body() dto: UpdateUserWorkspacesDto,
+    @Body() dto: UpdateUserSiteAccessesDto,
   ) {
-    return this.platformService.updateUserWorkspaces(userId, dto.workspaceIds);
-  }
-
-  @Put('users/:userId/sites')
-  updateUserSites(
-    @Param('userId', ParseUUIDPipe) userId: string,
-    @Body() dto: UpdateUserSitesDto,
-  ) {
-    return this.platformService.updateUserSites(userId, dto.siteIds);
-  }
-
-  @Post('workspaces/:workspaceId/members/:userId')
-  setWorkspaceMember(
-    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ) {
-    return this.platformService.setWorkspaceMember(workspaceId, userId);
-  }
-
-  @Delete('workspaces/:workspaceId/members/:userId')
-  removeWorkspaceMember(
-    @Param('workspaceId', ParseUUIDPipe) workspaceId: string,
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ) {
-    return this.platformService.removeWorkspaceMember(workspaceId, userId);
+    return this.platformService.updateUserSiteAccesses(
+      userId,
+      dto.siteAccesses,
+    );
   }
 
   @Patch('users/:userId/password')

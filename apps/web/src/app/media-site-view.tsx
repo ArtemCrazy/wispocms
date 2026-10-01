@@ -8,51 +8,64 @@ type MediaSiteTarget =
   | "404"
   | "privacy-policy"
   | "banners"
-  | "variables";
+  | "variables"
+  | "media";
 
 export function MediaSiteView({
   siteName,
   onOpen,
   showBanners = true,
+  showTemplates = true,
 }: {
   siteName?: string;
   onOpen: (target: MediaSiteTarget) => void;
   showBanners?: boolean;
+  showTemplates?: boolean;
 }) {
   const cards = (
     [
       {
         id: "templates",
         icon: "template",
-        title: "Шаблоны",
+        title: "Шаблоны и чанки",
         description: "Страницы, общие области и системные шаблоны сайта.",
-      },
-      {
-        id: "banners",
-        icon: "banners",
-        title: "Библиотека баннеров",
-        description: "Единая библиотека баннеров без привязки к месту показа.",
       },
       {
         id: "variables",
         icon: "company-data",
-        title: "Библиотека переменных",
+        title: "Переменные",
         description: "Повторно используемые значения для шаблонов и контента.",
       },
+      {
+        id: "banners",
+        icon: "banners",
+        title: "Баннеры",
+        description: "Единая библиотека баннеров без привязки к месту показа.",
+      },
+      {
+        id: "media",
+        icon: "content-center",
+        title: "Медиатека",
+        description: "Изображения и файлы, используемые на страницах сайта.",
+      },
     ] satisfies Array<{
-      id: "templates" | "banners" | "variables";
-      icon: "template" | "banners" | "company-data";
+      id: "templates" | "banners" | "variables" | "media";
+      icon: "template" | "banners" | "company-data" | "content-center";
       title: string;
       description: string;
     }>
-  ).filter((card) => card.id !== "banners" || showBanners);
+  ).filter(
+    (card) =>
+      (card.id !== "banners" || showBanners) &&
+      (card.id !== "templates" || showTemplates),
+  );
 
   const templates: Array<[MediaSiteTarget, string, string]> = [
     ["homepage", "Главная", "Баннеры, SEO и история страницы"],
     ["articles", "Статьи", "Материалы, категории и авторы"],
     ["layout", "Шапка и подвал", "Общие области и настройки поиска"],
     ["404", "404", "Системная страница и её SEO"],
-    ["privacy-policy", "ПК", "Юридический текст сайта"],
+    ["privacy-policy", "Политика", "Юридический текст сайта"],
   ];
 
   return (

@@ -1,4 +1,5 @@
 import { createDataSourceOptions } from './data-source';
+import { databaseEntities } from './entities';
 import { RemainingMetadataRevisionTypes1790210000000 } from './migrations/1790210000000-RemainingMetadataRevisionTypes';
 
 describe('database migrations', () => {
@@ -9,7 +10,7 @@ describe('database migrations', () => {
     const names = migrations.map(
       (Migration) => new Migration().name || Migration.name,
     );
-    expect(names).toHaveLength(46);
+    expect(names).toHaveLength(48);
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(
       expect.arrayContaining([
@@ -17,6 +18,7 @@ describe('database migrations', () => {
         'PreparationCheckpoints1791436800000',
         'SiteScopedRoles1790017200000',
         'RemainingMetadataRevisionTypes1790210000000',
+        'AdminPasswordEmailConfirmation1791613200000',
       ]),
     );
     // These independent migrations were already applied in separate environments.
@@ -33,5 +35,29 @@ describe('database migrations', () => {
     expect(options.migrations).toContain(
       RemainingMetadataRevisionTypes1790210000000,
     );
+  });
+
+  it('registers site-level access assignments as the canonical permission source', () => {
+    const options = createDataSourceOptions();
+    const migrationNames = (
+      options.migrations as Array<new () => { name?: string }>
+    ).map((Migration) => new Migration().name || Migration.name);
+    const entityNames = databaseEntities.map((Entity) => Entity.name);
+
+    expect(migrationNames).toContain('SiteAccessAssignments1791523200000');
+    expect(entityNames).toContain('SiteAccessEntity');
+  });
+
+  it('registers administrator password reset storage and session versions', () => {
+    const options = createDataSourceOptions();
+    const migrationNames = (
+      options.migrations as Array<new () => { name?: string }>
+    ).map((Migration) => new Migration().name || Migration.name);
+    const entityNames = databaseEntities.map((Entity) => Entity.name);
+
+    expect(migrationNames).toContain(
+      'AdminPasswordEmailConfirmation1791613200000',
+    );
+    expect(entityNames).toContain('AdminPasswordResetEntity');
   });
 });

@@ -47,14 +47,15 @@ type PlatformUser = {
   email: string;
   fullName: string;
   platformRole: string;
-  accountKind: "legacy" | "wispo" | "site";
   isActive: boolean;
-  memberships: Array<{
-    id: string;
+  siteAccesses: Array<{
+    siteId: string;
+    siteName: string;
     workspaceId: string;
     workspaceName: string;
-    role: string;
-    siteIds: string[];
+    role: "site_owner" | "content_manager";
+    canEditCode: boolean;
+    requiresApproval: boolean;
   }>;
 };
 
@@ -156,7 +157,9 @@ export function AllProjectsView({
     .filter((group) => group.projects.length > 0);
 
   const selectedWorkspace = settingsContext?.workspace ?? null;
-  const employeeUsers = users.filter((user) => user.accountKind === "wispo" && user.platformRole !== "wispo_admin");
+  const employeeUsers = users.filter(
+    (user) => user.platformRole !== "wispo_admin",
+  );
 
   async function openSettings(context: SettingsContext) {
     setSettingsContext(context);
@@ -234,13 +237,22 @@ export function AllProjectsView({
     setBusy(true);
     setMessage("");
     try {
-      const siteIds = user.memberships
-        .flatMap((membership) => membership.siteIds)
-        .filter((siteId) => siteId !== settingsContext.site!.id);
-      if (!assigned) siteIds.push(settingsContext.site.id);
-      await api(`/api/platform/users/${user.id}/sites`, {
+      const siteAccesses = assigned
+        ? user.siteAccesses.filter(
+            (access) => access.siteId !== settingsContext.site!.id,
+          )
+        : [
+            ...user.siteAccesses,
+            {
+              siteId: settingsContext.site.id,
+              role: "content_manager" as const,
+              canEditCode: false,
+              requiresApproval: false,
+            },
+          ];
+      await api(`/api/platform/users/${user.id}/site-accesses`, {
         method: "PUT",
-        body: JSON.stringify({ siteIds }),
+        body: JSON.stringify({ siteAccesses }),
       });
       setMessage(
         assigned
@@ -461,7 +473,7 @@ export function AllProjectsView({
               {loadingUsers ? <p className="project-settings-loading">Загружаем сотрудников…</p> : employeeUsers.length ? (
                 <div className="project-settings-team">
                   {employeeUsers.map((user) => {
-                    const assigned = user.memberships.some((membership) => membership.siteIds?.includes(settingsContext.site!.id));
+                    const assigned = user.siteAccesses.some((access) => access.siteId === settingsContext.site!.id);
                     return <label key={user.id}><span><i>{initials(user.fullName)}</i><b>{user.fullName}</b><small>{user.email}</small></span><input type="checkbox" checked={assigned} disabled={busy} onChange={() => void toggleTeamMember(user, assigned)} /></label>;
                   })}
                 </div>

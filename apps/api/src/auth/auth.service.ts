@@ -11,17 +11,12 @@ import { compare, hash } from 'bcryptjs';
 import { In, Repository } from 'typeorm';
 import {
   PlatformRole,
+  SiteAccessEntity,
   SiteEntity,
   UserEntity,
   WorkspaceEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import { SlidingWindowRateLimiter } from '../common/sliding-window-rate-limiter';
-import { canAccessContentCenter } from '../content-center/workspace-access';
-import {
-  hasSitePermission,
-  SitePermission,
-} from '../content/content.permissions';
 
 @Injectable()
 export class AuthService {
@@ -37,8 +32,8 @@ export class AuthService {
     private readonly workspaces: Repository<WorkspaceEntity>,
     @InjectRepository(SiteEntity)
     private readonly sites: Repository<SiteEntity>,
-    @InjectRepository(WorkspaceMembershipEntity)
-    private readonly memberships: Repository<WorkspaceMembershipEntity>,
+    @InjectRepository(SiteAccessEntity)
+    private readonly siteAccesses: Repository<SiteAccessEntity>,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -64,6 +59,7 @@ export class AuthService {
     const token = await this.jwtService.signAsync({
       sub: user.id,
       role: user.platformRole,
+      sessionVersion: user.sessionVersion ?? 0,
     });
     return { token, session: await this.getSession(user.id) };
   }
@@ -75,31 +71,27 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Пользователь не найден');
 
     const isAdministrator = user.platformRole === PlatformRole.WISPO_ADMIN;
-    const ownMemberships = await this.memberships.find({
+    const ownAccesses = await this.siteAccesses.find({
       where: { userId },
-      relations: { workspace: true },
+      relations: { site: { workspace: true } },
     });
-    const grantedMemberships = ownMemberships.filter(
-      (membership) =>
-        membership.siteIds?.length &&
-        hasSitePermission(
-          user.platformRole,
-          membership.role,
-          SitePermission.READ,
-        ),
-    );
     const workspaceRows = isAdministrator
       ? await this.workspaces.find({ order: { name: 'ASC' } })
-      : grantedMemberships.map((row) => row.workspace);
-    const allowedSiteIds = new Set(
-      grantedMemberships.flatMap((membership) => membership.siteIds),
-    );
+      : Array.from(
+          new Map(
+            ownAccesses.map((access) => [
+              access.site.workspace.id,
+              access.site.workspace,
+            ]),
+          ).values(),
+        );
+    const allowedSiteIds = new Set(ownAccesses.map((access) => access.siteId));
 
     const workspaceIds = workspaceRows.map((workspace) => workspace.id);
-    const projectMemberships = workspaceIds.length
-      ? await this.memberships.find({
-          where: { workspaceId: In(workspaceIds) },
-          relations: { user: true },
+    const projectAccesses = workspaceIds.length
+      ? await this.siteAccesses.find({
+          where: { site: { workspaceId: In(workspaceIds) } },
+          relations: { user: true, site: true },
           order: { createdAt: 'ASC' },
         })
       : [];
@@ -129,69 +121,74 @@ export class AuthService {
         id: workspace.id,
         name: workspace.name,
         slug: workspace.slug,
-        canUseContentCenter: canAccessContentCenter(
-          user.platformRole,
-          ownMemberships.find(
-            (membership) => membership.workspaceId === workspace.id,
-          ),
+        canUseContentCenter:
+          isAdministrator ||
           sites
             .filter((site) => site.workspaceId === workspace.id)
-            .map((site) => site.id),
-        ),
-        role:
-          ownMemberships.find(
-            (membership) => membership.workspaceId === workspace.id,
-          )?.role ?? null,
-        members: projectMemberships
-          .filter(
-            (membership) =>
-              membership.workspaceId === workspace.id &&
-              membership.user?.isActive &&
-              (isAdministrator ||
-                membership.siteIds?.some((siteId) =>
-                  allowedSiteIds.has(siteId),
-                )),
-          )
-          .map((membership) => ({
-            id: membership.user.id,
-            fullName: membership.user.fullName,
-            email: membership.user.email,
-            role: membership.role,
-          })),
+            .every((site) => allowedSiteIds.has(site.id)),
+        members: Array.from(
+          new Map(
+            projectAccesses
+              .filter(
+                (access) =>
+                  access.site.workspaceId === workspace.id &&
+                  access.user?.isActive &&
+                  (isAdministrator || allowedSiteIds.has(access.siteId)),
+              )
+              .map((access) => [access.user.id, access]),
+          ).values(),
+        ).map((access) => ({
+          id: access.user.id,
+          fullName: access.user.fullName,
+          email: access.user.email,
+          role: access.role,
+        })),
         sites: sites
           .filter(
             (site) =>
               site.workspaceId === workspace.id &&
               (isAdministrator || allowedSiteIds.has(site.id)),
           )
-          .map((site) => ({
-            id: site.id,
-            name: site.name,
-            slug: site.slug,
-            domain: site.domain,
-            domainStatus: site.domainStatus,
-            domainCheckedAt: site.domainCheckedAt,
-            domainStatusMessage: site.domainStatusMessage,
-            siteType: site.siteType,
-            linkedCommercialSiteId: site.linkedCommercialSiteId,
-            linkedCommercialSite: site.linkedCommercialSite
-              ? {
-                  id: site.linkedCommercialSite.id,
-                  name: site.linkedCommercialSite.name,
-                  slug: site.linkedCommercialSite.slug,
-                  domain: site.linkedCommercialSite.domain,
-                }
-              : null,
-            isActive: site.isActive,
-            createdAt: site.createdAt,
-            creator: site.createdBy
-              ? {
-                  id: site.createdBy.id,
-                  fullName: site.createdBy.fullName,
-                  email: site.createdBy.email,
-                }
-              : null,
-          })),
+          .map((site) => {
+            const access = ownAccesses.find(
+              (assignment) => assignment.siteId === site.id,
+            );
+            return {
+              id: site.id,
+              name: site.name,
+              slug: site.slug,
+              domain: site.domain,
+              domainStatus: site.domainStatus,
+              domainCheckedAt: site.domainCheckedAt,
+              domainStatusMessage: site.domainStatusMessage,
+              siteType: site.siteType,
+              linkedCommercialSiteId: site.linkedCommercialSiteId,
+              linkedCommercialSite: site.linkedCommercialSite
+                ? {
+                    id: site.linkedCommercialSite.id,
+                    name: site.linkedCommercialSite.name,
+                    slug: site.linkedCommercialSite.slug,
+                    domain: site.linkedCommercialSite.domain,
+                  }
+                : null,
+              isActive: site.isActive,
+              createdAt: site.createdAt,
+              creator: site.createdBy
+                ? {
+                    id: site.createdBy.id,
+                    fullName: site.createdBy.fullName,
+                    email: site.createdBy.email,
+                  }
+                : null,
+              access: isAdministrator
+                ? null
+                : {
+                    role: access!.role,
+                    canEditCode: access!.canEditCode,
+                    requiresApproval: access!.requiresApproval,
+                  },
+            };
+          }),
       })),
     };
   }
@@ -199,7 +196,7 @@ export class AuthService {
   async getActiveIdentity(userId: string) {
     return this.users.findOne({
       where: { id: userId, isActive: true },
-      select: { id: true, platformRole: true },
+      select: { id: true, platformRole: true, sessionVersion: true },
     });
   }
 
@@ -212,6 +209,10 @@ export class AuthService {
       where: { id: userId, isActive: true },
     });
     if (!user) throw new UnauthorizedException('Пользователь не найден');
+    if (user.platformRole === PlatformRole.WISPO_ADMIN)
+      throw new BadRequestException(
+        'Администратор Wispo меняет пароль только после подтверждения по email',
+      );
     if (!(await compare(currentPassword, user.passwordHash)))
       throw new BadRequestException('Текущий пароль указан неверно');
     if (await compare(newPassword, user.passwordHash))
@@ -220,6 +221,7 @@ export class AuthService {
       );
 
     user.passwordHash = await hash(newPassword, 12);
+    user.sessionVersion = (user.sessionVersion ?? 0) + 1;
     await this.users.save(user);
     return { ok: true };
   }

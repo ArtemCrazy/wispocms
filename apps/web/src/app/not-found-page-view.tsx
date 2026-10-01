@@ -55,11 +55,13 @@ export function NotFoundPageView({
   canEdit = true,
   canEditCode = true,
   canApprove = true,
+  canPublishDirectly = false,
 }: {
   siteId?: string;
   canEdit?: boolean;
   canEditCode?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
 }) {
   const [state, setState] = useState<NotFoundState | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
@@ -309,6 +311,7 @@ export function NotFoundPageView({
         label="Страница 404"
         canEdit={canEdit || canEditCode}
         canApprove={canApprove}
+        canPublishDirectly={canPublishDirectly}
         dirty={dirty}
         refreshToken={state.draftRevisionId}
         onChanged={load}

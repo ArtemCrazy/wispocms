@@ -49,6 +49,23 @@ assert.deepEqual(
     { ...base, reviewState: "approved", approvedRevisionId: "revision-2" },
     { canEdit: true, canApprove: false },
   ),
+  { submit: false, approve: false, requestChanges: false, publish: false },
+);
+
+assert.deepEqual(
+  revisionActions(base, {
+    canEdit: true,
+    canApprove: false,
+    canPublishDirectly: true,
+  }),
+  { submit: false, approve: false, requestChanges: false, publish: true },
+);
+
+assert.deepEqual(
+  revisionActions(
+    { ...base, reviewState: "approved", approvedRevisionId: "revision-2" },
+    { canEdit: true, canApprove: true, canPublishDirectly: true },
+  ),
   { submit: false, approve: false, requestChanges: false, publish: true },
 );
 

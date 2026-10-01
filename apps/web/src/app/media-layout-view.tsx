@@ -33,11 +33,13 @@ function SearchSettingsView({
   siteSlug,
   canEdit,
   canApprove,
+  canPublishDirectly,
 }: {
   siteId: string;
   siteSlug: string;
   canEdit: boolean;
   canApprove: boolean;
+  canPublishDirectly: boolean;
 }) {
   const [settings, setSettings] = useState<SearchSettings | null>(null);
   const [message, setMessage] = useState("");
@@ -276,6 +278,7 @@ function SearchSettingsView({
         label="Поиск"
         canEdit={canEdit}
         canApprove={canApprove}
+        canPublishDirectly={canPublishDirectly}
         dirty={false}
         refreshToken={settings.draftRevisionId}
         onChanged={load}
@@ -290,6 +293,7 @@ export function MediaLayoutView({
   siteSlug,
   canEdit,
   canApprove,
+  canPublishDirectly,
   onDirtyChange,
 }: {
   siteId?: string;
@@ -297,6 +301,7 @@ export function MediaLayoutView({
   siteSlug?: string;
   canEdit: boolean;
   canApprove: boolean;
+  canPublishDirectly: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [tab, setTab] = useState<"header" | "footer" | "search">("header");
@@ -335,6 +340,7 @@ export function MediaLayoutView({
           mode={tab}
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           onDirtyChange={onDirtyChange}
         />
       ) : null}
@@ -344,6 +350,7 @@ export function MediaLayoutView({
           siteSlug={siteSlug}
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
         />
       ) : null}
     </section>

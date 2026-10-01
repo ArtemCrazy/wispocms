@@ -34,6 +34,11 @@ export enum WorkspaceRole {
   SITE_DEVELOPER = 'site_developer',
 }
 
+export enum SiteRole {
+  OWNER = 'site_owner',
+  CONTENT_MANAGER = 'content_manager',
+}
+
 export enum SiteType {
   MEDIA = 'media',
   CORPORATE = 'corporate',
@@ -276,17 +281,58 @@ export class UserEntity {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 
+  @Column({ name: 'session_version', type: 'integer', default: 0 })
+  sessionVersion!: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 
   @OneToMany(() => WorkspaceMembershipEntity, (membership) => membership.user)
   memberships!: WorkspaceMembershipEntity[];
 
+  @OneToMany(() => SiteAccessEntity, (access) => access.user)
+  siteAccesses!: SiteAccessEntity[];
+
   @OneToMany(() => ArticleActivityEntity, (activity) => activity.user)
   articleActivities!: ArticleActivityEntity[];
 
   @OneToMany(() => AuditLogEntity, (entry) => entry.actor)
   auditEntries!: AuditLogEntity[];
+
+  @OneToMany(
+    () => AdminPasswordResetEntity,
+    (passwordReset) => passwordReset.user,
+  )
+  passwordResets!: AdminPasswordResetEntity[];
+}
+
+@Entity('admin_password_resets')
+@Index(['userId', 'createdAt'])
+export class AdminPasswordResetEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'user_id', type: 'uuid' })
+  userId!: string;
+
+  @Index({ unique: true })
+  @Column({ name: 'token_hash', type: 'varchar', length: 64 })
+  tokenHash!: string;
+
+  @Column({ name: 'expires_at', type: 'timestamptz' })
+  expiresAt!: Date;
+
+  @Column({ name: 'consumed_at', type: 'timestamptz', nullable: true })
+  consumedAt!: Date | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @ManyToOne(() => UserEntity, (user) => user.passwordResets, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'user_id' })
+  user!: UserEntity;
 }
 
 @Entity('workspaces')
@@ -456,6 +502,9 @@ export class SiteEntity {
   @OneToMany(() => AuditLogEntity, (entry) => entry.site)
   auditEntries!: AuditLogEntity[];
 
+  @OneToMany(() => SiteAccessEntity, (access) => access.site)
+  userAccesses!: SiteAccessEntity[];
+
   @OneToMany(() => PrivacyPolicyStateEntity, (state) => state.site)
   privacyPolicyStates!: PrivacyPolicyStateEntity[];
 }
@@ -497,6 +546,46 @@ export class WorkspaceMembershipEntity {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
+}
+
+@Entity('site_accesses')
+@Unique(['userId', 'siteId'])
+export class SiteAccessEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'user_id', type: 'uuid' })
+  userId!: string;
+
+  @ManyToOne(() => UserEntity, (user) => user.siteAccesses, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'user_id' })
+  user!: UserEntity;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, (site) => site.userAccesses, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ type: 'varchar', length: 40 })
+  role!: SiteRole;
+
+  @Column({ name: 'can_edit_code', type: 'boolean', default: false })
+  canEditCode!: boolean;
+
+  @Column({ name: 'requires_approval', type: 'boolean', default: false })
+  requiresApproval!: boolean;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
 }
 
 export type AuditChanges = {
@@ -1926,9 +2015,11 @@ export class CmsRevisionEventEntity {
 
 export const databaseEntities = [
   UserEntity,
+  AdminPasswordResetEntity,
   WorkspaceEntity,
   SiteEntity,
   WorkspaceMembershipEntity,
+  SiteAccessEntity,
   CategoryEntity,
   CategoryRedirectEntity,
   CategoryActivityEntity,

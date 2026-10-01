@@ -11,10 +11,7 @@ import {
   SiteEntity,
   WorkspaceRole,
 } from '../database/entities';
-import type {
-  UserEntity,
-  WorkspaceMembershipEntity,
-} from '../database/entities';
+import type { UserEntity } from '../database/entities';
 import { PlatformService } from './platform.service';
 
 describe('PlatformService user access', () => {
@@ -26,6 +23,7 @@ describe('PlatformService user access', () => {
   };
   const service = new PlatformService(
     users as never,
+    {} as never,
     {} as never,
     {} as never,
     {} as never,
@@ -171,6 +169,7 @@ describe('PlatformService workspace and site management', () => {
     sites as never,
     pages as never,
     memberships as never,
+    {} as never,
   );
 
   beforeEach(() => {
@@ -630,55 +629,5 @@ describe('PlatformService workspace and site management', () => {
       ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(memberships.findOne).not.toHaveBeenCalled();
-  });
-});
-
-describe('PlatformService project team assignments', () => {
-  const users = { findOneBy: jest.fn() };
-  const workspaces = { existsBy: jest.fn() };
-  const memberships = {
-    findOne: jest.fn(),
-    create: jest.fn(
-      (membership: Partial<WorkspaceMembershipEntity>) =>
-        membership as WorkspaceMembershipEntity,
-    ),
-    save: jest.fn((membership: WorkspaceMembershipEntity) =>
-      Promise.resolve({ id: 'membership-id', ...membership }),
-    ),
-    remove: jest.fn(),
-  };
-  const service = new PlatformService(
-    users as never,
-    workspaces as never,
-    {} as never,
-    {} as never,
-    memberships as never,
-  );
-
-  beforeEach(() => jest.clearAllMocks());
-
-  it('assigns an agency teammate to a workspace explicitly', async () => {
-    workspaces.existsBy.mockResolvedValue(true);
-    users.findOneBy.mockResolvedValue({
-      id: 'agency-id',
-      platformRole: PlatformRole.AGENCY_MEMBER,
-    });
-    memberships.findOne.mockResolvedValue(null);
-
-    await expect(
-      service.setWorkspaceMember('workspace-id', 'agency-id'),
-    ).resolves.toEqual({
-      id: 'membership-id',
-      workspaceId: 'workspace-id',
-      userId: 'agency-id',
-      role: WorkspaceRole.EMPLOYEE,
-    });
-    expect(memberships.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceId: 'workspace-id',
-        userId: 'agency-id',
-        role: WorkspaceRole.EMPLOYEE,
-      }),
-    );
   });
 });

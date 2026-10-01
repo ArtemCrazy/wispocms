@@ -1,19 +1,19 @@
 import {
-  ArrayUnique,
   ArrayNotEmpty,
   IsArray,
   IsBoolean,
   IsEmail,
   IsEnum,
-  IsIn,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
-import { SiteType, WorkspaceRole } from '../database/entities';
+import { Type } from 'class-transformer';
+import { SiteRole, SiteType } from '../database/entities';
 
 export class CreateWorkspaceDto {
   @IsString()
@@ -85,6 +85,51 @@ export class UpdateUserProfileDto {
   email!: string;
 }
 
+export enum ManagedUserRole {
+  WISPO_ADMIN = 'wispo_admin',
+  SITE_OWNER = 'site_owner',
+  CONTENT_MANAGER = 'content_manager',
+}
+
+export class UpdateManagedUserDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(160)
+  fullName!: string;
+
+  @IsEnum(ManagedUserRole)
+  role!: ManagedUserRole;
+
+  @IsArray()
+  @IsUUID('4', { each: true })
+  siteIds!: string[];
+
+  @IsBoolean()
+  canEditCode!: boolean;
+
+  @IsBoolean()
+  requiresApproval!: boolean;
+
+  @IsBoolean()
+  isActive!: boolean;
+}
+
+export class SiteAccessAssignmentDto {
+  @IsUUID('4')
+  siteId!: string;
+
+  @IsEnum(SiteRole)
+  role!: SiteRole;
+
+  @IsOptional()
+  @IsBoolean()
+  canEditCode?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requiresApproval?: boolean;
+}
+
 export class CreateUserDto {
   @IsString()
   @MinLength(2)
@@ -98,51 +143,18 @@ export class CreateUserDto {
   @MinLength(10)
   password!: string;
 
-  @IsIn([
-    WorkspaceRole.SITE_OWNER,
-    WorkspaceRole.WISPO_MANAGER,
-    WorkspaceRole.SITE_CONTENT_MANAGER,
-    WorkspaceRole.WISPO_DEVELOPER,
-    WorkspaceRole.SITE_DEVELOPER,
-  ])
-  role!: WorkspaceRole;
-
   @IsArray()
   @ArrayNotEmpty()
-  @ArrayUnique()
-  @IsUUID('4', { each: true })
-  siteIds!: string[];
+  @ValidateNested({ each: true })
+  @Type(() => SiteAccessAssignmentDto)
+  siteAccesses!: SiteAccessAssignmentDto[];
 }
 
-export class CreateSiteUserDto {
-  @IsString()
-  @MinLength(2)
-  @MaxLength(160)
-  fullName!: string;
-
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  @MinLength(10)
-  password!: string;
-
-  @IsIn([WorkspaceRole.SITE_CONTENT_MANAGER, WorkspaceRole.SITE_DEVELOPER])
-  role!: WorkspaceRole;
-}
-
-export class UpdateUserWorkspacesDto {
+export class UpdateUserSiteAccessesDto {
   @IsArray()
-  @ArrayUnique()
-  @IsUUID('4', { each: true })
-  workspaceIds!: string[];
-}
-
-export class UpdateUserSitesDto {
-  @IsArray()
-  @ArrayUnique()
-  @IsUUID('4', { each: true })
-  siteIds!: string[];
+  @ValidateNested({ each: true })
+  @Type(() => SiteAccessAssignmentDto)
+  siteAccesses!: SiteAccessAssignmentDto[];
 }
 
 export class UpdateUserStatusDto {

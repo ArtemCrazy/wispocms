@@ -85,11 +85,13 @@ export function SiteVariablesView({
   siteName,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
 }: {
   siteId?: string;
   siteName?: string;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
 }) {
   const [items, setItems] = useState<SiteVariable[]>([]);
   const [draftRevisionId, setDraftRevisionId] = useState<string | null>(null);
@@ -337,6 +339,7 @@ export function SiteVariablesView({
           label="Переменные"
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           dirty={false}
           refreshToken={draftRevisionId}
           onChanged={load}

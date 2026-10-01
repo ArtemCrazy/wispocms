@@ -9,11 +9,12 @@ import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import {
   AuditLogEntity,
   PlatformRole,
+  SiteAccessEntity,
   SiteEntity,
   UserEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import {
+  accessCoversSite,
   hasSitePermission,
   SitePermission,
 } from '../content/content.permissions';
@@ -68,8 +69,8 @@ export class AuditService {
     private readonly users: Repository<UserEntity>,
     @InjectRepository(SiteEntity)
     private readonly sites: Repository<SiteEntity>,
-    @InjectRepository(WorkspaceMembershipEntity)
-    private readonly memberships: Repository<WorkspaceMembershipEntity>,
+    @InjectRepository(SiteAccessEntity)
+    private readonly siteAccesses: Repository<SiteAccessEntity>,
   ) {}
 
   async recordRequest(request: AuthenticatedRequest) {
@@ -146,17 +147,12 @@ export class AuditService {
     const site = await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
-      const membership = await this.memberships.findOne({
-        where: { userId: actor.userId, workspaceId: site.workspaceId },
-        select: { role: true, siteIds: true },
+      const access = await this.siteAccesses.findOne({
+        where: { userId: actor.userId, siteId },
       });
       if (
-        !membership?.siteIds?.includes(siteId) ||
-        !hasSitePermission(
-          actor.platformRole,
-          membership.role,
-          SitePermission.READ,
-        )
+        !accessCoversSite(access, siteId) ||
+        !hasSitePermission(actor.platformRole, access, SitePermission.READ)
       )
         throw new ForbiddenException('Нет доступа к этому сайту');
     }

@@ -52,12 +52,12 @@ import {
   EditorialState,
   PrivacyPolicyStateEntity,
   SiteEntity,
+  SiteAccessEntity,
   type SiteGlobalData,
   type SiteLayoutSettings,
   SiteSearchSettingsEntity,
   SiteType,
   SiteVariableEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import {
   configuredDomainTargets,
@@ -117,7 +117,11 @@ import {
   normalizeArticleDocument,
 } from './article-document';
 import { detectImageMimeType, readImageDimensions } from './image-signature';
-import { hasSitePermission, SitePermission } from './content.permissions';
+import {
+  accessCoversSite,
+  hasSitePermission,
+  SitePermission,
+} from './content.permissions';
 import { privacyFingerprint } from '../privacy/privacy-generator';
 import {
   getNotFoundTemplate,
@@ -153,8 +157,8 @@ export class ContentService {
   constructor(
     @InjectRepository(SiteEntity)
     private readonly sites: Repository<SiteEntity>,
-    @InjectRepository(WorkspaceMembershipEntity)
-    private readonly memberships: Repository<WorkspaceMembershipEntity>,
+    @InjectRepository(SiteAccessEntity)
+    private readonly siteAccesses: Repository<SiteAccessEntity>,
     @InjectRepository(CategoryEntity)
     private readonly categories: Repository<CategoryEntity>,
     @InjectRepository(AuthorEntity)
@@ -344,20 +348,12 @@ export class ContentService {
     const site = await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
-      const membership = await this.memberships.findOne({
-        select: { role: true, siteIds: true },
-        where: {
-          userId: actor.userId,
-          workspaceId: site.workspaceId,
-        },
+      const access = await this.siteAccesses.findOne({
+        where: { userId: actor.userId, siteId },
       });
       if (
-        !membership?.siteIds?.includes(siteId) ||
-        !hasSitePermission(
-          actor.platformRole,
-          membership?.role ?? null,
-          permission,
-        )
+        !accessCoversSite(access, siteId) ||
+        !hasSitePermission(actor.platformRole, access, permission)
       )
         throw new ForbiddenException('Недостаточно прав для этого действия');
     }
@@ -5316,7 +5312,7 @@ export class ContentService {
   }
 
   async activateNotFoundPage(siteId: string, actor: Actor) {
-    await this.requireSite(siteId, actor, SitePermission.APPROVE);
+    await this.requireSite(siteId, actor, SitePermission.PUBLISH_CONTENT);
     const page = await this.pages.findOne({ where: { siteId, slug: '404' } });
     if (!page) throw new NotFoundException('Страница 404 не найдена');
     const template = getNotFoundTemplate(
@@ -5340,7 +5336,7 @@ export class ContentService {
   }
 
   async deactivateNotFoundPage(siteId: string, actor: Actor) {
-    await this.requireSite(siteId, actor, SitePermission.APPROVE);
+    await this.requireSite(siteId, actor, SitePermission.PUBLISH_CONTENT);
     const page = await this.pages.findOne({ where: { siteId, slug: '404' } });
     if (!page) throw new NotFoundException('Страница 404 не найдена');
     page.status = PageStatus.DRAFT;
@@ -5681,7 +5677,7 @@ export class ContentService {
     actor: Actor,
     dto: ChangePageStatusDto,
   ) {
-    await this.requireSite(siteId, actor, SitePermission.APPROVE);
+    await this.requireSite(siteId, actor, SitePermission.PUBLISH_CONTENT);
     const page = await this.pages.findOne({ where: { id: pageId, siteId } });
     if (!page) throw new NotFoundException('Страница не найдена');
     if (this.versionedPage(page) && this.revisions)

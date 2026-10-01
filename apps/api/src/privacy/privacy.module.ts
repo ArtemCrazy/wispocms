@@ -7,7 +7,7 @@ import {
   PrivacyLegalModelEntity,
   PrivacyPolicyStateEntity,
   SiteEntity,
-  WorkspaceMembershipEntity,
+  SiteAccessEntity,
 } from '../database/entities';
 import {
   PrivacyController,
@@ -21,7 +21,7 @@ import { PrivacyService } from './privacy.service';
     ContentModule,
     TypeOrmModule.forFeature([
       SiteEntity,
-      WorkspaceMembershipEntity,
+      SiteAccessEntity,
       PageEntity,
       PrivacyLegalModelEntity,
       PrivacyPolicyStateEntity,

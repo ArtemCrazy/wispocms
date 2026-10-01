@@ -50,12 +50,14 @@ export function MediaView({
   workspaceName,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
 }: {
   siteId?: string;
   siteName?: string;
   workspaceName?: string;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
 }) {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -474,6 +476,7 @@ export function MediaView({
                     label={`Alt: ${item.originalName}`}
                     canEdit={canEdit}
                     canApprove={canApprove}
+                    canPublishDirectly={canPublishDirectly}
                     dirty={
                       editingId === item.id &&
                       (altDraft.trim() !== (item.altText ?? "") ||

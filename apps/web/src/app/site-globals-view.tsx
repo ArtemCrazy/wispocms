@@ -55,6 +55,7 @@ export function SiteGlobalsView({
   siteSlug,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
   onDirtyChange,
 }: {
   siteId?: string;
@@ -62,6 +63,7 @@ export function SiteGlobalsView({
   siteSlug?: string;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [data, setData] = useState<SiteGlobals | null>(null);
@@ -417,6 +419,7 @@ export function SiteGlobalsView({
           label="Общие данные"
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           dirty={dirty}
           refreshToken={data.draftRevisionId}
           onChanged={load}
