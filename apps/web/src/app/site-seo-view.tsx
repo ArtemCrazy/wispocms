@@ -45,6 +45,7 @@ export function SiteSeoView({
   siteSlug,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
   onDirtyChange,
 }: {
   siteId?: string;
@@ -52,6 +53,7 @@ export function SiteSeoView({
   siteSlug?: string;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [seo, setSeo] = useState<SiteSeo | null>(null);
@@ -336,6 +338,7 @@ export function SiteSeoView({
           label="SEO"
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           dirty={dirty}
           refreshToken={seo.draftRevisionId}
           onChanged={load}

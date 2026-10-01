@@ -128,7 +128,11 @@ export function PagesView({
     (isVersionedPage || !editor || editor.status !== "published" || canEditPublished);
   const currentRevisionActions =
     isVersionedPage && revisionCurrent
-      ? revisionActions(revisionCurrent, { canEdit, canApprove })
+      ? revisionActions(revisionCurrent, {
+          canEdit,
+          canApprove,
+          canPublishDirectly: canEditPublished,
+        })
       : null;
   const isArmaturexEditor = Boolean(
     editor &&
@@ -348,7 +352,14 @@ export function PagesView({
       reason = window.prompt("Что нужно исправить в этой версии?")?.trim();
       if (!reason) return;
     }
-    if (action === "publish" && !window.confirm("Опубликовать именно одобренную версию страницы?"))
+    if (
+      action === "publish" &&
+      !window.confirm(
+        canEditPublished && revisionCurrent.reviewState === "draft"
+          ? "Опубликовать текущую версию страницы без согласования?"
+          : "Опубликовать именно одобренную версию страницы?",
+      )
+    )
       return;
     setStatusBusy(true);
     try {
@@ -360,7 +371,11 @@ export function PagesView({
         setMessage("Версия страницы изменилась после открытия. Проверьте новую версию перед действием.");
         return;
       }
-      const available = revisionActions(latest, { canEdit, canApprove });
+      const available = revisionActions(latest, {
+        canEdit,
+        canApprove,
+        canPublishDirectly: canEditPublished,
+      });
       const permission = action === "request-changes" ? "requestChanges" : action;
       if (!available[permission]) {
         setMessage("Состояние версии изменилось. Обновите страницу и проверьте действия.");
@@ -385,7 +400,9 @@ export function PagesView({
             ? "Версия страницы одобрена"
             : action === "request-changes"
               ? "Версия страницы возвращена на доработку"
-              : "Одобренная версия страницы опубликована",
+              : canEditPublished && latest.reviewState === "draft"
+                ? "Версия страницы опубликована без согласования"
+                : "Одобренная версия страницы опубликована",
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Не удалось изменить состояние версии страницы");
@@ -746,7 +763,9 @@ export function PagesView({
                     ) : null}
                     {currentRevisionActions?.publish ? (
                       <button type="button" className="publish" disabled={statusBusy || dirty} onClick={() => void changePageRevision("publish")}>
-                        Опубликовать одобренную версию
+                        {canEditPublished && revisionCurrent?.reviewState === "draft"
+                          ? "Опубликовать"
+                          : "Опубликовать одобренную версию"}
                       </button>
                     ) : null}
                     {dirty ? <small>Сначала сохраните изменения страницы.</small> : null}

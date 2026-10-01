@@ -13,6 +13,8 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard, type AuthenticatedRequest } from './jwt-auth.guard';
 import { ChangePasswordDto } from './change-password.dto';
 import { LoginDto } from './login.dto';
+import { CompleteAdminPasswordResetDto } from './admin-password-reset.dto';
+import { AdminPasswordResetService } from './admin-password-reset.service';
 
 const sessionCookie = {
   httpOnly: true,
@@ -24,7 +26,10 @@ const sessionCookie = {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly adminPasswordReset: AdminPasswordResetService,
+  ) {}
 
   @Post('login')
   @HttpCode(200)
@@ -64,6 +69,30 @@ export class AuthController {
       dto.currentPassword,
       dto.newPassword,
     );
+  }
+
+  @Post('admin-password-reset/request')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  requestAdminPasswordReset(@Req() request: AuthenticatedRequest) {
+    return this.adminPasswordReset.request(request.auth!.userId);
+  }
+
+  @Post('admin-password-reset/complete')
+  @HttpCode(200)
+  async completeAdminPasswordReset(
+    @Body() dto: CompleteAdminPasswordResetDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.adminPasswordReset.complete(
+      dto.token,
+      dto.newPassword,
+    );
+    response.clearCookie('wispo_session', {
+      ...sessionCookie,
+      maxAge: undefined,
+    });
+    return result;
   }
 
   @Post('logout')

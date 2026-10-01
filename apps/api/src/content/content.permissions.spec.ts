@@ -6,6 +6,7 @@ import {
 import {
   hasSitePermission,
   permissionForArticleTransition,
+  type SiteAccessGrant,
   SitePermission,
 } from './content.permissions';
 
@@ -49,74 +50,138 @@ describe('content permissions', () => {
     }
   });
 
-  it('allows the site owner to manage and publish everything on the assigned site', () => {
-    const role = 'site_owner' as WorkspaceRole;
+  it('keeps code editing and user administration closed while allowing the owner to publish an approved code revision', () => {
+    const access: SiteAccessGrant = {
+      role: 'site_owner',
+      canEditCode: false,
+      requiresApproval: false,
+    };
     for (const permission of [
       SitePermission.READ,
       SitePermission.EDIT_CONTENT,
       SitePermission.APPROVE,
       SitePermission.MANAGE_SETTINGS,
-      'edit_code',
+      SitePermission.PUBLISH_CODE,
+      SitePermission.VIEW_CODE,
       'publish_content',
-      'publish_code',
-      'manage_users',
     ] as SitePermission[]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, role, permission)).toBe(
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
         true,
+      );
+    }
+    for (const permission of [
+      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_USERS,
+    ]) {
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
+        false,
       );
     }
   });
 
-  it('allows a Wispo manager to edit and publish content but not code or approvals', () => {
-    const role = 'wispo_manager' as WorkspaceRole;
+  it('grants code editing to an owner only through the explicit flag', () => {
+    const access: SiteAccessGrant = {
+      role: 'site_owner',
+      canEditCode: true,
+      requiresApproval: false,
+    };
     expect(
       hasSitePermission(
         PlatformRole.EMPLOYEE,
-        role,
+        access,
+        SitePermission.EDIT_CODE,
+      ),
+    ).toBe(true);
+    expect(
+      hasSitePermission(
+        PlatformRole.EMPLOYEE,
+        access,
+        SitePermission.PUBLISH_CODE,
+      ),
+    ).toBe(true);
+    expect(
+      hasSitePermission(
+        PlatformRole.EMPLOYEE,
+        access,
+        SitePermission.MANAGE_USERS,
+      ),
+    ).toBe(false);
+  });
+
+  it('lets a content manager publish directly when approval is disabled', () => {
+    const access: SiteAccessGrant = {
+      role: 'content_manager',
+      canEditCode: false,
+      requiresApproval: false,
+    };
+    expect(
+      hasSitePermission(
+        PlatformRole.EMPLOYEE,
+        access,
         SitePermission.EDIT_CONTENT,
       ),
     ).toBe(true);
     expect(
       hasSitePermission(
         PlatformRole.EMPLOYEE,
-        role,
-        'publish_content' as SitePermission,
+        access,
+        SitePermission.PUBLISH_CONTENT,
       ),
     ).toBe(true);
     for (const permission of [
       SitePermission.APPROVE,
       SitePermission.MANAGE_SETTINGS,
-      'edit_code',
-      'manage_users',
-      'publish_code',
-    ] as SitePermission[]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, role, permission)).toBe(
+      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_USERS,
+      SitePermission.PUBLISH_CODE,
+    ]) {
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
         false,
       );
     }
   });
 
-  it('allows a developer to edit and publish code without granting approval or user management', () => {
-    const role = 'wispo_developer' as WorkspaceRole;
+  it('requires review for a content manager when approval is enabled', () => {
+    const access: SiteAccessGrant = {
+      role: 'content_manager',
+      canEditCode: true,
+      requiresApproval: true,
+    };
     for (const permission of [
       SitePermission.EDIT_CONTENT,
-      'edit_code',
-      'publish_content',
-      'publish_code',
-    ] as SitePermission[]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, role, permission)).toBe(
+      SitePermission.EDIT_CODE,
+      SitePermission.VIEW_CODE,
+    ]) {
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
         true,
       );
     }
     for (const permission of [
       SitePermission.APPROVE,
       SitePermission.MANAGE_SETTINGS,
-      'manage_users',
-    ] as SitePermission[]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, role, permission)).toBe(
+      SitePermission.MANAGE_USERS,
+      SitePermission.PUBLISH_CONTENT,
+      SitePermission.PUBLISH_CODE,
+    ]) {
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
         false,
       );
     }
+  });
+
+  it('keeps code hidden from a manager without the explicit code flag', () => {
+    const access: SiteAccessGrant = {
+      role: 'content_manager',
+      canEditCode: false,
+      requiresApproval: false,
+    };
+    expect(
+      hasSitePermission(
+        PlatformRole.EMPLOYEE,
+        access,
+        SitePermission.VIEW_CODE,
+      ),
+    ).toBe(false);
   });
 
   it('requires editors to request review and approvers for other transitions', () => {

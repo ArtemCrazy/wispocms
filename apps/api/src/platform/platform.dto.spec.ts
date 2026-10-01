@@ -1,6 +1,11 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { CreateSiteDto, CreateUserDto } from './platform.dto';
+import {
+  CreateSiteDto,
+  CreateUserDto,
+  ManagedUserRole,
+  UpdateManagedUserDto,
+} from './platform.dto';
 
 describe('CreateSiteDto', () => {
   const base = {
@@ -42,19 +47,7 @@ describe('CreateUserDto', () => {
   };
   const siteId = '77bbc150-03f9-4ae4-9713-a7c8de79897d';
 
-  it('rejects the old roleless workspace assignment payload', async () => {
-    const errors = await validate(
-      plainToInstance(CreateUserDto, {
-        ...base,
-        workspaceIds: [siteId],
-      }),
-    );
-    expect(errors.map((error) => error.property)).toEqual(
-      expect.arrayContaining(['role', 'siteIds']),
-    );
-  });
-
-  it('accepts an explicit role and site assignment', async () => {
+  it('rejects the legacy role and siteIds payload', async () => {
     const errors = await validate(
       plainToInstance(CreateUserDto, {
         ...base,
@@ -62,6 +55,76 @@ describe('CreateUserDto', () => {
         siteIds: [siteId],
       }),
     );
+    expect(errors.map((error) => error.property)).toContain('siteAccesses');
+  });
+
+  it('accepts explicit per-site role and permission flags', async () => {
+    const errors = await validate(
+      plainToInstance(CreateUserDto, {
+        ...base,
+        siteAccesses: [
+          {
+            siteId,
+            role: 'content_manager',
+            canEditCode: true,
+            requiresApproval: true,
+          },
+        ],
+      }),
+    );
     expect(errors).toHaveLength(0);
+  });
+
+  it('rejects a legacy developer role inside a site assignment', async () => {
+    const errors = await validate(
+      plainToInstance(CreateUserDto, {
+        ...base,
+        siteAccesses: [
+          {
+            siteId,
+            role: 'site_developer',
+            canEditCode: true,
+            requiresApproval: false,
+          },
+        ],
+      }),
+    );
+    expect(
+      errors[0]?.children?.[0]?.children?.map((error) => error.property),
+    ).toContain('role');
+  });
+});
+
+describe('UpdateManagedUserDto', () => {
+  const siteId = '77bbc150-03f9-4ae4-9713-a7c8de79897d';
+
+  it('accepts one atomic content-manager update', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateManagedUserDto, {
+        fullName: 'Анна Ковалёва',
+        role: ManagedUserRole.CONTENT_MANAGER,
+        siteIds: [siteId],
+        canEditCode: true,
+        requiresApproval: true,
+        isActive: true,
+      }),
+    );
+
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects an unsupported managed role', async () => {
+    const errors = await validate(
+      plainToInstance(UpdateManagedUserDto, {
+        fullName: 'Анна Ковалёва',
+        role: 'site_developer',
+        siteIds: [siteId],
+        canEditCode: true,
+        requiresApproval: false,
+        isActive: true,
+      }),
+    );
+
+    expect(errors.map((error) => error.property)).toContain('role');
   });
 });

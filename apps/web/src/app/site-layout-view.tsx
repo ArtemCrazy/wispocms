@@ -61,6 +61,7 @@ export function SiteLayoutView({
   mode,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
   onDirtyChange,
 }: {
   siteId?: string;
@@ -69,6 +70,7 @@ export function SiteLayoutView({
   mode: "header" | "footer";
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [data, setData] = useState<SiteLayoutSettings | null>(null);
@@ -420,6 +422,7 @@ export function SiteLayoutView({
           label={mode === "header" ? "Шапка" : "Подвал"}
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           dirty={dirty}
           refreshToken={data.draftRevisionId}
           onChanged={load}

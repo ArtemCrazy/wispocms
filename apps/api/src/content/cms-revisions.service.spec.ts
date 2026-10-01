@@ -3,12 +3,20 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PlatformRole, WorkspaceRole } from '../database/entities';
+import { PlatformRole, SiteRole } from '../database/entities';
 import { CmsRevisionsService } from './cms-revisions.service';
 
 describe('CMS revision storage', () => {
   const owner = { userId: 'owner-id', platformRole: PlatformRole.EMPLOYEE };
   const manager = { userId: 'manager-id', platformRole: PlatformRole.EMPLOYEE };
+  const independentManager = {
+    userId: 'independent-manager-id',
+    platformRole: PlatformRole.EMPLOYEE,
+  };
+  const ownerReviewer = {
+    userId: 'owner-reviewer-id',
+    platformRole: PlatformRole.EMPLOYEE,
+  };
   const outsider = {
     userId: 'outsider-id',
     platformRole: PlatformRole.EMPLOYEE,
@@ -81,20 +89,44 @@ describe('CMS revision storage', () => {
         .fn()
         .mockResolvedValue({ id: 'site-1', workspaceId: 'workspace-1' }),
     };
-    const memberships = {
+    const siteAccesses = {
       findOne: jest.fn((options: { where: { userId: string } }) => {
         const userId = options.where.userId;
         if (userId === owner.userId)
-          return { role: WorkspaceRole.SITE_OWNER, siteIds: ['site-1'] };
+          return {
+            role: SiteRole.OWNER,
+            siteId: 'site-1',
+            canEditCode: true,
+            requiresApproval: false,
+          };
+        if (userId === ownerReviewer.userId)
+          return {
+            role: SiteRole.OWNER,
+            siteId: 'site-1',
+            canEditCode: false,
+            requiresApproval: false,
+          };
         if (userId === manager.userId)
-          return { role: WorkspaceRole.WISPO_MANAGER, siteIds: ['site-1'] };
+          return {
+            role: SiteRole.CONTENT_MANAGER,
+            siteId: 'site-1',
+            canEditCode: false,
+            requiresApproval: true,
+          };
+        if (userId === independentManager.userId)
+          return {
+            role: SiteRole.CONTENT_MANAGER,
+            siteId: 'site-1',
+            canEditCode: false,
+            requiresApproval: false,
+          };
         return null;
       }),
     };
     const service = new CmsRevisionsService(
       dataSource as never,
       sites as never,
-      memberships as never,
+      siteAccesses as never,
     );
     return { service, resources, revisions, events, db };
   }
@@ -174,7 +206,7 @@ describe('CMS revision storage', () => {
     });
     await service.submit('site-1', 'article', 'article-1', first.id, manager);
     await service.approve('site-1', 'article', 'article-1', first.id, owner);
-    await service.publish('site-1', 'article', 'article-1', first.id, manager);
+    await service.publish('site-1', 'article', 'article-1', first.id, owner);
 
     const second = await service.saveDraft({
       siteId: 'site-1',
@@ -182,16 +214,46 @@ describe('CMS revision storage', () => {
       entityId: 'article-1',
       snapshot: { title: 'New title' },
       expectedDraftRevisionId: first.id,
-      actor: manager,
+      actor: independentManager,
     });
 
     expect(second.versionNumber).toBe(2);
     expect(
       await service.published('site-1', 'article', 'article-1', manager),
     ).toEqual({ title: 'Old title' });
+    await service.submit('site-1', 'article', 'article-1', second.id, manager);
     await expect(
-      service.publish('site-1', 'article', 'article-1', second.id, manager),
+      service.publish('site-1', 'article', 'article-1', second.id, owner),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('publishes a manager draft directly when the assignment does not require approval', async () => {
+    const { service } = setup();
+    const draft = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-direct',
+      snapshot: { title: 'Direct publication' },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+
+    await service.publish(
+      'site-1',
+      'article',
+      'article-direct',
+      draft.id,
+      independentManager,
+    );
+
+    await expect(
+      service.published(
+        'site-1',
+        'article',
+        'article-direct',
+        independentManager,
+      ),
+    ).resolves.toEqual({ title: 'Direct publication' });
   });
 
   it('does not switch the public pointer when applying a release fails', async () => {
@@ -206,7 +268,7 @@ describe('CMS revision storage', () => {
     });
     await service.submit('site-1', 'article', 'article-1', old.id, manager);
     await service.approve('site-1', 'article', 'article-1', old.id, owner);
-    await service.publish('site-1', 'article', 'article-1', old.id, manager);
+    await service.publish('site-1', 'article', 'article-1', old.id, owner);
     const next = await service.saveDraft({
       siteId: 'site-1',
       resourceType: 'article',
@@ -224,7 +286,7 @@ describe('CMS revision storage', () => {
         'article',
         'article-1',
         next.id,
-        manager,
+        owner,
         (_db, snapshot) => {
           expect(snapshot).toEqual({ title: 'Proposed' });
           return Promise.reject(new Error('Release failed'));
@@ -379,7 +441,7 @@ describe('CMS revision storage', () => {
       'Correct title',
     );
     await expect(
-      service.publish('site-1', 'article', 'article-1', draft.id, manager),
+      service.publish('site-1', 'article', 'article-1', draft.id, owner),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
@@ -395,7 +457,7 @@ describe('CMS revision storage', () => {
     });
     await service.submit('site-1', 'article', 'article-1', first.id, manager);
     await service.approve('site-1', 'article', 'article-1', first.id, owner);
-    await service.publish('site-1', 'article', 'article-1', first.id, manager);
+    await service.publish('site-1', 'article', 'article-1', first.id, owner);
     const second = await service.saveDraft({
       siteId: 'site-1',
       resourceType: 'article',
@@ -446,6 +508,51 @@ describe('CMS revision storage', () => {
     await expect(
       service.listVersions('site-1', 'chunk', 'chunk-1', manager),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('lets an owner review and publish submitted code without code editing rights', async () => {
+    const { service } = setup();
+    const draft = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'chunk',
+      entityId: 'chunk-1',
+      snapshot: { html: '<h1>Review me</h1>' },
+      expectedDraftRevisionId: null,
+      actor: owner,
+    });
+    await service.submit('site-1', 'chunk', 'chunk-1', draft.id, owner);
+
+    await expect(
+      service.current('site-1', 'chunk', 'chunk-1', ownerReviewer),
+    ).resolves.toMatchObject({ reviewState: 'in_review' });
+    await expect(
+      service.saveDraft({
+        siteId: 'site-1',
+        resourceType: 'chunk',
+        entityId: 'chunk-1',
+        snapshot: { html: '<h1>Owner edit</h1>' },
+        expectedDraftRevisionId: draft.id,
+        actor: ownerReviewer,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    await service.approve(
+      'site-1',
+      'chunk',
+      'chunk-1',
+      draft.id,
+      ownerReviewer,
+    );
+    await service.publish(
+      'site-1',
+      'chunk',
+      'chunk-1',
+      draft.id,
+      ownerReviewer,
+    );
+    await expect(
+      service.published('site-1', 'chunk', 'chunk-1', ownerReviewer),
+    ).resolves.toEqual({ html: '<h1>Review me</h1>' });
   });
 
   it('lists the immutable snapshots of only the requested resource newest first', async () => {

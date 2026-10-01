@@ -92,6 +92,7 @@ export function SiteDirectoryView({
   mode,
   canEdit = true,
   canApprove = true,
+  canPublishDirectly = false,
   focusId,
   focusRequestId,
 }: {
@@ -101,6 +102,7 @@ export function SiteDirectoryView({
   mode: DirectoryMode;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
   focusId?: string;
   focusRequestId?: number;
 }) {
@@ -127,10 +129,18 @@ export function SiteDirectoryView({
   const [authorVersions, setAuthorVersions] = useState<CmsCategoryVersion[]>([]);
   const [authorPreview, setAuthorPreview] = useState<AuthorPreview | null>(null);
   const currentRevisionActions = revisionCurrent
-    ? revisionActions(revisionCurrent, { canEdit, canApprove })
+    ? revisionActions(revisionCurrent, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      })
     : null;
   const currentAuthorRevisionActions = authorRevisionCurrent
-    ? revisionActions(authorRevisionCurrent, { canEdit, canApprove })
+    ? revisionActions(authorRevisionCurrent, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      })
     : null;
 
   const reloadCategoryRevision = useCallback(
@@ -355,7 +365,9 @@ export function SiteDirectoryView({
     if (
       action === "publish" &&
       !window.confirm(
-        "Опубликовать именно одобренную версию рубрики? Изменения станут видны посетителям сайта.",
+        canPublishDirectly && revisionCurrent.reviewState === "draft"
+          ? "Опубликовать текущую версию рубрики без согласования? Изменения станут видны посетителям сайта."
+          : "Опубликовать именно одобренную версию рубрики? Изменения станут видны посетителям сайта.",
       )
     )
       return;
@@ -371,7 +383,11 @@ export function SiteDirectoryView({
         );
         return;
       }
-      const available = revisionActions(latest, { canEdit, canApprove });
+      const available = revisionActions(latest, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      });
       const permission =
         action === "request-changes" ? "requestChanges" : action;
       if (!available[permission]) {
@@ -395,7 +411,9 @@ export function SiteDirectoryView({
             ? "Версия рубрики одобрена. Теперь её можно опубликовать"
             : action === "request-changes"
               ? "Версия рубрики возвращена на доработку"
-              : "Одобренная версия рубрики опубликована",
+              : canPublishDirectly && latest.reviewState === "draft"
+                ? "Версия рубрики опубликована без согласования"
+                : "Одобренная версия рубрики опубликована",
       );
     } catch (reason) {
       setMessage(
@@ -450,7 +468,9 @@ export function SiteDirectoryView({
     if (
       action === "publish" &&
       !window.confirm(
-        "Опубликовать именно одобренную версию автора? Изменения появятся в опубликованных материалах.",
+        canPublishDirectly && authorRevisionCurrent.reviewState === "draft"
+          ? "Опубликовать текущую версию автора без согласования? Изменения появятся в опубликованных материалах."
+          : "Опубликовать именно одобренную версию автора? Изменения появятся в опубликованных материалах.",
       )
     )
       return;
@@ -466,7 +486,11 @@ export function SiteDirectoryView({
         );
         return;
       }
-      const available = revisionActions(latest, { canEdit, canApprove });
+      const available = revisionActions(latest, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      });
       const permission =
         action === "request-changes" ? "requestChanges" : action;
       if (!available[permission]) {
@@ -490,7 +514,9 @@ export function SiteDirectoryView({
             ? "Версия автора одобрена. Теперь её можно опубликовать"
             : action === "request-changes"
               ? "Версия автора возвращена на доработку"
-              : "Одобренная версия автора опубликована",
+              : canPublishDirectly && latest.reviewState === "draft"
+                ? "Версия автора опубликована без согласования"
+                : "Одобренная версия автора опубликована",
       );
     } catch (reason) {
       setMessage(
@@ -862,7 +888,9 @@ export function SiteDirectoryView({
                 disabled={busy}
                 onClick={() => void changeCategoryRevision("publish")}
               >
-                Опубликовать одобренную версию
+                {canPublishDirectly && revisionCurrent?.reviewState === "draft"
+                  ? "Опубликовать"
+                  : "Опубликовать одобренную версию"}
               </button>
             ) : null}
           </div>
@@ -1037,7 +1065,9 @@ export function SiteDirectoryView({
                 disabled={busy}
                 onClick={() => void changeAuthorRevision("publish")}
               >
-                Опубликовать одобренную версию
+                {canPublishDirectly && authorRevisionCurrent?.reviewState === "draft"
+                  ? "Опубликовать"
+                  : "Опубликовать одобренную версию"}
               </button>
             ) : null}
           </div>

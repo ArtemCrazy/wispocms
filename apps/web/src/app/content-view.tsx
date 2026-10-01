@@ -272,6 +272,7 @@ export function ContentView({
   siteSlug,
   canEdit = true,
   canApprove = true,
+  canEditPublished = false,
   onCountChange,
   onDirtyChange,
   openArticleId,
@@ -387,10 +388,18 @@ export function ContentView({
     revisionCurrent === undefined &&
     !ownSavedDraftRevisionId.current;
   const currentRevisionActions = revisionCurrent
-    ? revisionActions(revisionCurrent, { canEdit, canApprove })
+    ? revisionActions(revisionCurrent, {
+        canEdit,
+        canApprove,
+        canPublishDirectly: canEditPublished,
+      })
     : null;
   const currentCategoryRevisionActions = categoryRevisionCurrent
-    ? revisionActions(categoryRevisionCurrent, { canEdit, canApprove })
+    ? revisionActions(categoryRevisionCurrent, {
+        canEdit,
+        canApprove,
+        canPublishDirectly: canEditPublished,
+      })
     : null;
 
   const reloadRevision = useCallback(
@@ -1407,7 +1416,9 @@ export function ContentView({
     if (
       action === "publish" &&
       !window.confirm(
-        "Опубликовать именно одобренную версию? Изменения станут видны посетителям сайта.",
+        canEditPublished && revisionCurrent?.reviewState === "draft"
+          ? "Опубликовать текущую версию без согласования? Изменения станут видны посетителям сайта."
+          : "Опубликовать именно одобренную версию? Изменения станут видны посетителям сайта.",
       )
     )
       return;
@@ -1432,7 +1443,11 @@ export function ContentView({
         setMessage("Актуальная версия не найдена. Обновите статью.");
         return;
       }
-      const available = revisionActions(current, { canEdit, canApprove });
+      const available = revisionActions(current, {
+        canEdit,
+        canApprove,
+        canPublishDirectly: canEditPublished,
+      });
       const permission =
         action === "request-changes" ? "requestChanges" : action;
       if (!available[permission]) {
@@ -1462,7 +1477,9 @@ export function ContentView({
             ? "Версия одобрена. Теперь её можно опубликовать"
             : action === "request-changes"
               ? "Версия возвращена на доработку"
-              : "Одобренная версия опубликована",
+              : canEditPublished && current.reviewState === "draft"
+                ? "Версия опубликована без согласования"
+                : "Одобренная версия опубликована",
       );
     } catch (reason) {
       setMessage(
@@ -1887,7 +1904,9 @@ export function ContentView({
     if (
       action === "publish" &&
       !window.confirm(
-        "Опубликовать именно одобренную версию рубрики? Изменения станут видны посетителям сайта.",
+        canEditPublished && categoryRevisionCurrent.reviewState === "draft"
+          ? "Опубликовать текущую версию рубрики без согласования? Изменения станут видны посетителям сайта."
+          : "Опубликовать именно одобренную версию рубрики? Изменения станут видны посетителям сайта.",
       )
     )
       return;
@@ -1904,7 +1923,11 @@ export function ContentView({
         );
         return;
       }
-      const available = revisionActions(latest, { canEdit, canApprove });
+      const available = revisionActions(latest, {
+        canEdit,
+        canApprove,
+        canPublishDirectly: canEditPublished,
+      });
       const permission =
         action === "request-changes" ? "requestChanges" : action;
       if (!available[permission]) {
@@ -1930,7 +1953,9 @@ export function ContentView({
             ? "Версия рубрики одобрена. Теперь её можно опубликовать"
             : action === "request-changes"
               ? "Версия рубрики возвращена на доработку"
-              : "Одобренная версия рубрики опубликована",
+              : canEditPublished && latest.reviewState === "draft"
+                ? "Версия рубрики опубликована без согласования"
+                : "Одобренная версия рубрики опубликована",
       );
     } catch (reason) {
       setMessage(
@@ -2814,7 +2839,9 @@ export function ContentView({
                         disabled={categoryBusy}
                         onClick={() => void changeCategoryRevision("publish")}
                       >
-                        Опубликовать одобренную версию
+                        {canEditPublished && categoryRevisionCurrent?.reviewState === "draft"
+                          ? "Опубликовать"
+                          : "Опубликовать одобренную версию"}
                       </button>
                     ) : null}
                   </div>
@@ -3855,7 +3882,9 @@ export function ContentView({
                           disabled={statusBusy || dirty}
                           onClick={() => void changeRevision("publish")}
                         >
-                          Опубликовать одобренную версию
+                          {canEditPublished && revisionCurrent?.reviewState === "draft"
+                            ? "Опубликовать"
+                            : "Опубликовать одобренную версию"}
                         </button>
                       ) : null}
                       {dirty ? (

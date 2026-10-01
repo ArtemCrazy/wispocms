@@ -220,6 +220,7 @@ export function MediaArticlesView({
         label="Шаблон списка статей"
         canEdit={canEditCode}
         canApprove={canApprove}
+        canPublishDirectly={canEditCode && canEditPublished}
         dirty={false}
         refreshToken={settings?.draftRevisionId ?? null}
         onChanged={loadSettings}

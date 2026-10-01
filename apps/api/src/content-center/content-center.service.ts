@@ -10,7 +10,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { WorkspaceRole } from '../database/entities';
 import { canAccessContentCenter } from './workspace-access';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import type {
@@ -155,16 +154,30 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
     const rows = await this.db.query<
       Array<{
         full_name: string;
-        role: WorkspaceRole | null;
-        site_ids: string[] | null;
+        site_accesses: Array<{
+          siteId: string;
+          role: 'site_owner' | 'content_manager';
+          canEditCode: boolean;
+          requiresApproval: boolean;
+        }>;
         workspace_site_ids: string[];
       }>
     >(
       `
-      SELECT u.full_name, m.role, m.site_ids,
-        ARRAY(SELECT s.id FROM sites s WHERE s.workspace_id=w.id) AS workspace_site_ids
+      SELECT u.full_name,
+        ARRAY(SELECT s.id FROM sites s WHERE s.workspace_id=w.id) AS workspace_site_ids,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'siteId', sa.site_id,
+            'role', sa.role,
+            'canEditCode', sa.can_edit_code,
+            'requiresApproval', sa.requires_approval
+          ))
+          FROM site_accesses sa
+          JOIN sites assigned_site ON assigned_site.id=sa.site_id
+          WHERE sa.user_id=u.id AND assigned_site.workspace_id=w.id
+        ), '[]'::jsonb) AS site_accesses
       FROM workspaces w JOIN users u ON u.id = $2 AND u.is_active = true
-      LEFT JOIN workspace_memberships m ON m.workspace_id=w.id AND m.user_id=u.id
       WHERE w.id = $1`,
       [workspaceId, actor.userId],
     );
@@ -173,7 +186,7 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
       !row ||
       !canAccessContentCenter(
         actor.platformRole,
-        row.role ? { role: row.role, siteIds: row.site_ids ?? [] } : null,
+        row.site_accesses,
         row.workspace_site_ids,
       )
     )

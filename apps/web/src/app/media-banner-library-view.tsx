@@ -98,6 +98,7 @@ export function MediaBannerLibraryView({
   siteName,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
   onBackToAssignments,
   createOnOpenKey,
   initialPreviewRenderer,
@@ -106,6 +107,7 @@ export function MediaBannerLibraryView({
   siteName?: string;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
   onBackToAssignments?: () => void;
   createOnOpenKey?: number;
   initialPreviewRenderer?: string;
@@ -458,7 +460,11 @@ export function MediaBannerLibraryView({
           "Черновик уже изменён. Загружена актуальная версия баннера",
         );
       }
-      const available = revisionActions(latest, { canEdit, canApprove });
+      const available = revisionActions(latest, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      });
       const allowed =
         action === "request-changes" ? available.requestChanges : available[action];
       if (!allowed) throw new Error("Действие больше недоступно");
@@ -469,7 +475,11 @@ export function MediaBannerLibraryView({
       if (action === "request-changes" && !reason?.trim()) return;
       if (
         action === "publish" &&
-        !window.confirm("Опубликовать одобренную версию баннера?")
+        !window.confirm(
+          canPublishDirectly && latest.reviewState === "draft"
+            ? "Опубликовать текущую версию баннера без согласования?"
+            : "Опубликовать одобренную версию баннера?",
+        )
       )
         return;
       await request(
@@ -494,7 +504,11 @@ export function MediaBannerLibraryView({
             item.id === selectedId && draft ? { ...item, ...draft } : item,
           ),
         );
-        setMessage("Одобренная версия баннера опубликована");
+        setMessage(
+          canPublishDirectly && latest.reviewState === "draft"
+            ? "Версия баннера опубликована без согласования"
+            : "Одобренная версия баннера опубликована",
+        );
       }
     } catch (error) {
       setMessage(
@@ -583,7 +597,11 @@ export function MediaBannerLibraryView({
     selectedId ? previewRenderers[selectedId] : null,
   );
   const currentRevisionActions = revisionCurrent
-    ? revisionActions(revisionCurrent, { canEdit, canApprove })
+    ? revisionActions(revisionCurrent, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      })
     : null;
   const canEditDraft = canEdit && revisionCurrent !== undefined;
 
@@ -764,7 +782,9 @@ export function MediaBannerLibraryView({
                     disabled={workflowBusy || saving}
                     onClick={() => void changeBannerRevision("publish")}
                   >
-                    Опубликовать одобренную версию
+                    {canPublishDirectly && revisionCurrent?.reviewState === "draft"
+                      ? "Опубликовать"
+                      : "Опубликовать одобренную версию"}
                   </button>
                 ) : null}
               </div>

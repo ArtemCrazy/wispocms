@@ -17,12 +17,18 @@ export function legacyBulkAllowed(
 
 export function revisionActions(
   current: ArticleRevisionCurrent,
-  permissions: { canEdit: boolean; canApprove: boolean },
+  permissions: {
+    canEdit: boolean;
+    canApprove: boolean;
+    canPublishDirectly?: boolean;
+  },
 ) {
   const draftId = current.draft?.id;
+  const canPublishDirectly = permissions.canPublishDirectly ?? false;
   return {
     submit:
       permissions.canEdit &&
+      !canPublishDirectly &&
       Boolean(draftId) &&
       (current.reviewState === "draft" ||
         current.reviewState === "changes_requested"),
@@ -35,10 +41,11 @@ export function revisionActions(
       Boolean(draftId) &&
       current.reviewState === "in_review",
     publish:
-      permissions.canEdit &&
       Boolean(draftId) &&
-      current.reviewState === "approved" &&
-      current.approvedRevisionId === draftId &&
-      current.publishedRevisionId !== draftId,
+      current.publishedRevisionId !== draftId &&
+      ((canPublishDirectly && current.reviewState === "draft") ||
+        ((permissions.canApprove || canPublishDirectly) &&
+          current.reviewState === "approved" &&
+          current.approvedRevisionId === draftId)),
   };
 }

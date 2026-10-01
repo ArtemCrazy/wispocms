@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
 import {
   PageEntity,
+  SiteAccessEntity,
   SiteEntity,
   UserEntity,
   WorkspaceEntity,
@@ -14,7 +15,6 @@ import { PlatformService } from './platform.service';
 import { WorkspaceController } from './workspace.controller';
 import { PlatformPromptsController } from './platform-prompts.controller';
 import { PlatformPromptsService } from './platform-prompts.service';
-import { SiteUsersController } from './site-users.controller';
 
 @Module({
   imports: [
@@ -24,6 +24,7 @@ import { SiteUsersController } from './site-users.controller';
       SiteEntity,
       PageEntity,
       WorkspaceMembershipEntity,
+      SiteAccessEntity,
     ]),
     AuthModule,
   ],
@@ -31,7 +32,6 @@ import { SiteUsersController } from './site-users.controller';
     PlatformController,
     WorkspaceController,
     PlatformPromptsController,
-    SiteUsersController,
   ],
   providers: [PlatformService, PlatformAdminGuard, PlatformPromptsService],
 })

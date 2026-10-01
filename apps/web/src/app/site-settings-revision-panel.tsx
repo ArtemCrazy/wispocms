@@ -45,6 +45,7 @@ export function SiteSettingsRevisionPanel({
   label,
   canEdit,
   canApprove,
+  canPublishDirectly = false,
   dirty,
   refreshToken,
   onChanged,
@@ -64,6 +65,7 @@ export function SiteSettingsRevisionPanel({
   label: string;
   canEdit: boolean;
   canApprove: boolean;
+  canPublishDirectly?: boolean;
   dirty: boolean;
   refreshToken?: string | null;
   onChanged: () => Promise<void> | void;
@@ -104,7 +106,11 @@ export function SiteSettingsRevisionPanel({
   }, [load, refreshToken]);
 
   const available = current
-    ? revisionActions(current, { canEdit, canApprove })
+    ? revisionActions(current, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      })
     : null;
 
   async function changeState(
@@ -118,7 +124,11 @@ export function SiteSettingsRevisionPanel({
     }
     if (
       action === "publish" &&
-      !window.confirm(`Опубликовать одобренную версию раздела «${label}»?`)
+      !window.confirm(
+        canPublishDirectly && current.reviewState === "draft"
+          ? `Опубликовать текущую версию раздела «${label}» без согласования?`
+          : `Опубликовать одобренную версию раздела «${label}»?`,
+      )
     )
       return;
     setBusy(true);
@@ -135,7 +145,11 @@ export function SiteSettingsRevisionPanel({
         await load();
         return;
       }
-      const latestActions = revisionActions(latest, { canEdit, canApprove });
+      const latestActions = revisionActions(latest, {
+        canEdit,
+        canApprove,
+        canPublishDirectly,
+      });
       const permission =
         action === "request-changes" ? "requestChanges" : action;
       if (!latestActions[permission]) {
@@ -159,7 +173,9 @@ export function SiteSettingsRevisionPanel({
             ? "Версия одобрена"
             : action === "request-changes"
               ? "Версия возвращена на доработку"
-              : "Одобренная версия опубликована",
+              : canPublishDirectly && latest.reviewState === "draft"
+                ? "Версия опубликована без согласования"
+                : "Одобренная версия опубликована",
       );
     } catch (error) {
       setMessage(
@@ -236,7 +252,9 @@ export function SiteSettingsRevisionPanel({
         ) : null}
         {available?.publish ? (
           <button type="button" className="publish" disabled={busy || dirty} onClick={() => void changeState("publish")}>
-            Опубликовать одобренную версию
+            {canPublishDirectly && current?.reviewState === "draft"
+              ? "Опубликовать"
+              : "Опубликовать одобренную версию"}
           </button>
         ) : null}
       </div>

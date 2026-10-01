@@ -52,10 +52,12 @@ export function CodeResourcesEditor({
   siteId,
   canEdit,
   canApprove,
+  canPublishDirectly,
 }: {
   siteId: string;
   canEdit: boolean;
   canApprove: boolean;
+  canPublishDirectly: boolean;
 }) {
   const [kind, setKind] = useState<Kind>("chunk");
   const [items, setItems] = useState<CodeResource[]>([]);
@@ -159,15 +161,17 @@ export function CodeResourcesEditor({
             {item.name} · {item.key}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => {
-            setDraft(emptyResource(kind));
-            setDirty(false);
-          }}
-        >
-          Создать {kind === "chunk" ? "чанг" : "шаблон"}
-        </button>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => {
+              setDraft(emptyResource(kind));
+              setDirty(false);
+            }}
+          >
+            Создать {kind === "chunk" ? "чанг" : "шаблон"}
+          </button>
+        ) : null}
       </div>
       <form className="settings-form" onSubmit={save}>
         <label>
@@ -288,6 +292,7 @@ export function CodeResourcesEditor({
           label={`${kind === "chunk" ? "Чанг" : "Шаблон"} «${draft.name}»`}
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           dirty={dirty}
           refreshToken={draft.draftRevisionId}
           onChanged={load}

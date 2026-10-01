@@ -18,10 +18,11 @@ import {
   PrivacyPolicyStateEntity,
   type PrivacySettings,
   SiteEntity,
+  SiteAccessEntity,
   type SiteGlobalData,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import {
+  accessCoversSite,
   hasSitePermission,
   SitePermission,
 } from '../content/content.permissions';
@@ -125,8 +126,8 @@ export class PrivacyService {
   constructor(
     @InjectRepository(SiteEntity)
     private readonly sites: Repository<SiteEntity>,
-    @InjectRepository(WorkspaceMembershipEntity)
-    private readonly memberships: Repository<WorkspaceMembershipEntity>,
+    @InjectRepository(SiteAccessEntity)
+    private readonly siteAccesses: Repository<SiteAccessEntity>,
     @InjectRepository(PageEntity)
     private readonly pages: Repository<PageEntity>,
     @InjectRepository(PrivacyLegalModelEntity)
@@ -200,17 +201,12 @@ export class PrivacyService {
     const site = await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
-      const membership = await this.memberships.findOne({
-        select: { role: true, siteIds: true },
-        where: { userId: actor.userId, workspaceId: site.workspaceId },
+      const access = await this.siteAccesses.findOne({
+        where: { userId: actor.userId, siteId },
       });
       if (
-        !membership?.siteIds?.includes(siteId) ||
-        !hasSitePermission(
-          actor.platformRole,
-          membership?.role ?? null,
-          permission,
-        )
+        !accessCoversSite(access, siteId) ||
+        !hasSitePermission(actor.platformRole, access, permission)
       )
         throw new ForbiddenException('Недостаточно прав для этого действия');
     }

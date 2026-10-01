@@ -32,9 +32,12 @@ export class JwtAuthGuard implements CanActivate {
       const payload = await this.jwtService.verifyAsync<{
         sub: string;
         role: PlatformRole;
+        sessionVersion?: number;
       }>(token);
       const user = await this.authService.getActiveIdentity(payload.sub);
       if (!user) throw new UnauthorizedException('Сессия недействительна');
+      if ((payload.sessionVersion ?? 0) !== (user.sessionVersion ?? 0))
+        throw new UnauthorizedException('Сессия недействительна');
       request.auth = {
         userId: user.id,
         platformRole: user.platformRole,

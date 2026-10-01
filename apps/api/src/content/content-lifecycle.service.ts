@@ -46,14 +46,18 @@ import {
   PublicationState,
   SiteContentTemplateEntity,
   SiteEntity,
-  WorkspaceMembershipEntity,
+  SiteAccessEntity,
 } from '../database/entities';
 import {
   articleDocumentMediaIds,
   articleDocumentText,
   normalizeArticleDocument,
 } from './article-document';
-import { hasSitePermission, SitePermission } from './content.permissions';
+import {
+  accessCoversSite,
+  hasSitePermission,
+  SitePermission,
+} from './content.permissions';
 import { CmsRevisionsService } from './cms-revisions.service';
 import {
   DuplicateContentDto,
@@ -84,8 +88,8 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     private readonly dataSource: DataSource,
     @InjectRepository(SiteEntity)
     private readonly sites: Repository<SiteEntity>,
-    @InjectRepository(WorkspaceMembershipEntity)
-    private readonly memberships: Repository<WorkspaceMembershipEntity>,
+    @InjectRepository(SiteAccessEntity)
+    private readonly siteAccesses: Repository<SiteAccessEntity>,
     @InjectRepository(ArticleEntity)
     private readonly articles: Repository<ArticleEntity>,
     @InjectRepository(CategoryEntity)
@@ -135,17 +139,12 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     const site = await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole !== PlatformRole.WISPO_ADMIN) {
-      const membership = await this.memberships.findOne({
-        select: { role: true, siteIds: true },
-        where: { userId: actor.userId, workspaceId: site.workspaceId },
+      const access = await this.siteAccesses.findOne({
+        where: { userId: actor.userId, siteId },
       });
       if (
-        !membership?.siteIds?.includes(siteId) ||
-        !hasSitePermission(
-          actor.platformRole,
-          membership?.role ?? null,
-          permission,
-        )
+        !accessCoversSite(access, siteId) ||
+        !hasSitePermission(actor.platformRole, access, permission)
       )
         throw new ForbiddenException('Недостаточно прав для этого действия');
     }
@@ -832,13 +831,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actor: ContentActor,
     dto: UpdatePublicationStateDto,
   ) {
-    await this.requireSite(
-      siteId,
-      actor,
-      dto.state === PublicationState.PUBLISHED
-        ? SitePermission.APPROVE
-        : SitePermission.EDIT_CONTENT,
-    );
+    await this.requireSite(siteId, actor, SitePermission.PUBLISH_CONTENT);
     return this.dataSource.transaction(async (manager) => {
       const article = await manager.findOne(ArticleEntity, {
         where: { id: articleId, siteId, deletedAt: IsNull() },
@@ -936,13 +929,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actor: ContentActor,
     dto: UpdatePublicationStateDto,
   ) {
-    await this.requireSite(
-      siteId,
-      actor,
-      dto.state === PublicationState.PUBLISHED
-        ? SitePermission.APPROVE
-        : SitePermission.EDIT_CONTENT,
-    );
+    await this.requireSite(siteId, actor, SitePermission.PUBLISH_CONTENT);
     return this.dataSource.transaction(async (manager) => {
       const category = await manager.findOne(CategoryEntity, {
         where: { id: categoryId, siteId, deletedAt: IsNull() },
@@ -980,13 +967,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     actor: ContentActor,
     dto: SchedulePublicationDto,
   ) {
-    await this.requireSite(
-      siteId,
-      actor,
-      dto.state === PublicationState.PUBLISHED
-        ? SitePermission.APPROVE
-        : SitePermission.EDIT_CONTENT,
-    );
+    await this.requireSite(siteId, actor, SitePermission.PUBLISH_CONTENT);
     const executeAt = new Date(dto.executeAt);
     if (executeAt <= new Date())
       throw new BadRequestException('Дата выполнения должна быть в будущем');

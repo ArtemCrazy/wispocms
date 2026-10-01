@@ -177,6 +177,7 @@ export function PrivacyPolicyView({
   siteName,
   canEdit = true,
   canApprove = false,
+  canPublishDirectly = false,
   canManageLegalModels = false,
   onDirtyChange,
 }: {
@@ -184,6 +185,7 @@ export function PrivacyPolicyView({
   siteName?: string;
   canEdit?: boolean;
   canApprove?: boolean;
+  canPublishDirectly?: boolean;
   canManageLegalModels?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -833,6 +835,7 @@ export function PrivacyPolicyView({
           label="Политика конфиденциальности"
           canEdit={canEdit}
           canApprove={canApprove}
+          canPublishDirectly={canPublishDirectly}
           dirty={dirty}
           refreshToken={draftRevisionId}
           onChanged={load}

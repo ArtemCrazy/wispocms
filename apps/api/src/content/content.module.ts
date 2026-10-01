@@ -20,11 +20,11 @@ import {
   PageActivityEntity,
   PageBannerAssignmentEntity,
   PrivacyPolicyStateEntity,
+  SiteAccessEntity,
   SiteEntity,
   SiteSearchSettingsEntity,
   SiteVariableEntity,
   SiteContentTemplateEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import { ContentController } from './content.controller';
 import { ContentLifecycleService } from './content-lifecycle.service';
@@ -42,7 +42,7 @@ import { ContentMetadataRevisionsService } from './content-metadata-revisions.se
   imports: [
     TypeOrmModule.forFeature([
       SiteEntity,
-      WorkspaceMembershipEntity,
+      SiteAccessEntity,
       CategoryEntity,
       CategoryActivityEntity,
       CategoryRedirectEntity,

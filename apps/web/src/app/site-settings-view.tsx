@@ -52,11 +52,15 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 export function SiteSettingsView({
   siteId,
   siteName,
+  section = "management",
+  siteCreatedAt,
   onSaved,
   onDirtyChange,
 }: {
   siteId?: string;
   siteName?: string;
+  section?: "management" | "domain" | "dates" | "product";
+  siteCreatedAt?: string;
   onSaved?: () => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -113,9 +117,7 @@ export function SiteSettingsView({
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!siteId || !settings) return;
-    const data = new FormData(event.currentTarget);
-    const optional = (name: string) =>
-      String(data.get(name) ?? "").trim() || null;
+    const optional = (value: string) => value.trim() || null;
     setSaving(true);
     setMessage("");
     try {
@@ -124,12 +126,12 @@ export function SiteSettingsView({
         {
           method: "PATCH",
           body: JSON.stringify({
-            name: String(data.get("name") ?? ""),
-            domain: optional("domain"),
-            notificationEmail: optional("notificationEmail"),
+            name: nameDraft,
+            domain: optional(domainDraft),
+            notificationEmail: optional(notificationEmailDraft),
             linkedCommercialSiteId:
               settings.siteType === "media"
-                ? optional("linkedCommercialSiteId")
+                ? optional(linkedCommercialSiteDraft)
                 : undefined,
           }),
         },
@@ -245,13 +247,42 @@ export function SiteSettingsView({
     verified: "Подтверждён",
     error: "Требует внимания",
   };
+  const sectionMeta = {
+    management: {
+      title: "Настройки",
+      description: "Название, системные параметры и получение заявок",
+    },
+    domain: {
+      title: "Домен",
+      description: "Адрес сайта и состояние подключения DNS",
+    },
+    dates: {
+      title: "Даты",
+      description: "Системные даты сайта и последней проверки домена",
+    },
+    product: {
+      title: "Продукт",
+      description: "Тип сайта и связь с коммерческим продуктом",
+    },
+  }[section];
+  const formatDate = (value?: string | null) =>
+    value
+      ? new Date(value).toLocaleString("ru-RU", {
+          dateStyle: "long",
+          timeStyle: "short",
+        })
+      : "Пока нет данных";
+  const canSaveSection =
+    section === "management" ||
+    section === "domain" ||
+    (section === "product" && settings.siteType === "media");
 
   return (
     <section className="directory-section settings-section">
       <div className="section-heading">
         <div>
-          <h1>Настройки сайта</h1>
-          <p>Основные параметры, SEO и получение заявок</p>
+          <h1>{sectionMeta.title}</h1>
+          <p>{sectionMeta.description}</p>
         </div>
       </div>
       {message ? (
@@ -260,190 +291,262 @@ export function SiteSettingsView({
         </div>
       ) : null}
       <form className="settings-form" onSubmit={save}>
-        <div className="settings-card">
-          <div className="settings-card-head">
-            <span>◇</span>
-            <div>
-              <h2>Основные данные</h2>
-              <p>Название и адрес сайта</p>
+        {section === "management" ? (
+          <>
+            <div className="settings-card">
+              <div className="settings-card-head">
+                <div>
+                  <h2>Параметры сайта</h2>
+                  <p>Название, тип и системный адрес</p>
+                </div>
+              </div>
+              <div className="settings-fields two-columns">
+                <label>
+                  <span>Название сайта</span>
+                  <input
+                    name="name"
+                    required
+                    minLength={2}
+                    maxLength={160}
+                    value={nameDraft}
+                    onChange={(event) => {
+                      setNameDraft(event.target.value);
+                      setDirty(true);
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Тип сайта</span>
+                  <input value={typeNames[settings.siteType]} readOnly disabled />
+                  <small>Определяет стартовую структуру разделов</small>
+                </label>
+                <label>
+                  <span>Системный адрес</span>
+                  <input value={settings.slug} readOnly disabled />
+                  <small>Не меняется после создания сайта</small>
+                </label>
+              </div>
             </div>
-          </div>
-          <div className="settings-fields two-columns">
-            <label>
-              <span>Название сайта</span>
-              <input
-                name="name"
-                required
-                minLength={2}
-                maxLength={160}
-                value={nameDraft}
-                onChange={(event) => {
-                  setNameDraft(event.target.value);
-                  setDirty(true);
-                }}
-              />
-            </label>
-            <label>
-              <span>Тип сайта</span>
-              <input value={typeNames[settings.siteType]} readOnly disabled />
-              <small>Определяет стартовую структуру разделов</small>
-            </label>
-            <label>
-              <span>Системный адрес</span>
-              <input value={settings.slug} readOnly disabled />
-              <small>Не меняется после создания сайта</small>
-            </label>
-            <label>
-              <span>Домен</span>
-              <input
-                name="domain"
-                maxLength={255}
-                placeholder="example.ru"
-                value={domainDraft}
-                onChange={(event) => {
-                  setDomainDraft(event.target.value);
-                  setDirty(true);
-                }}
-              />
-              <small>
-                Можно вставить полный URL — будет сохранено только доменное имя.
-              </small>
-            </label>
-          </div>
-          <div className="settings-email-test">
-            <div>
-              <span className={settings.domainStatus === "verified" ? "ready" : ""}>
-                DNS: {domainStatusNames[settings.domainStatus]}
-              </span>
-              <small
-                className={settings.domainStatus === "error" ? "error" : ""}
-              >
-                {settings.domainStatusMessage ||
-                  (settings.expectedDnsRecords.length
-                    ? `Направьте A/AAAA или CNAME на: ${settings.expectedDnsRecords.join(" или ")}`
-                    : "Целевую DNS-запись выдаёт администратор инфраструктуры Wispo")}
-              </small>
+            <div className="settings-card">
+              <div className="settings-card-head">
+                <div>
+                  <h2>Заявки с сайта</h2>
+                  <p>Пока заявки отправляются на электронную почту</p>
+                </div>
+              </div>
+              <div className="settings-fields">
+                <label>
+                  <span>Почта для заявок</span>
+                  <input
+                    name="notificationEmail"
+                    type="email"
+                    maxLength={255}
+                    placeholder="requests@company.ru"
+                    value={notificationEmailDraft}
+                    onChange={(event) => {
+                      setNotificationEmailDraft(event.target.value);
+                      setDirty(true);
+                    }}
+                  />
+                  <small>
+                    Интеграцию с Telegram и сохранение заявок в CMS добавим на
+                    следующем этапе развития.
+                  </small>
+                </label>
+                <div className="settings-email-test">
+                  <div>
+                    <span
+                      className={
+                        normalizedEmailDraft && emailIsSaved ? "ready" : ""
+                      }
+                    >
+                      {!normalizedEmailDraft
+                        ? "Получатель пока не настроен"
+                        : !emailIsSaved
+                          ? "Сначала сохраните новый адрес"
+                          : settings.notificationEmail
+                            ? `Получатель настроен: ${settings.notificationEmail}`
+                            : "Получатель пока не настроен"}
+                    </span>
+                    {emailStatus ? (
+                      <small
+                        className={emailStatus.transportReady ? "ready" : "error"}
+                      >
+                        {emailStatus.transportReady
+                          ? "Почтовый сервер доступен"
+                          : "Почтовый сервер не подключён"}
+                      </small>
+                    ) : null}
+                  </div>
+                  <div className="settings-email-actions">
+                    <button
+                      type="button"
+                      disabled={checkingEmail}
+                      onClick={() => void checkEmailStatus()}
+                    >
+                      {checkingEmail ? "Проверяем…" : "Проверить подключение"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        !normalizedEmailDraft || !emailIsSaved || testingEmail
+                      }
+                      onClick={() => void testEmail()}
+                    >
+                      {testingEmail ? "Отправляем…" : "Отправить тестовое письмо"}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            <button
-              type="button"
-              disabled={
-                checkingDomain || !settings.domain || !domainIsSaved || dirty
-              }
-              onClick={() => void checkDomain()}
-            >
-              {checkingDomain ? "Проверяем DNS…" : "Проверить DNS"}
-            </button>
-          </div>
-          {settings.siteType === "media" ? (
+          </>
+        ) : null}
+
+        {section === "domain" ? (
+          <div className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h2>Адрес сайта</h2>
+                <p>Домен и состояние его DNS-записей</p>
+              </div>
+            </div>
             <div className="settings-fields">
               <label>
-                <span>Связанный коммерческий сайт</span>
-                <select
-                  name="linkedCommercialSiteId"
-                  value={linkedCommercialSiteDraft}
+                <span>Домен</span>
+                <input
+                  name="domain"
+                  maxLength={255}
+                  placeholder="example.ru"
+                  value={domainDraft}
                   onChange={(event) => {
-                    setLinkedCommercialSiteDraft(event.target.value);
+                    setDomainDraft(event.target.value);
                     setDirty(true);
                   }}
-                >
-                  <option value="">Не выбран</option>
-                  {settings.commercialSiteOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name} · {typeNames[option.siteType]}
-                    </option>
-                  ))}
-                </select>
+                />
                 <small>
-                  Используется для переходов из Media на Corporate или Landing
-                  этого рабочего пространства.
+                  Можно вставить полный URL — будет сохранено только доменное имя.
                 </small>
               </label>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="settings-card">
-          <div className="settings-card-head">
-            <span>✉</span>
-            <div>
-              <h2>Заявки с сайта</h2>
-              <p>Пока заявки отправляются на электронную почту</p>
-            </div>
-          </div>
-          <div className="settings-fields">
-            <label>
-              <span>Почта для заявок</span>
-              <input
-                name="notificationEmail"
-                type="email"
-                maxLength={255}
-                placeholder="requests@company.ru"
-                value={notificationEmailDraft}
-                onChange={(event) => {
-                  setNotificationEmailDraft(event.target.value);
-                  setDirty(true);
-                }}
-              />
-              <small>
-                Интеграцию с Telegram и сохранение заявок в CMS добавим на
-                следующем этапе развития.
-              </small>
-            </label>
-            <div className="settings-email-test">
-              <div>
-                <span
-                  className={
-                    normalizedEmailDraft && emailIsSaved ? "ready" : ""
-                  }
-                >
-                  {!normalizedEmailDraft
-                    ? "Получатель пока не настроен"
-                    : !emailIsSaved
-                      ? "Сначала сохраните новый адрес"
-                      : settings.notificationEmail
-                        ? `Получатель настроен: ${settings.notificationEmail}`
-                        : "Получатель пока не настроен"}
-                </span>
-                {emailStatus ? (
-                  <small className={emailStatus.transportReady ? "ready" : "error"}>
-                    {emailStatus.transportReady
-                      ? "Почтовый сервер доступен"
-                      : "Почтовый сервер не подключён"}
+              <div className="settings-email-test">
+                <div>
+                  <span
+                    className={
+                      settings.domainStatus === "verified" ? "ready" : ""
+                    }
+                  >
+                    DNS: {domainStatusNames[settings.domainStatus]}
+                  </span>
+                  <small
+                    className={
+                      settings.domainStatus === "error" ? "error" : ""
+                    }
+                  >
+                    {settings.domainStatusMessage ||
+                      (settings.expectedDnsRecords.length
+                        ? `Направьте A/AAAA или CNAME на: ${settings.expectedDnsRecords.join(" или ")}`
+                        : "Целевую DNS-запись выдаёт администратор инфраструктуры Wispo")}
                   </small>
-                ) : null}
-              </div>
-              <div className="settings-email-actions">
-                <button
-                  type="button"
-                  disabled={checkingEmail}
-                  onClick={() => void checkEmailStatus()}
-                >
-                  {checkingEmail ? "Проверяем…" : "Проверить подключение"}
-                </button>
+                </div>
                 <button
                   type="button"
                   disabled={
-                    !normalizedEmailDraft || !emailIsSaved || testingEmail
+                    checkingDomain ||
+                    !settings.domain ||
+                    !domainIsSaved ||
+                    dirty
                   }
-                  onClick={() => void testEmail()}
+                  onClick={() => void checkDomain()}
                 >
-                  {testingEmail ? "Отправляем…" : "Отправить тестовое письмо"}
+                  {checkingDomain ? "Проверяем DNS…" : "Проверить DNS"}
                 </button>
               </div>
             </div>
           </div>
-        </div>
+        ) : null}
 
-        <div className="settings-actions">
-          <span className={dirty ? "unsaved-indicator" : ""}>
-            {dirty
-              ? "● Есть несохранённые изменения"
-              : `Изменения относятся только к сайту ${settings.name}`}
-          </span>
-          <button disabled={saving || !dirty}>
-            {saving ? "Сохраняем…" : "Сохранить настройки"}
-          </button>
-        </div>
+        {section === "dates" ? (
+          <div className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h2>Системные даты</h2>
+                <p>Справочная информация без возможности ручного изменения</p>
+              </div>
+            </div>
+            <div className="settings-fields two-columns">
+              <label>
+                <span>Сайт создан</span>
+                <input value={formatDate(siteCreatedAt)} readOnly disabled />
+              </label>
+              <label>
+                <span>Последняя проверка домена</span>
+                <input
+                  value={formatDate(settings.domainCheckedAt)}
+                  readOnly
+                  disabled
+                />
+              </label>
+            </div>
+          </div>
+        ) : null}
+
+        {section === "product" ? (
+          <div className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h2>Параметры продукта</h2>
+                <p>Тип проекта и связанный коммерческий сайт</p>
+              </div>
+            </div>
+            <div className="settings-fields two-columns">
+              <label>
+                <span>Тип сайта</span>
+                <input value={typeNames[settings.siteType]} readOnly disabled />
+              </label>
+              {settings.siteType === "media" ? (
+                <label>
+                  <span>Связанный коммерческий сайт</span>
+                  <select
+                    name="linkedCommercialSiteId"
+                    value={linkedCommercialSiteDraft}
+                    onChange={(event) => {
+                      setLinkedCommercialSiteDraft(event.target.value);
+                      setDirty(true);
+                    }}
+                  >
+                    <option value="">Не выбран</option>
+                    {settings.commercialSiteOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name} · {typeNames[option.siteType]}
+                      </option>
+                    ))}
+                  </select>
+                  <small>
+                    Используется для переходов из Media на Corporate или Landing
+                    этого рабочего пространства.
+                  </small>
+                </label>
+              ) : (
+                <label>
+                  <span>Продукт</span>
+                  <input value={settings.name} readOnly disabled />
+                </label>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {canSaveSection ? (
+          <div className="settings-actions">
+            <span className={dirty ? "unsaved-indicator" : ""}>
+              {dirty
+                ? "● Есть несохранённые изменения"
+                : `Изменения относятся только к сайту ${settings.name}`}
+            </span>
+            <button disabled={saving || !dirty}>
+              {saving ? "Сохраняем…" : "Сохранить настройки"}
+            </button>
+          </div>
+        ) : null}
       </form>
     </section>
   );

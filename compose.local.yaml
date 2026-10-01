@@ -32,6 +32,17 @@ services:
       timeout: 5s
       retries: 12
 
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_WEB_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
   dependencies:
     image: node:24-alpine
     working_dir: /workspace
@@ -86,6 +97,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
     environment:
       NODE_ENV: development
       API_PORT: 4000
@@ -96,6 +109,10 @@ services:
       COOKIE_SECURE: "false"
       WEB_ORIGIN: http://localhost:${WEB_PORT:-3300},http://127.0.0.1:${WEB_PORT:-3300}
       PUBLIC_DOMAIN_TARGETS: ""
+      PUBLIC_APP_URL: http://localhost:${WEB_PORT:-3300}
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      MAIL_FROM: Wispo CMS <noreply@local.test>
       WISPO_RESERVED_HOSTS: localhost,127.0.0.1
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD}
