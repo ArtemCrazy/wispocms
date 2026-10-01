@@ -277,24 +277,6 @@ export function TeamAccessView({
     }
   }
 
-  async function requestAdminPasswordReset() {
-    if (!editor) return;
-    setBusyUserId(editor.userId);
-    setMessage("");
-    try {
-      await api("/api/auth/admin-password-reset/request", { method: "POST" });
-      setMessage("Письмо со ссылкой отправлено на email администратора");
-    } catch (reason) {
-      setMessage(
-        reason instanceof Error
-          ? reason.message
-          : "Не удалось отправить письмо",
-      );
-    } finally {
-      setBusyUserId(null);
-    }
-  }
-
   const editorUser = editor
     ? users.find((user) => user.id === editor.userId)
     : null;
@@ -469,7 +451,6 @@ export function TeamAccessView({
             )
           }
           onResetPassword={(event) => void resetPassword(event, editorUser)}
-          onRequestAdminPasswordReset={() => void requestAdminPasswordReset()}
           onSave={() => void updateUser()}
           onClose={() => {
             setEditor(null);

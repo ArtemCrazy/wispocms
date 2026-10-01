@@ -1060,33 +1060,6 @@ function Dashboard({
     }
   }
 
-  async function requestAdminPasswordReset() {
-    setChangingPassword(true);
-    setPasswordMessage("");
-    try {
-      const response = await fetch("/api/auth/admin-password-reset/request", {
-        method: "POST",
-        credentials: "include",
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok)
-        throw new Error(
-          Array.isArray(payload?.message)
-            ? payload.message.join(", ")
-            : (payload?.message ?? "Не удалось отправить письмо"),
-        );
-      setPasswordMessage(
-        "Письмо со ссылкой отправлено на email администратора",
-      );
-    } catch (reason) {
-      setPasswordMessage(
-        reason instanceof Error ? reason.message : "Не удалось отправить письмо",
-      );
-    } finally {
-      setChangingPassword(false);
-    }
-  }
-
   function startWorkspaceCreate(location: "switcher" | "sidebar") {
     setWorkspaceCreateLocation(location);
     setWorkspaceCreateName("");
@@ -2172,7 +2145,7 @@ function Dashboard({
                   {passwordMessage}
                 </div>
               ) : null}
-              {passwordFormOpen && !isWispoAdmin ? (
+              {passwordFormOpen ? (
                 <form onSubmit={changePassword}>
                   <label>
                     <span>Текущий пароль</span>
@@ -2263,15 +2236,10 @@ function Dashboard({
                   <button
                     disabled={changingPassword}
                     onClick={() => {
-                      if (isWispoAdmin) void requestAdminPasswordReset();
-                      else setPasswordFormOpen(true);
+                      setPasswordFormOpen(true);
                     }}
                   >
-                    {changingPassword
-                      ? "Отправляем…"
-                      : isWispoAdmin
-                        ? "Сменить пароль по email"
-                        : "Сменить пароль"}
+                    Сменить пароль
                   </button>
                   <button
                     className="logout"

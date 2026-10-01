@@ -43,7 +43,6 @@ export function TeamUserEditorModal({
   onToggleSite,
   onTogglePassword,
   onResetPassword,
-  onRequestAdminPasswordReset,
   onSave,
   onClose,
 }: {
@@ -60,7 +59,6 @@ export function TeamUserEditorModal({
   onToggleSite: (siteId: string) => void;
   onTogglePassword: () => void;
   onResetPassword: (event: FormEvent<HTMLFormElement>) => void;
-  onRequestAdminPasswordReset: () => void;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -278,14 +276,7 @@ export function TeamUserEditorModal({
         <footer>
           <div>
             {editor.role === "wispo_admin" && protectedUser ? (
-              <button
-                type="button"
-                className="team-password-button"
-                disabled={busy}
-                onClick={onRequestAdminPasswordReset}
-              >
-                Отправить ссылку на email
-              </button>
+              <small>Смена своего пароля — в профиле</small>
             ) : !protectedUser && editor.role !== "wispo_admin" ? (
               <button
                 type="button"

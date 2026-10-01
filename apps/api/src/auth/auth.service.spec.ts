@@ -78,14 +78,15 @@ describe('AuthService password change', () => {
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
-  it('requires Wispo administrators to confirm password changes by email', async () => {
-    users.findOne.mockResolvedValue({
+  it('lets Wispo administrators change a known password while email is unavailable', async () => {
+    const admin = {
       id: 'admin-id',
       isActive: true,
       platformRole: 'wispo_admin',
       sessionVersion: 0,
       passwordHash: await hash('current-password', 4),
-    });
+    };
+    users.findOne.mockResolvedValue(admin);
 
     await expect(
       service.changePassword(
@@ -93,8 +94,9 @@ describe('AuthService password change', () => {
         'current-password',
         'new-secure-password',
       ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(users.save).not.toHaveBeenCalled();
+    ).resolves.toEqual({ ok: true });
+    expect(users.save).toHaveBeenCalledWith(admin);
+    expect(admin.sessionVersion).toBe(1);
   });
 });
 

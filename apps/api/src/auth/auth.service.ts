@@ -209,10 +209,6 @@ export class AuthService {
       where: { id: userId, isActive: true },
     });
     if (!user) throw new UnauthorizedException('Пользователь не найден');
-    if (user.platformRole === PlatformRole.WISPO_ADMIN)
-      throw new BadRequestException(
-        'Администратор Wispo меняет пароль только после подтверждения по email',
-      );
     if (!(await compare(currentPassword, user.passwordHash)))
       throw new BadRequestException('Текущий пароль указан неверно');
     if (await compare(newPassword, user.passwordHash))
