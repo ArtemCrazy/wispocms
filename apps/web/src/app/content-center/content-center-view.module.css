@@ -36,6 +36,27 @@
 .creationLayout { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .creationLayout > .creationTabs { flex-direction: row; flex: none; width: auto; padding: 0 0 14px; overflow: visible; }
 .creationLayout textarea { min-height: 120px; }
+.creationLauncher { min-width: 0; }
+.creationLauncher .cardHead { flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.creationLauncher .field { margin: 0; }
+.creationLauncher textarea { display: block; box-sizing: border-box; width: 100%; min-height: 128px; padding: 14px 16px; border: 1px solid #dedbe9; border-radius: 8px; background: white; color: #302744; font: inherit; line-height: 1.6; resize: vertical; }
+.creationLauncher textarea::placeholder { color: #90889c; }
+.creationLauncher textarea:focus-visible { outline: 2px solid #aa96f5; outline-offset: 2px; }
+.launcherToolbar { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.launcherFiles { display: flex; flex: 1 1 240px; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.launcherFileName { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.launcherActions { display: flex; align-items: flex-start; gap: 10px; margin-left: auto; }
+.launcherActions .voice { margin: 0; min-width: 0; }
+.launcherActions .voice > .actions { margin: 0; }
+.launcherActions > button { white-space: nowrap; }
+.launcherFileHint { font-size: 12px; color: #81798d; margin: 12px 0 0; }
+.launcherSummary { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eeecf4; color: #777188; font-size: 12px; }
+.launcherSummary strong { color: #51495e; font-weight: 600; }
+.launcherHint { margin: 6px 0 0; color: #777188; font-size: 12px; }
+@media (max-width: 700px) {
+  .launcherActions { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+  .launcherFileName { max-width: 180px; }
+}
 .contentTableCard { min-width: 0; }
 .tableCount { color: #79758a; font-size: 13px; font-weight: 400; margin-left: 8px; }
 .visuallyHidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

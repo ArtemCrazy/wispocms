@@ -19,7 +19,6 @@ import {
 } from "./creation-state";
 import {
   CreationDialog,
-  CreationInstruction,
   creationDate,
   creationRequest,
 } from "./creation-shared";
@@ -27,6 +26,7 @@ import { CreationArticle } from "./creation-article";
 import { CreationHistory } from "./creation-history";
 import { RestructureClusters } from "./creation-restructure";
 import { CreationTable } from "./creation-table";
+import { CreationLauncher } from "./creation-launcher";
 import styles from "./content-center-view.module.css";
 const emptyLocation: CreationLocation = {
   screen: "table",
@@ -361,6 +361,27 @@ export function CreationView({
           статей станут доступны после подключения API.
         </div>
       )}
+      {location.screen === "table" && (
+        <CreationLauncher
+          base={parentBase}
+          instruction={instruction}
+          setInstruction={setInstruction}
+          file={file}
+          setFile={setFile}
+          busy={busy}
+          running={running}
+          voice={voice}
+          connected={data.ai.connected}
+          clusterCount={selectedClusters.length}
+          platformCount={data.settings.platforms.length}
+          hasSelection={Boolean(selected.length)}
+          onVoice={setVoice}
+          onLaunch={() => {
+            setRetry(false);
+            setLaunchConfirm(true);
+          }}
+        />
+      )}
       {(location.screen === "table" || location.screen === "article") &&
         data.run && (
           <section className={styles.card}>
@@ -438,42 +459,6 @@ export function CreationView({
               setRestructure({ kind: "merge", clusters: selectedClusters })
             }
           />
-          <section className={styles.card}>
-            <h2>Создать контент</h2>
-            <CreationInstruction
-              base={parentBase}
-              value={instruction}
-              setValue={setInstruction}
-              file={file}
-              setFile={setFile}
-              disabled={busy || running}
-              onVoice={setVoice}
-            />
-            <div className={styles.actions}>
-              <button
-                className={styles.primary}
-                disabled={
-                  busy ||
-                  voice ||
-                  running ||
-                  !data.ai.connected ||
-                  !selectedClusters.length ||
-                  !data.settings.platforms.length
-                }
-                onClick={() => {
-                  setRetry(false);
-                  setLaunchConfirm(true);
-                }}
-              >
-                Создать контент
-              </button>
-              <span className={styles.muted}>
-                {selected.length
-                  ? `Для выбранных актуальных кластеров: ${selectedClusters.length}`
-                  : `Для всех актуальных кластеров: ${selectedClusters.length}. Фильтры не ограничивают запуск.`}
-              </span>
-            </div>
-          </section>
         </>
       )}
       {location.screen === "cluster" &&

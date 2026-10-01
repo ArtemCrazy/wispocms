@@ -79,6 +79,8 @@ export function CreationInstruction({
   disabled,
   onVoice,
   children,
+  launcher = false,
+  action,
 }: {
   base: string;
   value: string;
@@ -88,6 +90,8 @@ export function CreationInstruction({
   disabled: boolean;
   onVoice: (a: boolean) => void;
   children?: ReactNode;
+  launcher?: boolean;
+  action?: ReactNode;
 }) {
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -99,63 +103,111 @@ export function CreationInstruction({
   return (
     <>
       <div className={styles.cardHead}>
-        <h3>Дополнительная инструкция</h3>
-        <button disabled={disabled} onClick={() => setPromptsOpen(true)}>
+        {launcher ? (
+          <h2>Запустить подготовку контента</h2>
+        ) : (
+          <h3>Дополнительная инструкция</h3>
+        )}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setPromptsOpen(true)}
+        >
           Список промптов
         </button>
       </div>
       <label className={styles.field}>
-        Задача для текущего запуска
+        <span className={launcher ? styles.visuallyHidden : undefined}>
+          Задача для текущего запуска
+        </span>
         <textarea
           rows={4}
           maxLength={12000}
           value={value}
           disabled={disabled}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="Необязательно: на что обратить внимание при создании контента"
+          placeholder={
+            launcher
+              ? "Например: сделай упор на практические советы, добавь примеры, используй простой и понятный стиль изложения…"
+              : "Необязательно: на что обратить внимание при создании контента"
+          }
         />
       </label>
       {children}
-      <div className={styles.actions}>
-        <input
-          ref={fileRef}
-          type="file"
-          hidden
-          accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv"
-          onChange={(e) => {
-            const chosen = e.target.files?.[0];
-            e.target.value = "";
-            if (chosen && chosen.size > 10 * 1024 * 1024) {
-              setError("Файл должен быть не больше 10 МБ");
-              return;
-            }
-            setError("");
-            setFile(chosen ?? null);
-          }}
-        />
-        <button disabled={disabled} onClick={() => fileRef.current?.click()}>
-          Прикрепить файл
-        </button>
-        {file && (
-          <>
-            <span>{file.name}</span>
-            <button disabled={disabled} onClick={() => setFile(null)}>
-              Убрать файл
-            </button>
-          </>
+      <div className={launcher ? styles.launcherToolbar : styles.actions}>
+        <div className={launcher ? styles.launcherFiles : styles.actions}>
+          <input
+            ref={fileRef}
+            type="file"
+            hidden
+            disabled={disabled}
+            aria-label="Файл для текущего запуска"
+            accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv"
+            onChange={(e) => {
+              const chosen = e.target.files?.[0];
+              e.target.value = "";
+              if (!chosen) return;
+              if (chosen && chosen.size > 10 * 1024 * 1024) {
+                setError("Файл должен быть не больше 10 МБ");
+                return;
+              }
+              setError("");
+              setFile(chosen ?? null);
+            }}
+          />
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => fileRef.current?.click()}
+          >
+            Прикрепить файл
+          </button>
+          {file && (
+            <>
+              <span className={styles.launcherFileName} title={file.name}>
+                {file.name}
+              </span>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  setFile(null);
+                  setError("");
+                }}
+                aria-label="Убрать файл"
+              >
+                {launcher ? "×" : "Убрать файл"}
+              </button>
+            </>
+          )}
+        </div>
+        {launcher && (
+          <div className={styles.launcherActions}>
+            <SpeechInput
+              compact
+              disabled={disabled}
+              onTranscript={(text) =>
+                setValue(appendDictation(valueRef.current, text).value)
+              }
+              onActiveChange={onVoice}
+            />
+            {action}
+          </div>
         )}
       </div>
-      <p className={styles.muted}>
+      <p className={launcher ? styles.launcherFileHint : styles.muted}>
         Инструкция и файл относятся только к этому запуску, не становятся
         материалами проекта. Файл — до 10 МБ.
       </p>
-      <SpeechInput
-        disabled={disabled}
-        onTranscript={(text) =>
-          setValue(appendDictation(valueRef.current, text).value)
-        }
-        onActiveChange={onVoice}
-      />
+      {!launcher && (
+        <SpeechInput
+          disabled={disabled}
+          onTranscript={(text) =>
+            setValue(appendDictation(valueRef.current, text).value)
+          }
+          onActiveChange={onVoice}
+        />
+      )}
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -165,7 +217,11 @@ export function CreationInstruction({
         <GlobalPromptPicker
           close={() => setPromptsOpen(false)}
           onSelect={(content) => {
-            if (value.trim() && !window.confirm("Заменить текущую инструкцию текстом промпта?")) return;
+            if (
+              value.trim() &&
+              !window.confirm("Заменить текущую инструкцию текстом промпта?")
+            )
+              return;
             setValue(content);
             setPromptsOpen(false);
           }}

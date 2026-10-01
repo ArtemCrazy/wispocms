@@ -47,6 +47,29 @@ function load(name) {
   cache.set(name, module.exports);
   return module.exports;
 }
+test("launcher renders instruction, local attachment and selection scope with explicit blocking reasons", () => {
+  const { CreationLauncher, launchBlockReason } = load("creation-launcher");
+  const props = { base: "/api/test", instruction: "Добавь примеры", setInstruction() {}, file: { name: "brief.txt", size: 80 }, setFile() {}, busy: false, running: false, voice: false, connected: true, clusterCount: 3, platformCount: 2, hasSelection: false, onVoice() {}, onLaunch() {} };
+  const render = (overrides = {}) => renderToStaticMarkup(React.createElement(CreationLauncher, { ...props, ...overrides }));
+  const html = render();
+  for (const label of ["Запустить подготовку контента", "Список промптов", "Прикрепить файл", "Убрать файл", "brief.txt", "Добавь примеры", "Все актуальные кластеры", "Фильтры таблицы не ограничивают запуск.", "Голосовой ввод"])
+    assert.ok(html.includes(label), label);
+  assert.match(html, /maxLength="12000"/);
+  assert.match(html, /type="file"/);
+  assert.doesNotMatch(html, /aria-describedby="creation-launch-blocked"/);
+  assert.match(render({ hasSelection: true }), /Выбрано актуальных кластеров/);
+  assert.doesNotMatch(render({ hasSelection: true }), /Фильтры таблицы не ограничивают запуск/);
+  assert.match(render({ running: true }), /disabled="" aria-describedby="creation-launch-blocked"/);
+  assert.match(render({ busy: true }), /type="file" hidden="" disabled=""/);
+  assert.doesNotMatch(render({ file: null }), /Убрать файл/);
+  assert.equal(launchBlockReason(props), "");
+  for (const [override, message] of [
+    [{ busy: true }, /текущего действия/], [{ running: true }, /текущего запуска/],
+    [{ voice: true }, /диктовку/], [{ connected: false }, /подключите AI/],
+    [{ clusterCount: 0 }, /кластер/], [{ platformCount: 0 }, /площадки/],
+  ]) assert.match(launchBlockReason({ ...props, ...override }), message);
+});
+
 test("creation table groups platforms, keeps archives read-only and renders article links", () => {
   const clusters = [false, true].map((archived, i) => ({ id: `c${i}`, number: i + 1, title: archived ? "Архивный кластер" : "Уход за кожей", direction: "Косметология", queries: [{ text: "уход", general: 18400, exact: 7200, primary: true }], archived }));
   const html = renderToStaticMarkup(React.createElement(load("creation-table").CreationTable, {

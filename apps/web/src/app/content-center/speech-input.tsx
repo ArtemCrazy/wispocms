@@ -30,10 +30,12 @@ export function SpeechInput({
   disabled,
   onTranscript,
   onActiveChange,
+  compact = false,
 }: {
   disabled: boolean;
   onTranscript: (text: string) => void;
   onActiveChange: (active: boolean) => void;
+  compact?: boolean;
 }) {
   const recognition = useRef<Recognition | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
@@ -184,7 +186,7 @@ export function SpeechInput({
             <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
           </svg>
         </button>
-        <span className={styles.muted} role="status">
+        <span className={compact && !active ? styles.visuallyHidden : styles.muted} role="status">
           {active
             ? listening
               ? "Микрофон включён. Говорите по-русски."
