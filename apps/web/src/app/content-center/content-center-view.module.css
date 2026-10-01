@@ -33,17 +33,21 @@
   width: 100%;
   font-size: 14px;
 }
+.creationLayout { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.creationLayout > .creationTabs { flex-direction: row; flex: none; width: auto; padding: 0 0 14px; overflow: visible; }
+.creationLayout textarea { min-height: 120px; }
 .contentTableCard { min-width: 0; }
 .tableCount { color: #79758a; font-size: 13px; font-weight: 400; margin-left: 8px; }
 .visuallyHidden { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .contentTableFilters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
 .contentTableFilters .field { margin: 0; min-width: 0; }
+.contentTableFilters input, .contentTableFilters select { width: 100%; min-width: 0; min-height: 40px; padding: 9px 12px; border: 1px solid #dedbe9; border-radius: 7px; background: white; color: #51495e; font: inherit; font-weight: 400; }
 .contentTableSearch { grid-column: 1 / -1; }
 .tableSelection { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 12px; background: #f4f0ff; border-radius: 8px; font-size: 13px; }
 .contentTableScroll { max-width: 100%; overflow: auto; border: 1px solid #e8e5f1; border-radius: 9px; }
 .contentTableScroll:focus-visible { outline: 2px solid #7054ec; outline-offset: 3px; }
 .contentMatrix { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.45; }
-.view .contentMatrix th, .view .contentMatrix td { padding: 11px 10px; border-bottom: 1px solid #eeecf4; text-align: left; vertical-align: middle; font-size: 13px; }
+.view .contentMatrix th, .view .contentMatrix td { padding: 11px 10px; height: auto; border-top: 0; border-bottom: 1px solid #eeecf4; text-align: left; vertical-align: middle; font-size: 13px; white-space: normal; text-transform: none; letter-spacing: normal; }
 .view .contentMatrix tbody th { background: transparent; }
 .view .contentMatrix thead th { background: #f8f7fc; color: #777188; font-size: 12px; font-weight: 500; }
 .view .contentMatrix thead .matrixPlatformHead { text-align: center; color: #302744; font-size: 13px; font-weight: 600; border-left: 1px solid #e8e5f1; }
@@ -79,7 +83,7 @@
 .matrixFooter { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 16px; font-size: 12px; color: #777188; }
 .matrixFooter label { display: flex; align-items: center; gap: 8px; }
 .view .matrixFooter select { width: auto; padding: 5px 25px 5px 8px; min-height: 32px; }
-.matrixFooter nav { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.matrixFooter nav { display: flex; flex-direction: row; flex: none; width: auto; padding: 0; overflow: visible; align-items: center; gap: 12px; margin-left: auto; }
 .view .matrixFooter nav button { min-width: 34px; padding: 4px 10px; font-size: 20px; }
 @media (max-width: 700px) {
   .contentTableFilters { grid-template-columns: 1fr; }

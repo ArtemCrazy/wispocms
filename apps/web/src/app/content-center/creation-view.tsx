@@ -316,7 +316,7 @@ export function CreationView({
     ));
   }
   return (
-    <div className={styles.preparationStack}>
+    <div className={styles.creationLayout}>
       <nav className={styles.creationTabs} aria-label="Создание контента">
         <button
           className={location.screen === "table" ? styles.selected : undefined}
