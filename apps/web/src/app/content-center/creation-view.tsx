@@ -1,13 +1,9 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import Image from "next/image";
 import {
-  ARTICLE_STATUS,
-  AI_RECOMMENDATION,
   creationLocation,
   filterClusters,
   launchClusters,
-  platformRows,
   type ArticleDetails,
   type Cluster,
   type CreationLocation,
@@ -16,17 +12,14 @@ import {
   type Query,
   type Settings,
 } from "./creation-state";
-import {
-  CreationDialog,
-  creationDate,
-  creationRequest,
-} from "./creation-shared";
+import { CreationDialog, creationRequest } from "./creation-shared";
 import { CreationArticle } from "./creation-article";
 import { CreationHistory } from "./creation-history";
 import { RestructureClusters } from "./creation-restructure";
 import { CreationTable } from "./creation-table";
 import { CreationLauncher } from "./creation-launcher";
 import { CreationRunPanels } from "./creation-progress";
+import { CreationCluster } from "./creation-cluster";
 import styles from "./content-center-view.module.css";
 const emptyLocation: CreationLocation = {
   screen: "table",
@@ -237,84 +230,6 @@ export function CreationView({
           },
     );
   }
-  function articleCards(c: Cluster) {
-    return platformRows(c, data!).map((p) => (
-      <article className={styles.card} key={p.siteId}>
-        {p.article?.cover_media_id && (
-          <Image
-            unoptimized
-            width={480}
-            height={270}
-            className={styles.creationImage}
-            src={`/api/sites/${p.siteId}/content/media/${p.article.cover_media_id}/file`}
-            alt="Иллюстрация статьи"
-          />
-        )}
-        <div className={styles.cardHead}>
-          <h3>
-            {p.article ? (
-              <button
-                className={styles.link}
-                onClick={() =>
-                  navigate({ screen: "article", id: p.article!.id })
-                }
-              >
-                {p.article.title}
-              </button>
-            ) : (
-              p.name
-            )}
-          </h3>
-          <span className={styles.badge}>
-            {ARTICLE_STATUS[p.article?.status ?? "missing"]}
-          </span>
-        </div>
-        {p.article ? (
-          <>
-            <p className={styles.muted}>
-              Создана: {creationDate(p.article.created_at)} · Обновлена:{" "}
-              {creationDate(p.article.updated_at)}
-            </p>
-            <details>
-              <summary>Рекомендация AI и назначение статьи</summary>
-              <p>
-                <b>{AI_RECOMMENDATION[p.article.recommendation]}</b> —{" "}
-                {p.article.rationale}
-              </p>
-              <dl>
-                <dt>Назначение</dt>
-                <dd>{p.article.purpose}</dd>
-                <dt>Задача</dt>
-                <dd>{p.article.task}</dd>
-                <dt>Потребность пользователя</dt>
-                <dd>{p.article.need}</dd>
-                <dt>Обоснование содержания</dt>
-                <dd>{p.article.content_rationale}</dd>
-              </dl>
-            </details>
-          </>
-        ) : (
-          <p>
-            Рекомендация: Создать. Статья для этой площадки пока не существует;
-            релевантность определит AI при запуске.
-          </p>
-        )}
-        <div className={styles.creationPublication}>
-          <strong>Публикация</strong>
-          <p>{p.name}</p>
-          {p.article?.publication_url && (
-            <a
-              href={p.article.publication_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Открыть опубликованную статью ↗
-            </a>
-          )}
-        </div>
-      </article>
-    ));
-  }
   return (
     <div className={styles.creationLayout}>
       <nav className={styles.creationTabs} aria-label="Создание контента">
@@ -431,82 +346,26 @@ export function CreationView({
       )}
       {location.screen === "cluster" &&
         (cluster ? (
-          <>
-            <section className={styles.card}>
-              <div className={styles.cardHead}>
-                <h2>
-                  Кластер № {cluster.number}: {cluster.title}
-                </h2>
-                <button onClick={() => edit(cluster)}>
-                  Редактировать кластер
-                </button>
-                <button
-                  disabled={cluster.archived || cluster.queries.length < 2}
-                  onClick={() =>
-                    setRestructure({ kind: "split", clusters: [cluster] })
-                  }
-                >
-                  Разделить кластер
-                </button>
-              </div>
-              <p>
-                {cluster.direction || "Без направления"}{" "}
-                {cluster.archived && "· Архив"}
-              </p>
-              <p>
-                Запросов: {cluster.queries.length} · Общая частотность:{" "}
-                {cluster.queries.reduce((s, q) => s + q.general, 0)} · Точная
-                частотность: {cluster.queries.reduce((s, q) => s + q.exact, 0)}
-              </p>
-              <h3>Запросы кластера</h3>
-              <div className={styles.tableWrap}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Запрос</th>
-                      <th>Общая частотность</th>
-                      <th>Точная частотность</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cluster.queries.map((q) => (
-                      <tr key={q.text}>
-                        <td>
-                          {q.text}{" "}
-                          {q.primary && (
-                            <span className={styles.badge}>Основной</span>
-                          )}
-                        </td>
-                        <td>{q.general}</td>
-                        <td>{q.exact}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <button
-                onClick={() =>
-                  navigate({
-                    screen: "history",
-                    historyTab: "clusters",
-                    clusterContext: cluster.id,
-                    id: null,
-                  })
-                }
-              >
-                История изменений кластера →
-              </button>
-            </section>
-            <h2>Статьи</h2>
-            {articleCards(cluster)}
-            {!platformRows(cluster, data).length && (
-              <p className={styles.muted}>
-                Подключите площадки для создания статей.
-              </p>
-            )}
-          </>
+          <CreationCluster
+            cluster={cluster}
+            data={data}
+            busy={busy}
+            navigate={navigate}
+            onEdit={() => edit(cluster)}
+            onSplit={() =>
+              setRestructure({ kind: "split", clusters: [cluster] })
+            }
+          />
         ) : (
-          <p>Кластер не найден.</p>
+          <section className={styles.card}>
+            <p>Кластер не найден.</p>
+            <button
+              type="button"
+              onClick={() => navigate({ screen: "table", id: null })}
+            >
+              К таблице контента
+            </button>
+          </section>
         ))}
       {(location.screen === "article" || location.screen === "versions") &&
         (details && details.article.id === location.id ? (

@@ -36,6 +36,39 @@
 .creationLayout { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .creationLayout > .creationTabs { flex-direction: row; flex: none; width: auto; padding: 0 0 14px; overflow: visible; }
 .creationLayout textarea { min-height: 120px; }
+.clusterLayout { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.clusterLayout > .cardHead { flex-wrap: wrap; gap: 12px; }
+.clusterHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.clusterHeader h2 { margin: 4px 0 8px; overflow-wrap: anywhere; }
+.clusterHeader > strong { overflow-wrap: anywhere; }
+.clusterEyebrow { display: block; margin: 0; color: #81798d; font-size: 12px; }
+.clusterMetrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.clusterMetrics > div { background: #f8f7fc; border: 1px solid #eeecf4; border-radius: 8px; padding: 14px 16px; }
+.clusterMetrics dt { color: #81798d; font-size: 12px; }
+.clusterMetrics dd { margin: 4px 0 0; color: #514166; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.clusterActions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.clusterActions > .link { margin-left: auto; }
+.clusterQueries { margin-top: 20px; }
+.clusterQueries summary, .clusterPurpose summary { cursor: pointer; color: #7054ec; font-size: 13px; margin-bottom: 12px; }
+.clusterQueries .contentTableScroll { max-height: 420px; }
+.clusterQueryTable { width: 100%; border-collapse: collapse; }
+.view .clusterQueryTable th, .view .clusterQueryTable td { padding: 12px; border: 0; border-bottom: 1px solid #eeecf4; height: auto; font-size: 13px; text-transform: none; letter-spacing: normal; white-space: normal; }
+.view .clusterQueryTable th { background: #f8f7fc; color: #81798d; font-weight: 500; }
+.clusterQueryTable th:first-child, .clusterQueryTable td:first-child { text-align: left; min-width: 180px; overflow-wrap: anywhere; }
+.clusterQueryTable th:not(:first-child), .clusterQueryTable td:not(:first-child) { text-align: right; min-width: 110px; font-variant-numeric: tabular-nums; }
+.clusterArticleGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.clusterArticle h3 { margin: 16px 0 10px; }
+.view .clusterArticle h3 button { font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.clusterArticle .creationImage { margin-top: 16px; }
+.clusterArticleDates { font-size: 12px; color: #81798d; margin: 12px 0; }
+.clusterRecommendation { padding: 14px; margin: 16px 0; background: #f8f5ff; border-radius: 8px; }
+.clusterRecommendation > strong { display: block; margin-top: 4px; color: #6242cd; font-size: 13px; }
+.clusterRecommendation p { margin: 8px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.clusterPurpose .creationEventFields { grid-template-columns: minmax(100px, .8fr) minmax(0, 1fr); font-size: 13px; }
+.clusterPurpose dd { overflow-wrap: anywhere; }
+.clusterVersions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; border-top: 1px solid #eeecf4; margin-top: 16px; padding-top: 12px; font-size: 12px; color: #81798d; }
+@media (max-width: 950px) { .clusterArticleGrid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .clusterMetrics { grid-template-columns: 1fr; } .clusterActions > .link { margin-left: 0; } }
 .historyCard { min-width: 0; }
 .historyCard > .cardHead { flex-wrap: wrap; gap: 12px; }
 .historyTabs { display: flex; gap: 20px; border-bottom: 1px solid #e8e5f1; margin-top: 14px; }

@@ -91,6 +91,27 @@ test("progress renders real outcomes, cluster details, empty state and retry onl
   assert.doesNotMatch(history, /статьи|статей/);
 });
 
+test("cluster card separates platform status, AI recommendation and published/current versions", () => {
+  const { CreationCluster } = load("creation-cluster");
+  const cluster = { id: "c", number: 7, title: "Уход за кожей", direction: "Косметология", archived: false, queries: [{ text: "уход", general: 100, exact: 30, primary: true }, { text: "крем", general: 200, exact: 50, primary: false }] };
+  const article = { id: "a", cluster_id: "c", site_id: "s", title: "Практические советы", status: "published", recommendation: "update", rationale: "Нужны примеры", purpose: "Объяснить", task: "Помочь", need: "Выбрать", content_rationale: "Факты", current_number: 3, published_number: 2, publication_url: "https://example.com/article", created_at: "2026-10-02T00:00:00Z", updated_at: "2026-10-02T00:00:00Z" };
+  const data = { settings: { platforms: [{ siteId: "s" }, { siteId: "new" }] }, sites: [{ id: "s", name: "Сайт" }, { id: "new", name: "Новая площадка" }, { id: "old", name: "Прежняя площадка" }], articles: [article, { ...article, id: "old-a", site_id: "old" }] };
+  const render = (clusterOverride = {}, articleOverride = {}) => renderToStaticMarkup(React.createElement(CreationCluster, { cluster: { ...cluster, ...clusterOverride }, data: { ...data, articles: data.articles.map((a) => ({ ...a, ...articleOverride })) }, busy: false, navigate() {}, onEdit() {}, onSplit() {} }));
+  const html = render();
+  for (const text of ["Кластер № 7", "300", "80", "Основной", "Статьи по площадкам", "Прежняя площадка", "Площадка отключена", "Рекомендация AI", "Нужны примеры", "Опубликована V2", "Текущая версия V3", "Есть изменения, не опубликованные на сайте.", "Статья пока не создана", "История статей", "История изменений кластера"])
+    assert.ok(html.includes(text), text);
+  assert.match(html, /href="https:\/\/example.com\/article"/);
+  const archived = render({ archived: true });
+  assert.match(archived, /disabled="">Разделить кластер/);
+  assert.doesNotMatch(archived, /Рекомендация AI/);
+  assert.match(archived, /Статьи и история сохранены/);
+  assert.doesNotMatch(render({}, { publication_url: "javascript:alert(1)" }), /href="javascript:/);
+  assert.doesNotMatch(render({}, { status: "unpublished" }), /Открыть опубликованную статью/);
+  const empty = renderToStaticMarkup(React.createElement(CreationCluster, { cluster, data: { settings: { platforms: [] }, sites: [], articles: [] }, busy: false, navigate() {}, onEdit() {}, onSplit() {} }));
+  assert.match(empty, /Подключите площадки/);
+  assert.match(empty, /К таблице контента/);
+});
+
 test("creation table groups platforms, keeps archives read-only and renders article links", () => {
   const clusters = [false, true].map((archived, i) => ({ id: `c${i}`, number: i + 1, title: archived ? "Архивный кластер" : "Уход за кожей", direction: "Косметология", queries: [{ text: "уход", general: 18400, exact: 7200, primary: true }], archived }));
   const html = renderToStaticMarkup(React.createElement(load("creation-table").CreationTable, {
