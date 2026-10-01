@@ -154,16 +154,16 @@ test("article exposes per-proposal decisions, unpublished current-version notice
     },
     changes: [],
   };
-  const render = (canPublishDirectly) => renderToStaticMarkup(
+  const render = (canPublishDirectly, articleOverride = {}) => renderToStaticMarkup(
     React.createElement(load("creation-article").CreationArticle, {
       base: "/api/test",
       parentBase: "/api/test",
       details: {
         canPublishDirectly,
-        article,
+        article: { ...article, ...articleOverride },
         version,
         versions: [],
-        sites: [{ id: "site", name: "Media", slug: "test" }],
+        sites: [{ id: "other", name: "Wrong platform", slug: "wrong" }, { id: "site", name: "Media", slug: "test" }],
         categories: [],
         templates: [],
         correction: {
@@ -205,7 +205,55 @@ test("article exposes per-proposal decisions, unpublished current-version notice
     assert.ok(html.includes(label), label);
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /type="file"/);
+  assert.match(html, /Media/);
+  assert.doesNotMatch(html, /Wrong platform/);
+  assert.doesNotMatch(render(true, { publication_url: "javascript:alert(1)" }), /href="javascript:/);
+  assert.doesNotMatch(render(true, { status: "unpublished" }), /Открыть публикацию/);
+  assert.ok(html.indexOf('aria-label="Актуальная статья"') < html.indexOf('aria-label="Корректировка статьи"'));
 });
+test("version preview never labels a stale snapshot as the selected version and explains restoration", () => {
+  const { CreationVersionPreview } = load("creation-article");
+  const version = { number: 2, created_at: "2026-10-02T00:00:00Z", actor_name: "Редактор", reason: "Уточнение", changes: [], snapshot: { title: "Верный заголовок", excerpt: "Описание версии", document: { blocks: [{ id: "b", type: "paragraph", text: "Верный текст" }] } } };
+  const props = { number: 2, version, error: "", busy: false, currentNumber: 3, publishedNumber: 2, hasCorrection: false, siteSlug: "site", onRetry() {}, onRestore() {} };
+  const render = (override = {}) => renderToStaticMarkup(React.createElement(CreationVersionPreview, { ...props, ...override }));
+  const html = render();
+  for (const text of ["Верный текст", "Описание версии", "Опубликованная", "Восстановить версию", "не меняет опубликованную статью", "нет отдельных изменений"])
+    assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /Первая версия/);
+  for (const override of [{ version: null }, { number: 1 }]) {
+    const pending = render(override);
+    assert.match(pending, /Загружаем версию/);
+    assert.doesNotMatch(pending, /Верный текст|Восстановить версию/);
+  }
+  assert.match(render({ error: "Ошибка сети", version: null }), /Повторить загрузку версии/);
+  assert.doesNotMatch(render({ error: "Ошибка сети" }), /Верный текст/);
+  assert.match(render({ currentNumber: 2 }), /disabled="">Восстановить версию/);
+  assert.match(render({ hasCorrection: true }), /Завершите рассмотрение/);
+  assert.match(render({ busy: true }), /disabled="">Восстановить версию/);
+});
+
+test("proposal panel counts decisions, keeps before/after text and dispatches an individual decision", () => {
+  const { CreationProposals } = load("creation-article");
+  const proposals = ["pending", "accepted", "rejected"].map((decision, i) => ({ id: `p${i}`, target: "title", before: "Прежний", after: "Новый", reason: "Понятнее", decision }));
+  const decisions = [];
+  const props = { proposals, busy: false, onDecision: (...args) => decisions.push(args) };
+  const html = renderToStaticMarkup(React.createElement(CreationProposals, props));
+  for (const text of ["Осталось: 1", "Принято: 1", "Отклонено: 1", "Предложение 1 из 3", "Было", "Стало", "Прежний", "Новый", "Понятнее"])
+    assert.ok(html.includes(text), text);
+  assert.equal((html.match(/<button/g) || []).length, 2);
+  const buttons = [];
+  function visit(element) {
+    if (!element || typeof element !== "object") return;
+    if (Array.isArray(element)) return element.forEach(visit);
+    if (element.type === "button") buttons.push(element);
+    visit(element.props?.children);
+  }
+  visit(CreationProposals(props));
+  buttons.forEach(button => button.props.onClick());
+  assert.deepEqual(decisions, [["p0", "accepted"], ["p0", "rejected"]]);
+  assert.equal((renderToStaticMarkup(React.createElement(CreationProposals, { ...props, busy: true })).match(/disabled=""/g) || []).length, 2);
+});
+
 test("run history does not expand; history has all three specified tabs and filters", () => {
   const html = renderToStaticMarkup(
     React.createElement(load("creation-history").CreationHistory, {

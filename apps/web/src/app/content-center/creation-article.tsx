@@ -1,5 +1,6 @@
 "use client";
 import { articleSelection, type ArticleSelection } from "./creation-selection";
+import { publicationDetails } from "./creation-history-state";
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { ArticleDocumentBlock } from "../structured-article-editor";
@@ -106,6 +107,169 @@ function Block({
     );
   return <p className={styles.creationText}>{block.text}</p>;
 }
+
+export function CreationVersionPreview({
+  number,
+  version,
+  error,
+  busy,
+  currentNumber,
+  publishedNumber,
+  hasCorrection,
+  siteSlug,
+  onRetry,
+  onRestore,
+}: {
+  number: number;
+  version: Version | null;
+  error: string;
+  busy: boolean;
+  currentNumber: number;
+  publishedNumber: number | null;
+  hasCorrection: boolean;
+  siteSlug: string;
+  onRetry: () => void;
+  onRestore: (number: number) => void;
+}) {
+  // A late response must never present the previous selection under the new number.
+  const selected = version?.number === number ? version : null;
+  return (
+    <section
+      className={styles.card}
+      aria-label={`Просмотр версии ${number}`}
+      aria-busy={!selected && !error}
+    >
+      <div className={styles.cardHead}>
+        <h2>Версия {number}</h2>
+        {selected && (
+          <button
+            disabled={busy || number === currentNumber || hasCorrection}
+            onClick={() => onRestore(number)}
+          >
+            Восстановить версию
+          </button>
+        )}
+      </div>
+      {error ? (
+        <div role="alert">
+          <p className={styles.error}>{error}</p>
+          <button onClick={onRetry}>Повторить загрузку версии</button>
+        </div>
+      ) : !selected ? (
+        <p role="status">Загружаем версию {number}…</p>
+      ) : (
+        <>
+          <p className={styles.muted}>
+            {creationDate(selected.created_at)} · {selected.actor_name}
+          </p>
+          <div className={styles.actions}>
+            {number === currentNumber && (
+              <span className={styles.badge}>Актуальная</span>
+            )}
+            {number === publishedNumber && (
+              <span className={styles.badge}>Опубликованная</span>
+            )}
+          </div>
+          {selected.reason && <p>{selected.reason}</p>}
+          {hasCorrection && (
+            <p className={styles.notice}>
+              Завершите рассмотрение предложений AI перед восстановлением
+              версии.
+            </p>
+          )}
+          <p className={styles.muted}>
+            Восстановление создаёт новую актуальную версию и не меняет
+            опубликованную статью.
+          </p>
+          <details className={styles.creationVersionChanges} open>
+            <summary>Что изменилось · {selected.changes.length}</summary>
+            {selected.changes.length ? (
+              <CreationDiff changes={selected.changes} />
+            ) : (
+              <p className={styles.muted}>
+                Для этой версии нет отдельных изменений.
+              </p>
+            )}
+          </details>
+          <article
+            className={styles.creationVersionText}
+            aria-label="Текст выбранной версии"
+          >
+            <h3>{selected.snapshot.title}</h3>
+            {selected.snapshot.excerpt && (
+              <p className={styles.muted}>{selected.snapshot.excerpt}</p>
+            )}
+            {selected.snapshot.document.blocks.map((b) => (
+              <Block key={b.id} block={b} siteSlug={siteSlug} />
+            ))}
+          </article>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function CreationProposals({
+  proposals,
+  busy,
+  onDecision,
+}: {
+  proposals: Proposal[];
+  busy: boolean;
+  onDecision: (id: string, decision: "accepted" | "rejected") => void;
+}) {
+  const pending = proposals.filter((p) => p.decision === "pending").length;
+  const accepted = proposals.filter((p) => p.decision === "accepted").length;
+  return (
+    <section
+      className={`${styles.card} ${styles.creationArticleProposals}`}
+      aria-label="Предложения AI по корректировке"
+    >
+      <h2>Предложения AI по корректировке</h2>
+      <p className={styles.muted}>
+        Рассмотрите каждое предложение. После последнего решения принятые
+        изменения сохранятся одной версией; если отклонить всё, новой версии не
+        будет.
+      </p>
+      <p role="status">
+        Осталось: {pending} · Принято: {accepted} · Отклонено:{" "}
+        {proposals.length - pending - accepted}
+      </p>
+      {proposals.map((p, index) => (
+        <div key={p.id} className={styles.creationProposal}>
+          <strong>
+            Предложение {index + 1} из {proposals.length}
+          </strong>
+          <CreationDiff changes={[p]} />
+          {p.decision === "pending" ? (
+            <div className={styles.actions}>
+              <button
+                disabled={busy}
+                className={styles.primary}
+                aria-label={`Принять предложение ${index + 1}`}
+                onClick={() => onDecision(p.id, "accepted")}
+              >
+                Принять
+              </button>
+              <button
+                disabled={busy}
+                aria-label={`Отклонить предложение ${index + 1}`}
+                onClick={() => onDecision(p.id, "rejected")}
+              >
+                Отклонить
+              </button>
+            </div>
+          ) : (
+            <span className={styles.badge}>
+              {p.decision === "accepted" ? "Принято" : "Отклонено"}
+            </span>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function CreationArticle({
   base,
   parentBase,
@@ -141,7 +305,14 @@ export function CreationArticle({
     [template, setTemplate] = useState("");
   const [siteId, setSiteId] = useState(article.site_id);
   const [confirmMove, setConfirmMove] = useState(false);
-  const [historical, setHistorical] = useState<Version | null>(null);
+  const requestedNumber = location.version ?? article.current_number;
+  const versionKey = `${article.id}:${requestedNumber}:${article.revision}`;
+  const [historical, setHistorical] = useState<{
+    key: string;
+    value: Version | null;
+    error: string;
+  } | null>(null);
+  const [versionRetry, setVersionRetry] = useState(0);
   const correctionRef = useRef<HTMLElement>(null);
   const articleRef = useRef<HTMLElement>(null);
   const [selection, setSelection] = useState<ArticleSelection | null>(null);
@@ -163,13 +334,14 @@ export function CreationArticle({
     if (location.screen !== "versions") return;
     let active = true;
     creationRequest<Version>(
-      `${base}/articles/${article.id}/versions/${location.version ?? article.current_number}`,
+      `${base}/articles/${article.id}/versions/${requestedNumber}`,
     )
       .then((v) => {
-        if (active) setHistorical(v);
+        if (active) setHistorical({ key: versionKey, value: v, error: "" });
       })
       .catch((e) => {
-        if (active) setError(e.message);
+        if (active)
+          setHistorical({ key: versionKey, value: null, error: e.message });
       });
     return () => {
       active = false;
@@ -177,9 +349,10 @@ export function CreationArticle({
   }, [
     base,
     article.id,
-    article.current_number,
     location.screen,
-    location.version,
+    requestedNumber,
+    versionKey,
+    versionRetry,
   ]);
   async function act(action: () => Promise<void>) {
     setBusy(true);
@@ -204,6 +377,10 @@ export function CreationArticle({
   const running =
     data.run?.status === "queued" || data.run?.status === "processing";
   const moving = siteId !== article.site_id;
+  const articleSite = details.sites.find((s) => s.id === article.site_id);
+  const publicationHref = publicationDetails({
+    url: article.publication_url,
+  }).href;
   const categories = details.categories.filter((c) => c.site_id === siteId);
   const templates = details.templates.filter((t) => t.site_id === siteId);
   const occupiedSites = new Set(
@@ -228,6 +405,7 @@ export function CreationArticle({
             navigate({
               screen: location.screen === "versions" ? "article" : "versions",
               id: article.id,
+              version: null,
             })
           }
         >
@@ -254,71 +432,65 @@ export function CreationArticle({
                   </tr>
                 </thead>
                 <tbody>
-                  {details.versions.map((v) => (
-                    <tr key={v.id}>
-                      <td>
-                        <button
-                          className={styles.link}
-                          onClick={() =>
-                            navigate({
-                              screen: "versions",
-                              id: article.id,
-                              version: v.number,
-                            })
-                          }
-                        >
-                          Версия {v.number}
-                        </button>
-                      </td>
-                      <td>
-                        {v.number === article.current_number && (
-                          <span className={styles.badge}>Актуальная</span>
-                        )}{" "}
-                        {v.number === article.published_number && (
-                          <span className={styles.badge}>Опубликованная</span>
-                        )}
-                      </td>
-                      <td>{creationDate(v.created_at)}</td>
-                      <td>{v.actor_name}</td>
-                    </tr>
-                  ))}
+                  {[...details.versions]
+                    .sort((a, b) => b.number - a.number)
+                    .map((v) => (
+                      <tr
+                        key={v.id}
+                        className={
+                          v.number === requestedNumber
+                            ? styles.creationSelectedVersion
+                            : undefined
+                        }
+                      >
+                        <td>
+                          <button
+                            className={styles.link}
+                            aria-current={
+                              v.number === requestedNumber ? "true" : undefined
+                            }
+                            onClick={() =>
+                              navigate({
+                                screen: "versions",
+                                id: article.id,
+                                version: v.number,
+                              })
+                            }
+                          >
+                            Версия {v.number}
+                          </button>
+                        </td>
+                        <td>
+                          {v.number === article.current_number && (
+                            <span className={styles.badge}>Актуальная</span>
+                          )}{" "}
+                          {v.number === article.published_number && (
+                            <span className={styles.badge}>Опубликованная</span>
+                          )}
+                        </td>
+                        <td>{creationDate(v.created_at)}</td>
+                        <td>{v.actor_name}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
           </section>
-          {historical && (
-            <section className={styles.card}>
-              <div className={styles.cardHead}>
-                <h2>Версия {historical.number}</h2>
-                <button
-                  disabled={
-                    busy ||
-                    historical.number === article.current_number ||
-                    Boolean(details.correction)
-                  }
-                  onClick={() => setRestore(historical.number)}
-                >
-                  Восстановить версию
-                </button>
-              </div>
-              <p>
-                {creationDate(historical.created_at)} · {historical.actor_name}
-              </p>
-              <p>{historical.reason}</p>
-              <h3>Что изменилось</h3>
-              {historical.changes.length ? (
-                <CreationDiff changes={historical.changes} />
-              ) : (
-                <p className={styles.muted}>
-                  Первая версия — предыдущего состояния нет.
-                </p>
-              )}
-              <h3>{historical.snapshot.title}</h3>
-              {historical.snapshot.document.blocks.map((b) => (
-                <Block key={b.id} block={b} siteSlug={article.site_id} />
-              ))}
-            </section>
-          )}
+          <CreationVersionPreview
+            number={requestedNumber}
+            version={historical?.key === versionKey ? historical.value : null}
+            error={historical?.key === versionKey ? historical.error : ""}
+            busy={busy}
+            currentNumber={article.current_number}
+            publishedNumber={article.published_number}
+            hasCorrection={Boolean(details.correction)}
+            siteSlug={articleSite?.slug ?? article.site_id}
+            onRetry={() => {
+              setHistorical(null);
+              setVersionRetry((v) => v + 1);
+            }}
+            onRestore={setRestore}
+          />
         </>
       ) : (
         <>
@@ -330,7 +502,11 @@ export function CreationArticle({
               </span>
             </div>
             <p className={styles.muted}>
-              Версия {article.current_number} · {details.sites[0]?.name}
+              Актуальная версия V{article.current_number} ·{" "}
+              {articleSite?.name ?? "Площадка недоступна"}
+            </p>
+            <p className={styles.muted}>
+              {creationDate(version.created_at)} · {version.actor_name}
             </p>
             {unpublishedChanges(article) && (
               <p className={styles.notice}>
@@ -338,29 +514,37 @@ export function CreationArticle({
                 версия {article.published_number}.
               </p>
             )}
-            <p>
+            <p aria-label="Рекомендация AI">
+              Рекомендация AI:{" "}
               <strong>{AI_RECOMMENDATION[article.recommendation]}</strong> —{" "}
               {article.rationale}
             </p>
             <div className={styles.actions}>
-              {details.canPublishDirectly ? <>
-              <button
-                className={styles.primary}
-                disabled={busy}
-                onClick={() => setPublish(true)}
-              >
-                Отправить в публикацию
-              </button>
-              {article.status === "published" && (
-                <button disabled={busy} onClick={() => setUnpublish(true)}>
-                  Снять с публикации
-                </button>
+              {details.canPublishDirectly ? (
+                <>
+                  <button
+                    className={styles.primary}
+                    disabled={busy}
+                    onClick={() => setPublish(true)}
+                  >
+                    Отправить в публикацию
+                  </button>
+                  {article.status === "published" && (
+                    <button disabled={busy} onClick={() => setUnpublish(true)}>
+                      Снять с публикации
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className={styles.muted}>
+                  Публикацию этой версии подтверждает владелец сайта или
+                  администратор Wispo.
+                </p>
               )}
-              </> : <p className={styles.muted}>Публикацию этой версии подтверждает владелец сайта или администратор Wispo.</p>}
-              {article.publication_url && (
+              {article.status === "published" && publicationHref && (
                 <a
                   className={styles.download}
-                  href={article.publication_url}
+                  href={publicationHref}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -369,190 +553,188 @@ export function CreationArticle({
               )}
             </div>
           </section>
-          <section ref={correctionRef} className={styles.card}>
-            <h2>Корректировка статьи</h2>
-            <p className={styles.muted}>
-              AI предложит изменения. Содержимое статьи останется прежним, пока
-              вы не рассмотрите все предложения.
-            </p>
-            {target ? (
-              <div className={styles.notice}>
-                <strong>
-                  Контекст:{" "}
-                  {target === "title"
-                    ? "заголовок"
-                    : target === "excerpt"
-                      ? "описание"
-                      : "выбранный элемент"}
-                </strong>
-                <pre className={styles.creationPre}>
-                  {valueText(
-                    target === "title"
-                      ? version.snapshot.title
-                      : target === "excerpt"
-                        ? version.snapshot.excerpt
-                        : version.snapshot.document.blocks.find(
-                            (b) => `block:${b.id}` === target,
-                          ),
-                  )}
-                </pre>
-                <button onClick={() => choose("")}>
-                  Корректировать статью целиком
+          <div className={styles.creationArticleWorkspace}>
+            <section
+              className={`${styles.card} ${styles.creationArticleReading}`}
+              ref={articleRef}
+              aria-label="Актуальная статья"
+            >
+              <h2>Актуальная статья</h2>
+              <p className={styles.muted}>
+                Выделите текст статьи для точечной корректировки. Инструкция
+                вводится отдельно.
+              </p>
+              <button
+                disabled={!selection}
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  if (selection) choose(selection.target, selection.fragment);
+                }}
+              >
+                Изменить выделенный фрагмент с помощью AI
+              </button>
+              <div className={styles.creationElement}>
+                <h2 data-ai-target="title">{version.snapshot.title}</h2>
+                <button onClick={() => choose("title")}>
+                  Изменить с помощью AI
                 </button>
               </div>
-            ) : (
-              <p>Область: вся статья.</p>
-            )}
-            <CreationInstruction
-              base={parentBase}
-              value={instruction}
-              setValue={setInstruction}
-              file={file}
-              setFile={setFile}
-              disabled={busy || running || Boolean(details.correction)}
-              onVoice={setVoice}
-            >
-              <label className={styles.field}>
-                Конкретный фрагмент (необязательно)
-                <textarea
-                  rows={2}
-                  maxLength={12000}
-                  value={fragment}
-                  onChange={(e) => setFragment(e.target.value)}
-                  placeholder="Вставьте фрагмент текущего элемента или статьи. Это контекст, не инструкция."
-                />
-              </label>
-            </CreationInstruction>
-            <button
-              className={styles.primary}
-              disabled={
-                busy ||
-                voice ||
-                running ||
-                !data.ai.connected ||
-                !instruction.trim() ||
-                Boolean(details.correction)
-              }
-              onClick={() =>
-                void act(async () => {
-                  const form = new FormData();
-                  form.append(
-                    "payload",
-                    JSON.stringify({
-                      revision: article.revision,
-                      instruction,
-                      ...(target ? { target } : {}),
-                      ...(fragment ? { fragment } : {}),
-                    }),
-                  );
-                  if (file) form.append("file", file);
-                  await creationRequest(
-                    `${base}/articles/${article.id}/correct`,
-                    "POST",
-                    form,
-                  );
-                  setInstruction("");
-                  setFile(null);
-                })
-              }
-            >
-              Получить предложения AI
-            </button>
-            {!data.ai.connected && (
-              <p className={styles.muted}>Доступно после подключения AI API.</p>
-            )}
-          </section>
-          {details.correction && (
-            <section className={styles.card}>
-              <h2>Предложения AI по корректировке</h2>
-              <p className={styles.muted}>
-                Рассмотрите каждое предложение. После последнего решения
-                принятые изменения сохранятся одной версией; если отклонить всё,
-                новой версии не будет.
-              </p>
-              {details.correction.proposals.map((p) => (
-                <div key={p.id} className={styles.creationProposal}>
-                  <CreationDiff changes={[p]} />
-                  {p.decision === "pending" ? (
-                    <div className={styles.actions}>
-                      {(["accepted", "rejected"] as const).map((decision) => (
-                        <button
-                          key={decision}
-                          disabled={busy}
-                          className={
-                            decision === "accepted" ? styles.primary : undefined
-                          }
-                          onClick={() =>
-                            void act(async () => {
-                              await creationRequest(
-                                `${base}/articles/${article.id}/decisions`,
-                                "POST",
-                                {
-                                  revision: article.revision,
-                                  correctionId: details.correction!.id,
-                                  proposalId: p.id,
-                                  decision,
-                                },
-                              );
-                            })
-                          }
-                        >
-                          {decision === "accepted" ? "Принять" : "Отклонить"}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className={styles.badge}>
-                      {p.decision === "accepted" ? "Принято" : "Отклонено"}
-                    </span>
-                  )}
+              {version.snapshot.excerpt && (
+                <div className={styles.creationElement}>
+                  <p data-ai-target="excerpt">{version.snapshot.excerpt}</p>
+                  <button onClick={() => choose("excerpt")}>
+                    Изменить с помощью AI
+                  </button>
+                </div>
+              )}
+              {version.snapshot.document.blocks.map((b) => (
+                <div key={b.id} className={styles.creationElement}>
+                  <div data-ai-target={`block:${b.id}`}>
+                    <Block
+                      block={b}
+                      siteSlug={articleSite?.slug ?? article.site_id}
+                    />
+                  </div>
+                  <button
+                    aria-label={`Изменить с помощью AI: ${b.id}`}
+                    onClick={() => choose(`block:${b.id}`)}
+                  >
+                    Изменить с помощью AI
+                  </button>
                 </div>
               ))}
             </section>
-          )}
-          <section className={styles.card} ref={articleRef}>
-            <h2>Актуальная статья</h2>
-            <p className={styles.muted}>
-              Выделите текст статьи для точечной корректировки. Инструкция
-              вводится отдельно.
-            </p>
-            <button
-              disabled={!selection}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={() => {
-                if (selection) choose(selection.target, selection.fragment);
-              }}
+            <section
+              ref={correctionRef}
+              className={`${styles.card} ${styles.creationArticleCorrection}`}
+              aria-label="Корректировка статьи"
             >
-              Изменить выделенный фрагмент с помощью AI
-            </button>
-            <div className={styles.creationElement}>
-              <h2 data-ai-target="title">{version.snapshot.title}</h2>
-              <button onClick={() => choose("title")}>
-                Изменить с помощью AI
-              </button>
-            </div>
-            {version.snapshot.excerpt && (
-              <div className={styles.creationElement}>
-                <p data-ai-target="excerpt">{version.snapshot.excerpt}</p>
-                <button onClick={() => choose("excerpt")}>
-                  Изменить с помощью AI
-                </button>
-              </div>
-            )}
-            {version.snapshot.document.blocks.map((b) => (
-              <div key={b.id} className={styles.creationElement}>
-                <div data-ai-target={`block:${b.id}`}>
-                  <Block block={b} siteSlug={article.site_id} />
+              <h2>Корректировка статьи</h2>
+              <p className={styles.muted}>
+                AI предложит изменения. Содержимое статьи останется прежним,
+                пока вы не рассмотрите все предложения.
+              </p>
+              {target ? (
+                <div className={styles.notice}>
+                  <strong>
+                    Контекст:{" "}
+                    {target === "title"
+                      ? "заголовок"
+                      : target === "excerpt"
+                        ? "описание"
+                        : "выбранный элемент"}
+                  </strong>
+                  <pre className={styles.creationPre}>
+                    {valueText(
+                      target === "title"
+                        ? version.snapshot.title
+                        : target === "excerpt"
+                          ? version.snapshot.excerpt
+                          : version.snapshot.document.blocks.find(
+                              (b) => `block:${b.id}` === target,
+                            ),
+                    )}
+                  </pre>
+                  <button onClick={() => choose("")}>
+                    Корректировать статью целиком
+                  </button>
                 </div>
-                <button
-                  aria-label={`Изменить с помощью AI: ${b.id}`}
-                  onClick={() => choose(`block:${b.id}`)}
-                >
-                  Изменить с помощью AI
-                </button>
-              </div>
-            ))}
-          </section>
+              ) : (
+                <p>Область: вся статья.</p>
+              )}
+              <CreationInstruction
+                base={parentBase}
+                value={instruction}
+                setValue={setInstruction}
+                file={file}
+                setFile={setFile}
+                disabled={busy || running || Boolean(details.correction)}
+                onVoice={setVoice}
+              >
+                <label className={styles.field}>
+                  Конкретный фрагмент (необязательно)
+                  <textarea
+                    rows={2}
+                    maxLength={12000}
+                    value={fragment}
+                    onChange={(e) => setFragment(e.target.value)}
+                    placeholder="Вставьте фрагмент текущего элемента или статьи. Это контекст, не инструкция."
+                  />
+                </label>
+              </CreationInstruction>
+              <button
+                className={styles.primary}
+                disabled={
+                  busy ||
+                  voice ||
+                  running ||
+                  !data.ai.connected ||
+                  !instruction.trim() ||
+                  Boolean(details.correction)
+                }
+                onClick={() =>
+                  void act(async () => {
+                    const form = new FormData();
+                    form.append(
+                      "payload",
+                      JSON.stringify({
+                        revision: article.revision,
+                        instruction,
+                        ...(target ? { target } : {}),
+                        ...(fragment ? { fragment } : {}),
+                      }),
+                    );
+                    if (file) form.append("file", file);
+                    await creationRequest(
+                      `${base}/articles/${article.id}/correct`,
+                      "POST",
+                      form,
+                    );
+                    setInstruction("");
+                    setFile(null);
+                  })
+                }
+              >
+                Получить предложения AI
+              </button>
+              {!data.ai.connected && (
+                <p className={styles.muted}>
+                  Доступно после подключения AI API.
+                </p>
+              )}
+              {running && (
+                <p className={styles.notice} role="status">
+                  Идёт обработка. Дождитесь завершения текущего запуска.
+                </p>
+              )}
+              {details.correction && (
+                <p className={styles.notice}>
+                  Сначала рассмотрите все предложения ниже. Затем можно
+                  отправить новую инструкцию.
+                </p>
+              )}
+            </section>
+            {details.correction && (
+              <CreationProposals
+                proposals={details.correction.proposals}
+                busy={busy}
+                onDecision={(proposalId, decision) =>
+                  void act(async () => {
+                    await creationRequest(
+                      `${base}/articles/${article.id}/decisions`,
+                      "POST",
+                      {
+                        revision: article.revision,
+                        correctionId: details.correction!.id,
+                        proposalId,
+                        decision,
+                      },
+                    );
+                  })
+                }
+              />
+            )}
+          </div>
         </>
       )}
       {publish && (
