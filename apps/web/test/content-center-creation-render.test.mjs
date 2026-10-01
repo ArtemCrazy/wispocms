@@ -254,6 +254,40 @@ test("proposal panel counts decisions, keeps before/after text and dispatches an
   assert.equal((renderToStaticMarkup(React.createElement(CreationProposals, { ...props, busy: true })).match(/disabled=""/g) || []).length, 2);
 });
 
+test("publication validates platform, category, template and explicit move without overwriting another article", () => {
+  const { publicationFormState, CreationPublicationForm } = load("creation-publication");
+  const details = { canPublishDirectly: true, article: { id: "a", cluster_id: "c", site_id: "s", revision: 3, current_number: 2, published_number: 1, status: "published", cms_article_id: "cms", category_id: "cat" }, correction: null, sites: [{ id: "s", name: "Сайт" }, { id: "s2", name: "Вторая площадка" }], categories: [{ id: "cat", site_id: "s", name: "Раздел" }, { id: "cat2", site_id: "s2", name: "Другой раздел" }], templates: [{ site_id: "s", key: "editorial:v2", version: "1", name: "Статья" }, { site_id: "s2", key: "editorial:v2", version: "1", name: "Статья" }] };
+  const data = { articles: [] };
+  const input = { revision: 3, siteId: "s", categoryId: "cat", slug: "new-article", templateKey: "editorial:v2", templateVersion: "1", confirmMove: false };
+  const state = (changed = {}, modifiedDetails = {}, modifiedData = {}) => publicationFormState({ ...details, ...modifiedDetails }, { ...data, ...modifiedData }, { ...input, ...changed });
+  assert.equal(state().blocked, "");
+  assert.match(state({}, { canPublishDirectly: false }).blocked, /владелец/);
+  assert.match(state({ siteId: "missing" }).blocked, /доступную площадку/);
+  assert.match(state({ categoryId: "cat2" }).blocked, /раздел площадки/);
+  assert.match(state({}, { categories: [] }).blocked, /нет опубликованных разделов/);
+  assert.match(state({}, { templates: [] }).blocked, /нет активного шаблона/);
+  assert.match(state({ templateVersion: "obsolete" }).blocked, /шаблон статьи/);
+  assert.match(state({}, {}, { articles: [{ id: "other", cluster_id: "c", site_id: "s" }] }).blocked, /не будет перезаписана/);
+  const move = { siteId: "s2", categoryId: "cat2" };
+  assert.match(state(move).blocked, /Подтвердите перенос/);
+  assert.equal(state({ ...move, confirmMove: true }).blocked, "");
+  assert.match(state({ ...move, confirmMove: true }, { correction: { id: "pending" } }).blocked, /предложения AI/);
+  assert.match(state({ ...move, slug: "search" }).blocked, /зарезервирован/);
+  assert.match(state({ ...move, slug: "UPPER SPACE" }).blocked, /Адрес:/);
+  assert.equal(state({ slug: "ignored-for-existing-url" }).blocked, "");
+  const props = { details, data, busy: false, error: "", onCancel() {}, onPublish() {} };
+  const html = renderToStaticMarkup(React.createElement(CreationPublicationForm, props));
+  assert.match(html, /Существующий URL сохранится/);
+  assert.match(html, /Сейчас на сайте опубликована V1/);
+  assert.doesNotMatch(html, /Адрес статьи \(slug\)/);
+  const busy = renderToStaticMarkup(React.createElement(CreationPublicationForm, { ...props, busy: true }));
+  assert.match(busy, /<fieldset disabled=""/);
+  assert.match(busy, /Публикуем…/);
+  const blocked = renderToStaticMarkup(React.createElement(CreationPublicationForm, { ...props, details: { ...details, categories: [] } }));
+  assert.match(blocked, /aria-describedby="publication-blocked"/);
+  assert.match(blocked, /нет опубликованных разделов/);
+});
+
 test("run history does not expand; history has all three specified tabs and filters", () => {
   const html = renderToStaticMarkup(
     React.createElement(load("creation-history").CreationHistory, {

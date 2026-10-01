@@ -10,7 +10,7 @@ import {
   ContentStatusScheduleEntity,
   SiteContentTemplateEntity,
   SiteEntity,
-  WorkspaceMembershipEntity,
+  SiteAccessEntity,
   PlatformRole,
   databaseEntities,
 } from '../database/entities';
@@ -115,6 +115,10 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         [site, workspace, site2, foreignSite, other],
       );
       await db.query(
+        "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'site_owner',false),($1,$3,'site_owner',false)",
+        [actor.userId, site, site2],
+      );
+      await db.query(
         "INSERT INTO site_content_templates(site_id,kind,key,version,name) VALUES($1,'article','editorial','1','Статья'),($2,'article','editorial','1','Статья'),($3,'article','editorial','1','Статья')",
         [site, site2, foreignSite],
       );
@@ -135,7 +139,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       const lifecycle = new ContentLifecycleService(
         db,
         db.getRepository(SiteEntity),
-        db.getRepository(WorkspaceMembershipEntity),
+        db.getRepository(SiteAccessEntity),
         db.getRepository(ArticleEntity),
         db.getRepository(CategoryEntity),
         db.getRepository(ArticleRelatedItemEntity),
@@ -151,7 +155,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         new CmsRevisionsService(
           db,
           db.getRepository(SiteEntity),
-          db.getRepository(WorkspaceMembershipEntity),
+          db.getRepository(SiteAccessEntity),
         ),
       );
     });
@@ -185,19 +189,23 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         platforms: [{ siteId: site, rules: 'Обращение на вы' }],
       });
     });
-    it('denies shared materials to partial site grants and direct publication to employees', async () => {
+    it('denies shared materials to partial site grants and direct publication when approval is required', async () => {
       const { article } = await create();
       try {
         await db.query(
-          'UPDATE workspace_memberships SET site_ids=$1 WHERE user_id=$2',
-          [[site], actor.userId],
+          'DELETE FROM site_accesses WHERE user_id=$1 AND site_id=$2',
+          [actor.userId, site2],
         );
         await expect(
           service.details(workspace, actor, article.id),
         ).rejects.toThrow('недоступно');
         await db.query(
-          "UPDATE workspace_memberships SET role='wispo_manager',site_ids=$1 WHERE user_id=$2",
-          [[site, site2], actor.userId],
+          "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'content_manager',true)",
+          [actor.userId, site2],
+        );
+        await db.query(
+          "UPDATE site_accesses SET role='content_manager',requires_approval=true WHERE user_id=$1",
+          [actor.userId],
         );
         expect(
           (await service.details(workspace, actor, article.id))
@@ -209,8 +217,8 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         expect(await db.getRepository(ArticleEntity).count()).toBe(0);
       } finally {
         await db.query(
-          "UPDATE workspace_memberships SET role='site_owner',site_ids=$1 WHERE user_id=$2",
-          [[site, site2], actor.userId],
+          "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'site_owner',false),($1,$3,'site_owner',false) ON CONFLICT(user_id,site_id) DO UPDATE SET role='site_owner',requires_approval=false",
+          [actor.userId, site, site2],
         );
       }
     });
@@ -223,7 +231,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       const revisions = new CmsRevisionsService(
         db,
         db.getRepository(SiteEntity),
-        db.getRepository(WorkspaceMembershipEntity),
+        db.getRepository(SiteAccessEntity),
       );
       const current = await revisions.current(site, 'article', cmsId, actor);
       expect(current!.draft!.id).toBe(current!.publishedRevisionId);

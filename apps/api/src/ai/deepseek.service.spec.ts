@@ -509,16 +509,82 @@ describe('DeepSeek adapter', () => {
     expect(String(error)).not.toContain(TEST_KEY);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+  it('preserves literal article line breaks and retries malformed JSON once with the same structured input', async () => {
+    const payload = JSON.stringify(production).replace(
+      'Компания основана в 2010 году.',
+      'Первая строка\nВторая строка',
+    );
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: 'stop', message: { content: payload } }],
+          }),
+        ),
+      ),
+    );
+    const output = await ai.produce(input, new AbortController().signal);
+    expect(output.article?.document.blocks[0]).toMatchObject({
+      text: 'Первая строка\nВторая строка',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockClear();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            { finish_reason: 'stop', message: { content: '{broken PRIVATE' } },
+          ],
+        }),
+      ),
+    );
+    respond(production);
+    await expect(
+      ai.produce(input, new AbortController().signal),
+    ).resolves.toMatchObject(production);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const bodies = fetchMock.mock.calls.map(
+      (call: [string, RequestInit]) =>
+        JSON.parse(call[1].body as string) as {
+          response_format: { type: string };
+          messages: { content: string }[];
+        },
+    );
+    expect(bodies[1].response_format.type).toBe('json_object');
+    expect(bodies[1].messages[1]).toEqual(bodies[0].messages[1]);
+    expect(bodies[1].messages[0].content).not.toContain('PRIVATE');
+  });
+  it('stops after two malformed article JSON responses without leaking their content', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              { finish_reason: 'stop', message: { content: '{PRIVATE' } },
+            ],
+          }),
+        ),
+      ),
+    );
+    const error = await ai
+      .produce(input, new AbortController().signal)
+      .catch((reason: unknown) => reason);
+    expect(String(error)).toContain('некорректный JSON');
+    expect(String(error)).not.toContain('PRIVATE');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it('rejects truncated, empty and malformed output without creating a result', async () => {
     respond(production, 'length');
     await expect(
       ai.produce(input, new AbortController().signal),
     ).rejects.toThrow('лимита длины');
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          choices: [{ finish_reason: 'stop', message: { content: '' } }],
-        }),
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: 'stop', message: { content: '' } }],
+          }),
+        ),
       ),
     );
     await expect(

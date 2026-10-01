@@ -1,6 +1,7 @@
 "use client";
 import { articleSelection, type ArticleSelection } from "./creation-selection";
 import { publicationDetails } from "./creation-history-state";
+import { CreationPublicationForm } from "./creation-publication";
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { ArticleDocumentBlock } from "../structured-article-editor";
@@ -300,11 +301,6 @@ export function CreationArticle({
   const [publish, setPublish] = useState(false),
     [unpublish, setUnpublish] = useState(false),
     [restore, setRestore] = useState<number | null>(null);
-  const [category, setCategory] = useState(article.category_id ?? ""),
-    [slug, setSlug] = useState(`article-${article.id.slice(0, 8)}`),
-    [template, setTemplate] = useState("");
-  const [siteId, setSiteId] = useState(article.site_id);
-  const [confirmMove, setConfirmMove] = useState(false);
   const requestedNumber = location.version ?? article.current_number;
   const versionKey = `${article.id}:${requestedNumber}:${article.revision}`;
   const [historical, setHistorical] = useState<{
@@ -376,20 +372,10 @@ export function CreationArticle({
   }
   const running =
     data.run?.status === "queued" || data.run?.status === "processing";
-  const moving = siteId !== article.site_id;
   const articleSite = details.sites.find((s) => s.id === article.site_id);
   const publicationHref = publicationDetails({
     url: article.publication_url,
   }).href;
-  const categories = details.categories.filter((c) => c.site_id === siteId);
-  const templates = details.templates.filter((t) => t.site_id === siteId);
-  const occupiedSites = new Set(
-    data.articles
-      .filter((a) => a.cluster_id === article.cluster_id && a.id !== article.id)
-      .map((a) => a.site_id),
-  );
-  const publishTemplate =
-    template || [templates[0]?.key, templates[0]?.version].join(":");
   return (
     <>
       <div className={styles.actions}>
@@ -525,7 +511,10 @@ export function CreationArticle({
                   <button
                     className={styles.primary}
                     disabled={busy}
-                    onClick={() => setPublish(true)}
+                    onClick={() => {
+                      setError("");
+                      setPublish(true);
+                    }}
                   >
                     Отправить в публикацию
                   </button>
@@ -743,147 +732,23 @@ export function CreationArticle({
           close={() => setPublish(false)}
           busy={busy}
         >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
+          <CreationPublicationForm
+            details={details}
+            data={data}
+            busy={busy}
+            error={error}
+            onCancel={() => setPublish(false)}
+            onPublish={(input) =>
               void act(async () => {
-                const [templateKey, templateVersion] =
-                  publishTemplate.split(":");
                 await creationRequest(
                   `${base}/articles/${article.id}/publish`,
                   "POST",
-                  {
-                    revision: article.revision,
-                    siteId,
-                    confirmMove,
-                    categoryId: category,
-                    slug,
-                    templateKey,
-                    templateVersion,
-                  },
+                  input,
                 );
                 setPublish(false);
-              });
-            }}
-          >
-            <p>
-              Будет опубликована текущая версия {article.current_number}. Статьи
-              других площадок не изменятся.
-            </p>
-            <label className={styles.field}>
-              Целевая площадка
-              <select
-                value={siteId}
-                disabled={busy}
-                onChange={(event) => {
-                  setSiteId(event.target.value);
-                  setCategory("");
-                  setTemplate("");
-                  setConfirmMove(false);
-                }}
-              >
-                {details.sites.map((s) => (
-                  <option
-                    key={s.id}
-                    value={s.id}
-                    disabled={occupiedSites.has(s.id)}
-                  >
-                    {s.name}
-                    {occupiedSites.has(s.id)
-                      ? " — уже есть статья кластера"
-                      : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {moving && (
-              <div className={styles.notice}>
-                <p>
-                  Статья будет закреплена за выбранной площадкой. Её версии и
-                  история сохранятся. Правила другой площадки могут отличаться —
-                  проверьте текст перед публикацией.
-                </p>
-                {article.status === "published" && (
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={confirmMove}
-                      onChange={(event) => setConfirmMove(event.target.checked)}
-                    />
-                    Подтверждаю перенос: снять прежнюю публикацию и опубликовать
-                    текущую версию на выбранной площадке.
-                  </label>
-                )}
-              </div>
-            )}
-            <label className={styles.field}>
-              Раздел
-              <select
-                required
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
-                <option value="">Выберите опубликованный раздел</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={styles.field}>
-              Шаблон статьи
-              <select
-                required
-                value={publishTemplate}
-                onChange={(e) => setTemplate(e.target.value)}
-              >
-                {templates.map((t) => (
-                  <option
-                    key={`${t.key}:${t.version}`}
-                    value={`${t.key}:${t.version}`}
-                  >
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {article.cms_article_id && !moving ? (
-              <p className={styles.muted}>Существующий URL сохранится.</p>
-            ) : (
-              <label className={styles.field}>
-                Адрес статьи (slug)
-                <input
-                  required
-                  maxLength={160}
-                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
-                />
-              </label>
-            )}
-            {error && <p className={styles.error}>{error}</p>}
-            <div className={styles.actions}>
-              <button
-                className={styles.primary}
-                disabled={
-                  busy ||
-                  !category ||
-                  !templates.length ||
-                  (moving && article.status === "published" && !confirmMove)
-                }
-              >
-                Отправить в публикацию
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setPublish(false)}
-              >
-                Отмена
-              </button>
-            </div>
-          </form>
+              })
+            }
+          />
         </CreationDialog>
       )}
       {unpublish && (

@@ -419,7 +419,30 @@ export class DeepseekService implements PreparationProvider, CreationProvider {
       throw new DeepseekError(
         'Вложения в генерацию пока не поддерживаются этим подключением.',
       );
-    const output = await this.completion(CREATION_PROMPT, input, signal);
+    // Text in article blocks can contain literal line breaks. Escaping only
+    // LF/CR/TAB preserves that text; schema and exact-before checks stay strict.
+    let output: Record<string, unknown>;
+    try {
+      output = await this.completion(
+        CREATION_PROMPT,
+        input,
+        signal,
+        8192,
+        true,
+      );
+    } catch (error) {
+      if (!(error instanceof DeepseekFormatError) || signal.aborted)
+        throw error;
+      // Retry the same immutable input once, not a guessed/repaired article.
+      // Never downgrade structured article/proposal output to arbitrary text.
+      output = await this.completion(
+        `${CREATION_PROMPT}\nПредыдущая попытка не дала корректный JSON. Верни один полный JSON-объект без обёртки; экранируй кавычки и переводы строк внутри строковых значений.`,
+        input,
+        signal,
+        8192,
+        true,
+      );
+    }
     try {
       if (
         typeof output.relevant !== 'boolean' ||
