@@ -70,6 +70,27 @@ test("launcher renders instruction, local attachment and selection scope with ex
   ]) assert.match(launchBlockReason({ ...props, ...override }), message);
 });
 
+test("progress renders real outcomes, cluster details, empty state and retry only for production failures", () => {
+  const { CreationProgress, RecentRunList } = load("creation-progress");
+  const run = { id: "r", number: 4, kind: "production", status: "partial", cluster_count: 1, created_at: "2026-10-02T00:00:00Z", actor_name: "Редактор", operations: [
+    { clusterId: "c", clusterTitle: "Уход за кожей", siteId: "s", siteName: "Сайт", status: "succeeded", message: "" },
+    { clusterId: "c", clusterTitle: "Уход за кожей", siteId: "s2", siteName: "Площадка 2", status: "failed", message: "Не удалось сохранить" },
+  ] };
+  const render = (value) => renderToStaticMarkup(React.createElement(CreationProgress, { run: value, retryDisabled: false, onRetry() {} }));
+  const html = render(run);
+  for (const text of ["100%", "Завершён с ошибками", "Ошибок: 1", "Пропущено: 0", "Уход за кожей", "Площадка 2", "Не удалось сохранить", "Повторить операции с ошибкой"])
+    assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /Осталось примерно|минуты/);
+  assert.match(render(null), /Запусков пока нет/);
+  assert.doesNotMatch(render({ ...run, kind: "correction" }), /Повторить операции/);
+  assert.doesNotMatch(render({ ...run, status: "succeeded" }), /Повторить операции/);
+  const history = renderToStaticMarkup(React.createElement(RecentRunList, { runs: [run], loading: false, error: "", onReload() {}, onHistory() {} }));
+  assert.match(history, /Все запуски/);
+  assert.match(history, /Запуск №4/);
+  assert.match(history, /Кластеров: 1/);
+  assert.doesNotMatch(history, /статьи|статей/);
+});
+
 test("creation table groups platforms, keeps archives read-only and renders article links", () => {
   const clusters = [false, true].map((archived, i) => ({ id: `c${i}`, number: i + 1, title: archived ? "Архивный кластер" : "Уход за кожей", direction: "Косметология", queries: [{ text: "уход", general: 18400, exact: 7200, primary: true }], archived }));
   const html = renderToStaticMarkup(React.createElement(load("creation-table").CreationTable, {

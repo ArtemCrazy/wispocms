@@ -4,7 +4,6 @@ import Image from "next/image";
 import {
   ARTICLE_STATUS,
   AI_RECOMMENDATION,
-  RUN_STATUS,
   creationLocation,
   filterClusters,
   launchClusters,
@@ -27,6 +26,7 @@ import { CreationHistory } from "./creation-history";
 import { RestructureClusters } from "./creation-restructure";
 import { CreationTable } from "./creation-table";
 import { CreationLauncher } from "./creation-launcher";
+import { CreationRunPanels } from "./creation-progress";
 import styles from "./content-center-view.module.css";
 const emptyLocation: CreationLocation = {
   screen: "table",
@@ -382,60 +382,28 @@ export function CreationView({
           }}
         />
       )}
-      {(location.screen === "table" || location.screen === "article") &&
-        data.run && (
-          <section className={styles.card}>
-            <div className={styles.cardHead}>
-              <h2>Текущий запуск № {data.run.number}</h2>
-              <span className={styles.badge}>
-                {RUN_STATUS[data.run.status]}
-              </span>
-            </div>
-            <p>
-              {
-                data.run.operations.filter(
-                  (o) => !["queued", "processing"].includes(o.status),
-                ).length
-              }{" "}
-              из {data.run.operations.length} операций ·{" "}
-              {creationDate(data.run.created_at)} · {data.run.actor_name}
-            </p>
-            <progress
-              aria-label="Прогресс запуска"
-              max={Math.max(1, data.run.operations.length)}
-              value={
-                data.run.operations.filter(
-                  (o) => !["queued", "processing"].includes(o.status),
-                ).length
-              }
-            />
-            {data.run.operations.map((o, i) => (
-              <div className={styles.creationOperation} key={i}>
-                <span>
-                  {o.clusterTitle} · {o.siteName}
-                </span>
-                <span>
-                  {o.message ||
-                    (o.status === "processing"
-                      ? "Обрабатывается"
-                      : "В очереди")}
-                </span>
-              </div>
-            ))}
-            {["failed", "partial"].includes(data.run.status) &&
-              data.run.kind === "production" && (
-                <button
-                  disabled={busy || !data.ai.connected}
-                  onClick={() => {
-                    setRetry(true);
-                    setLaunchConfirm(true);
-                  }}
-                >
-                  Повторить операции с ошибкой
-                </button>
-              )}
-          </section>
-        )}
+      {(location.screen === "table" ||
+        (location.screen === "article" && data.run)) && (
+        <CreationRunPanels
+          key={base}
+          base={base}
+          run={data.run}
+          showHistory={location.screen === "table"}
+          retryDisabled={busy || voice || !data.ai.connected}
+          onRetry={() => {
+            setRetry(true);
+            setLaunchConfirm(true);
+          }}
+          onHistory={() =>
+            navigate({
+              screen: "history",
+              historyTab: "runs",
+              id: null,
+              clusterContext: null,
+            })
+          }
+        />
+      )}
       {location.screen === "table" && (
         <>
           <CreationTable

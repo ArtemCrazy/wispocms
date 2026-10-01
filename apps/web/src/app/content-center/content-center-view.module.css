@@ -36,6 +36,46 @@
 .creationLayout { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .creationLayout > .creationTabs { flex-direction: row; flex: none; width: auto; padding: 0 0 14px; overflow: visible; }
 .creationLayout textarea { min-height: 120px; }
+.runPanels { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.runPanels .cardHead { flex-wrap: wrap; gap: 8px; }
+.runMeta, .runCounts { color: #81798d; font-size: 12px; margin: 8px 0 12px; }
+.runProgressBar { display: flex; align-items: center; gap: 16px; }
+.runProgressBar progress { appearance: none; width: 100%; height: 8px; border: 0; border-radius: 10px; background: #eae4fa; accent-color: #7054ec; overflow: hidden; }
+.runProgressBar progress::-webkit-progress-bar { background: #eae4fa; border-radius: 10px; }
+.runProgressBar progress::-webkit-progress-value { background: #7054ec; border-radius: 10px; }
+.runProgressBar progress::-moz-progress-bar { background: #7054ec; }
+.runProgressBar[data-error="true"] progress { accent-color: #c27936; }
+.runProgressBar[data-error="true"] progress::-webkit-progress-value { background: #c27936; }
+.runProgressBar[data-error="true"] progress::-moz-progress-bar { background: #c27936; }
+.runProgressBar strong { font-variant-numeric: tabular-nums; min-width: 40px; color: #514166; }
+.runMessage { margin: 8px 0; font-size: 13px; color: #716780; }
+.runSteps { list-style: none; padding: 0; margin: 20px 0 0; }
+.runSteps li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px; margin: 12px 0; color: #81798d; font-size: 13px; }
+.runSteps small { font-size: 12px; }
+.runStepIcon { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #eeebf5; }
+.runSteps li[data-state="done"] .runStepIcon { color: #24724e; background: #e5f5ed; }
+.runSteps li[data-state="active"] { color: #6242cd; font-weight: 500; }
+.runSteps li[data-state="active"] .runStepIcon { background: #eee8ff; }
+.runSteps li[data-state="error"] .runStepIcon { color: #b54548; background: #fdebec; }
+.runBadge { display: inline-block; padding: 3px 8px; border-radius: 5px; color: #716d7b; background: #f0eef4; font-size: 12px; font-weight: 400; }
+.runBadge[data-status="processing"] { color: #6242cd; background: #eee8ff; }
+.runBadge[data-status="succeeded"] { color: #24724e; background: #e5f5ed; }
+.runBadge[data-status="failed"] { color: #b54548; background: #fdebec; }
+.runBadge[data-status="partial"] { color: #99602b; background: #fff1de; }
+.runDetails { border-top: 1px solid #eeecf4; margin: 16px 0; padding-top: 12px; }
+.runDetails summary { cursor: pointer; color: #7054ec; font-size: 13px; }
+.runClusterList { max-height: 340px; overflow-y: auto; }
+.runCluster { padding: 14px 0; border-bottom: 1px solid #eeecf4; font-size: 13px; }
+.runCluster .cardHead { align-items: start; }
+.runCluster strong { overflow-wrap: anywhere; }
+.runOperation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; }
+.runOperation > span:first-child { overflow-wrap: anywhere; }
+.runOperation p { width: 100%; margin: 0; font-size: 12px; color: #81798d; overflow-wrap: anywhere; }
+.recentRunList { list-style: none; padding: 0; margin: 16px 0 0; }
+.recentRunList li { padding: 14px; border-radius: 8px; border-bottom: 1px solid #eeecf4; }
+.recentRunList li[data-active="true"] { background: #f7f4fe; }
+.recentRunList p { font-size: 12px; color: #81798d; margin: 4px 0 0; overflow-wrap: anywhere; }
+@media (max-width: 950px) { .runPanels { grid-template-columns: 1fr; } }
 .creationLauncher { min-width: 0; }
 .creationLauncher .cardHead { flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .creationLauncher .field { margin: 0; }
