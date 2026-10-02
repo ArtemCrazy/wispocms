@@ -353,7 +353,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         [article.id],
       );
       expect(copies.find((c) => c.site_id === site)?.publication_state).toBe(
-        'hidden',
+        'disabled',
       );
       expect(copies.find((c) => c.site_id === site2)?.publication_state).toBe(
         'published',
@@ -723,7 +723,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
             .getRepository(ArticleEntity)
             .findOneByOrFail({ id: removed.cms_article_id! })
         ).publicationState,
-      ).toBe('hidden');
+      ).toBe('disabled');
     });
     it('rejecting everything makes no version; pending and unpublished articles are skipped on repeated production', async () => {
       const { article } = await create();

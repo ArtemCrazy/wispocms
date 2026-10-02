@@ -38,7 +38,9 @@ export class CreationPublicationService {
     actor: CreationActor,
   ) {
     const before = Object.assign(new ArticleEntity(), cms);
-    cms.publicationState = PublicationState.HIDDEN;
+    // HIDDEN only removes an article from listings; its direct URL stays public.
+    // Unpublishing (including a move) must also disable the old public URL.
+    cms.publicationState = PublicationState.DISABLED;
     cms.status = ArticleStatus.DRAFT;
     cms.revision++;
     cms.updatedByUserId = actor.userId;
