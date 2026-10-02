@@ -266,7 +266,7 @@ test("team table opens the styled user editor with multi-site controls", async (
   await expect(dialog.getByRole("combobox", { name: "Роль" })).toHaveText(
     "Контент-менеджер",
   );
-  await expect(dialog.getByText("Доступ к коду")).toBeVisible();
+  await expect(dialog.getByText("Доступ к коду")).toHaveCount(0);
   await expect(dialog.getByText("Требует согласования")).toBeVisible();
 
   const siteCheckboxes = dialog.locator('.team-site-picker input[type="checkbox"]');
@@ -679,7 +679,7 @@ test("media site keeps CMS tools on the Site root screen instead of the sidebar"
     .getByRole("navigation", { name: "Разделы сайта Skinova" });
   const content = page.locator("main.content");
   for (const label of [
-    "Шаблоны и чанки",
+    "Шаблоны",
     "Переменные",
     "Баннеры",
     "Медиатека",
@@ -700,7 +700,7 @@ test("media site keeps CMS tools on the Site root screen instead of the sidebar"
         buttons.map((button) => button.getAttribute("aria-label")),
       ),
   ).toEqual([
-    "Открыть раздел «Шаблоны и чанки»",
+    "Открыть раздел «Шаблоны»",
     "Открыть раздел «Переменные»",
     "Открыть раздел «Баннеры»",
     "Открыть раздел «Медиатека»",
@@ -1011,7 +1011,7 @@ test("site owner opens directly inside the assigned site", async ({
   await ownerContext.close();
 });
 
-test("content managers see site content while code visibility follows the separate permission", async ({
+test("content managers see site content without structural template controls", async ({
   browser,
 }) => {
   const adminContext = await browser.newContext();
@@ -1035,10 +1035,7 @@ test("content managers see site content while code visibility follows the separa
   expect(codeManager).toBeTruthy();
   await adminContext.close();
 
-  for (const [account, canSeeCode] of [
-    [contentManager!, false],
-    [codeManager!, true],
-  ] as const) {
+  for (const account of [contentManager!, codeManager!]) {
     const context = await browser.newContext();
     await setSessionCookie(context, account);
     const page = await context.newPage();
@@ -1058,9 +1055,9 @@ test("content managers see site content while code visibility follows the separa
     await navigation.getByRole("button", { name: "Сайт", exact: true }).click();
     await expect(
       page.getByRole("button", {
-        name: "Открыть раздел «Шаблоны и чанки»",
+        name: "Открыть раздел «Шаблоны»",
       }),
-    ).toHaveCount(canSeeCode ? 1 : 0);
+    ).toHaveCount(0);
     await context.close();
   }
 });

@@ -96,7 +96,12 @@ export type ArticleDetails = {
   version: Version;
   versions: Omit<Version, "snapshot" | "changes">[];
   correction: { id: string; proposals: Proposal[] } | null;
-  sites: { id: string; name: string; slug: string }[];
+  sites: {
+    id: string;
+    name: string;
+    slug: string;
+    canManageStructure: boolean;
+  }[];
   categories: { id: string; name: string; site_id: string }[];
   templates: { key: string; version: string; name: string; site_id: string }[];
   media: { id: string; alt_text: string }[];
@@ -115,6 +120,12 @@ export type HistoryEvent = {
   created_at: string;
 };
 export type History = { runs: Run[]; events: HistoryEvent[] };
+export function publicationBlockedByTemplates(
+  canManageStructure: boolean,
+  templates: unknown[],
+) {
+  return canManageStructure && templates.length === 0;
+}
 export const ARTICLE_STATUS = {
   missing: "Не создана",
   created: "Создана",

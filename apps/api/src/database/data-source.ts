@@ -49,6 +49,7 @@ import { CompleteCmsRevisionResourceTypes1790200000000 } from './migrations/1790
 import { RemainingMetadataRevisionTypes1790210000000 } from './migrations/1790210000000-RemainingMetadataRevisionTypes';
 import { SiteAccessAssignments1791523200000 } from './migrations/1791523200000-SiteAccessAssignments';
 import { AdminPasswordEmailConfirmation1791613200000 } from './migrations/1791613200000-AdminPasswordEmailConfirmation';
+import { RemoveCmsCodeEditing1791703200000 } from './migrations/1791703200000-RemoveCmsCodeEditing';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -104,6 +105,7 @@ export function createDataSourceOptions(): DataSourceOptions {
       RemainingMetadataRevisionTypes1790210000000,
       SiteAccessAssignments1791523200000,
       AdminPasswordEmailConfirmation1791613200000,
+      RemoveCmsCodeEditing1791703200000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',

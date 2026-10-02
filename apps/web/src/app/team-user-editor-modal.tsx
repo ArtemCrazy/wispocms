@@ -12,7 +12,6 @@ export type TeamUserEditor = {
   fullName: string;
   role: ManagedUserRole;
   siteIds: string[];
-  canEditCode: boolean;
   requiresApproval: boolean;
   isActive: boolean;
 };
@@ -207,27 +206,15 @@ export function TeamUserEditorModal({
                   </small>
                 ) : null}
               </div>
-              <div className="team-editor-section-heading permissions">
-                <div>
-                  <h3>Дополнительные возможности</h3>
-                  <p>Настройки применяются ко всем выбранным сайтам</p>
-                </div>
-              </div>
-              <div className="team-permission-grid">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={editor.canEditCode}
-                    onChange={(event) =>
-                      onChange({ canEditCode: event.target.checked })
-                    }
-                  />
-                  <span>
-                    <b>Доступ к коду</b>
-                    <small>Редактирование шаблонов, чанков и HTML-кода</small>
-                  </span>
-                </label>
-                {editor.role === "content_manager" ? (
+              {editor.role === "content_manager" ? (
+                <>
+                  <div className="team-editor-section-heading permissions">
+                    <div>
+                      <h3>Дополнительные возможности</h3>
+                      <p>Настройки применяются ко всем выбранным сайтам</p>
+                    </div>
+                  </div>
+                  <div className="team-permission-grid">
                   <label>
                     <input
                       type="checkbox"
@@ -243,8 +230,9 @@ export function TeamUserEditorModal({
                       </small>
                     </span>
                   </label>
-                ) : null}
-              </div>
+                  </div>
+                </>
+              ) : null}
             </>
           )}
           {passwordOpen ? (

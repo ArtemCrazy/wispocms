@@ -7,6 +7,7 @@ import {
   ARTICLE_STATUS,
   AI_RECOMMENDATION,
   unpublishedChanges,
+  publicationBlockedByTemplates,
   valueText,
   type ArticleDetails,
   type CreationLocation,
@@ -21,6 +22,42 @@ import {
   creationRequest,
 } from "./creation-shared";
 import styles from "./content-center-view.module.css";
+
+export function CreationPublicationTemplateField({
+  canManageStructure,
+  templates,
+  value,
+  disabled,
+  onChange,
+}: {
+  canManageStructure: boolean;
+  templates: { key: string; version: string; name: string }[];
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  if (!canManageStructure) return null;
+  return (
+    <label className={styles.field}>
+      Шаблон статьи
+      <select
+        required
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {templates.map((template) => (
+          <option
+            key={`${template.key}:${template.version}`}
+            value={`${template.key}:${template.version}`}
+          >
+            {template.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 export function CreationDiff({ changes }: { changes: Proposal[] }) {
   return (
@@ -204,6 +241,9 @@ export function CreationArticle({
   const running =
     data.run?.status === "queued" || data.run?.status === "processing";
   const moving = siteId !== article.site_id;
+  const canManageStructure =
+    details.sites.find((site) => site.id === siteId)?.canManageStructure ??
+    false;
   const categories = details.categories.filter((c) => c.site_id === siteId);
   const templates = details.templates.filter((t) => t.site_id === siteId);
   const occupiedSites = new Set(
@@ -565,8 +605,9 @@ export function CreationArticle({
             onSubmit={(e) => {
               e.preventDefault();
               void act(async () => {
-                const [templateKey, templateVersion] =
-                  publishTemplate.split(":");
+                const [templateKey, templateVersion] = canManageStructure
+                  ? publishTemplate.split(":")
+                  : [];
                 await creationRequest(
                   `${base}/articles/${article.id}/publish`,
                   "POST",
@@ -576,8 +617,9 @@ export function CreationArticle({
                     confirmMove,
                     categoryId: category,
                     slug,
-                    templateKey,
-                    templateVersion,
+                    ...(canManageStructure
+                      ? { templateKey, templateVersion }
+                      : {}),
                   },
                 );
                 setPublish(false);
@@ -649,23 +691,13 @@ export function CreationArticle({
                 ))}
               </select>
             </label>
-            <label className={styles.field}>
-              Шаблон статьи
-              <select
-                required
-                value={publishTemplate}
-                onChange={(e) => setTemplate(e.target.value)}
-              >
-                {templates.map((t) => (
-                  <option
-                    key={`${t.key}:${t.version}`}
-                    value={`${t.key}:${t.version}`}
-                  >
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CreationPublicationTemplateField
+              canManageStructure={canManageStructure}
+              templates={templates}
+              value={publishTemplate}
+              disabled={busy}
+              onChange={setTemplate}
+            />
             {article.cms_article_id && !moving ? (
               <p className={styles.muted}>Существующий URL сохранится.</p>
             ) : (
@@ -687,7 +719,10 @@ export function CreationArticle({
                 disabled={
                   busy ||
                   !category ||
-                  !templates.length ||
+                  publicationBlockedByTemplates(
+                    canManageStructure,
+                    templates,
+                  ) ||
                   (moving && article.status === "published" && !confirmMove)
                 }
               >

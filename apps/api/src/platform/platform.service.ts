@@ -519,7 +519,6 @@ export class PlatformService {
               dto.role === ManagedUserRole.SITE_OWNER
                 ? SiteRole.OWNER
                 : SiteRole.CONTENT_MANAGER,
-            canEditCode: dto.canEditCode,
             requiresApproval:
               dto.role === ManagedUserRole.CONTENT_MANAGER
                 ? dto.requiresApproval
@@ -586,7 +585,6 @@ export class PlatformService {
         workspaceId: access.site.workspaceId,
         workspaceName: access.site.workspace.name,
         role: access.role,
-        canEditCode: access.canEditCode,
         requiresApproval: access.requiresApproval,
       })),
       accountKind: user.accountKind,
@@ -648,7 +646,6 @@ export class PlatformService {
             userId: user.id,
             siteId: access.siteId,
             role: access.role,
-            canEditCode: access.canEditCode ?? false,
             requiresApproval:
               access.role === SiteRole.OWNER
                 ? false
@@ -730,7 +727,6 @@ export class PlatformService {
               userId,
               siteId: access.siteId,
               role: access.role,
-              canEditCode: access.canEditCode ?? false,
               requiresApproval:
                 access.role === SiteRole.OWNER
                   ? false

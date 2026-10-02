@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { PlatformRole, SiteType, WorkspaceRole } from '../database/entities';
+import { PlatformRole, SiteRole, SiteType } from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('ContentService site boundary', () => {
@@ -11,10 +11,10 @@ describe('ContentService site boundary', () => {
       siteType: SiteType.MEDIA,
     }),
   };
-  const memberships = { findOne: jest.fn() };
+  const siteAccesses = { findOne: jest.fn() };
   const service = new ContentService(
     sites as never,
-    memberships as never,
+    siteAccesses as never,
     {} as never,
     {} as never,
     articles as never,
@@ -27,9 +27,10 @@ describe('ContentService site boundary', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('allows reading a site explicitly assigned to a content manager', async () => {
-    memberships.findOne.mockResolvedValue({
-      role: WorkspaceRole.SITE_CONTENT_MANAGER,
-      siteIds: ['site-id'],
+    siteAccesses.findOne.mockResolvedValue({
+      role: SiteRole.CONTENT_MANAGER,
+      siteId: 'site-id',
+      requiresApproval: false,
     });
     await expect(
       service.listArticles('site-id', {
@@ -45,9 +46,10 @@ describe('ContentService site boundary', () => {
       workspaceId: 'workspace-id',
       siteType: SiteType.MEDIA,
     });
-    memberships.findOne.mockResolvedValue({
-      role: WorkspaceRole.SITE_CONTENT_MANAGER,
-      siteIds: ['site-id'],
+    siteAccesses.findOne.mockResolvedValue({
+      role: SiteRole.CONTENT_MANAGER,
+      siteId: 'site-id',
+      requiresApproval: false,
     });
     await expect(
       service.listArticles('other-site-id', {
@@ -58,7 +60,7 @@ describe('ContentService site boundary', () => {
   });
 
   it('returns 403 outside employee assignments', async () => {
-    memberships.findOne.mockResolvedValue(null);
+    siteAccesses.findOne.mockResolvedValue(null);
     await expect(
       service.listArticles('site-id', {
         userId: 'employee-id',
@@ -68,7 +70,7 @@ describe('ContentService site boundary', () => {
   });
 
   it('does not treat legacy agency_member as a global bypass', async () => {
-    memberships.findOne.mockResolvedValue(null);
+    siteAccesses.findOne.mockResolvedValue(null);
     await expect(
       service.listArticles('site-id', {
         userId: 'legacy-id',

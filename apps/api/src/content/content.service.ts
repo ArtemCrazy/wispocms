@@ -13,6 +13,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { resolve4, resolve6, resolveCname } from 'node:dns/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
@@ -358,6 +359,21 @@ export class ContentService {
         throw new ForbiddenException('Недостаточно прав для этого действия');
     }
     return site;
+  }
+
+  private async hasSitePermission(
+    siteId: string,
+    actor: Actor,
+    permission: SitePermission,
+  ) {
+    if (actor.platformRole === PlatformRole.WISPO_ADMIN) return true;
+    const access = await this.siteAccesses.findOne({
+      where: { userId: actor.userId, siteId },
+    });
+    return (
+      accessCoversSite(access, siteId) &&
+      hasSitePermission(actor.platformRole, access, permission)
+    );
   }
 
   private async requireSiteModule(
@@ -2125,7 +2141,7 @@ export class ContentService {
       dto.footerTemplateVersion !== undefined ||
       dto.footerTemplateConfig !== undefined;
     if (changesHeaderTemplate || changesFooterTemplate)
-      await this.requireSite(siteId, actor, SitePermission.EDIT_CODE);
+      await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     if (
       site.siteType !== SiteType.MEDIA &&
       (changesHeaderTemplate || changesFooterTemplate)
@@ -3383,9 +3399,20 @@ export class ContentService {
     const body = dto.bodyDocument
       ? articleDocumentText(bodyDocument)
       : (dto.body ?? '');
-    const displayTemplateKey =
-      dto.displayTemplateKey?.trim() || 'standard-article';
-    const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
+    const canManageStructure = await this.hasSitePermission(
+      siteId,
+      actor,
+      SitePermission.MANAGE_STRUCTURE,
+    );
+    const displayTemplateKey = canManageStructure
+      ? dto.displayTemplateKey?.trim() || 'standard-article'
+      : 'standard-article';
+    const displayTemplateVersion = canManageStructure
+      ? dto.displayTemplateVersion?.trim() || '1'
+      : '1';
+    const displayTemplateConfig = canManageStructure
+      ? (dto.displayTemplateConfig ?? {})
+      : {};
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.ARTICLE,
@@ -3417,7 +3444,7 @@ export class ContentService {
           editorialState: EditorialState.DRAFT,
           displayTemplateKey,
           displayTemplateVersion,
-          displayTemplateConfig: dto.displayTemplateConfig ?? {},
+          displayTemplateConfig,
           deletedAt: null,
           deletedByUserId: null,
           categoryId: dto.categoryId ?? null,
@@ -3513,6 +3540,17 @@ export class ContentService {
       dto.displayTemplateKey?.trim() || article.displayTemplateKey;
     const displayTemplateVersion =
       dto.displayTemplateVersion?.trim() || article.displayTemplateVersion;
+    const displayTemplateConfig =
+      dto.displayTemplateConfig ?? article.displayTemplateConfig ?? {};
+    const changesDisplayTemplate =
+      displayTemplateKey !== article.displayTemplateKey ||
+      displayTemplateVersion !== article.displayTemplateVersion ||
+      !isDeepStrictEqual(
+        displayTemplateConfig,
+        article.displayTemplateConfig ?? {},
+      );
+    if (changesDisplayTemplate)
+      await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.ARTICLE,
@@ -3563,8 +3601,7 @@ export class ContentService {
           : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
-      displayTemplateConfig:
-        dto.displayTemplateConfig ?? article.displayTemplateConfig,
+      displayTemplateConfig,
       publishedAt:
         dto.publishedAt === undefined
           ? article.publishedAt
@@ -4100,9 +4137,20 @@ export class ContentService {
       imageMediaId,
       dto.ogImageMediaId ?? null,
     );
-    const displayTemplateKey =
-      dto.displayTemplateKey?.trim() || 'standard-category';
-    const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
+    const canManageStructure = await this.hasSitePermission(
+      siteId,
+      actor,
+      SitePermission.MANAGE_STRUCTURE,
+    );
+    const displayTemplateKey = canManageStructure
+      ? dto.displayTemplateKey?.trim() || 'standard-category'
+      : 'standard-category';
+    const displayTemplateVersion = canManageStructure
+      ? dto.displayTemplateVersion?.trim() || '1'
+      : '1';
+    const displayTemplateConfig = canManageStructure
+      ? (dto.displayTemplateConfig ?? {})
+      : {};
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.CATEGORY,
@@ -4144,7 +4192,7 @@ export class ContentService {
           structuredData: dto.structuredData ?? null,
           displayTemplateKey,
           displayTemplateVersion,
-          displayTemplateConfig: dto.displayTemplateConfig ?? {},
+          displayTemplateConfig,
           deletedAt: null,
           deletedByUserId: null,
           createdByUserId: actor.userId,
@@ -4227,6 +4275,17 @@ export class ContentService {
       dto.displayTemplateKey?.trim() || source.displayTemplateKey;
     const displayTemplateVersion =
       dto.displayTemplateVersion?.trim() || source.displayTemplateVersion;
+    const displayTemplateConfig =
+      dto.displayTemplateConfig ?? source.displayTemplateConfig ?? {};
+    const changesDisplayTemplate =
+      displayTemplateKey !== source.displayTemplateKey ||
+      displayTemplateVersion !== source.displayTemplateVersion ||
+      !isDeepStrictEqual(
+        displayTemplateConfig,
+        source.displayTemplateConfig ?? {},
+      );
+    if (changesDisplayTemplate)
+      await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.CATEGORY,
@@ -4303,8 +4362,7 @@ export class ContentService {
           : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
-      displayTemplateConfig:
-        dto.displayTemplateConfig ?? source.displayTemplateConfig,
+      displayTemplateConfig,
     };
     const baseline =
       !current &&
@@ -5267,7 +5325,7 @@ export class ContentService {
     actor: Actor,
     dto: UpdateNotFoundTemplateDto,
   ) {
-    await this.requireSite(siteId, actor, SitePermission.EDIT_CODE);
+    await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     const page = await this.pages.findOne({ where: { siteId, slug: '404' } });
     if (!page) throw new NotFoundException('Страница 404 не найдена');
     const template = NOT_FOUND_TEMPLATES.find(

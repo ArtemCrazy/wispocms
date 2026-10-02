@@ -105,9 +105,6 @@ export class UpdateManagedUserDto {
   siteIds!: string[];
 
   @IsBoolean()
-  canEditCode!: boolean;
-
-  @IsBoolean()
   requiresApproval!: boolean;
 
   @IsBoolean()
@@ -120,10 +117,6 @@ export class SiteAccessAssignmentDto {
 
   @IsEnum(SiteRole)
   role!: SiteRole;
-
-  @IsOptional()
-  @IsBoolean()
-  canEditCode?: boolean;
 
   @IsOptional()
   @IsBoolean()

@@ -53,13 +53,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export function NotFoundPageView({
   siteId,
   canEdit = true,
-  canEditCode = true,
+  canManageStructure = true,
   canApprove = true,
   canPublishDirectly = false,
 }: {
   siteId?: string;
   canEdit?: boolean;
-  canEditCode?: boolean;
+  canManageStructure?: boolean;
   canApprove?: boolean;
   canPublishDirectly?: boolean;
 }) {
@@ -180,7 +180,7 @@ export function NotFoundPageView({
             <small>Версия {state.template.version}</small>
           </div>
 
-          <fieldset disabled={!canEditCode || busy}>
+          <fieldset disabled={!canManageStructure || busy}>
             <legend>Сменить шаблон</legend>
             {state.templates.map((template) => (
               <label
@@ -205,7 +205,7 @@ export function NotFoundPageView({
             {dirty ? (
               <button
                 type="button"
-                disabled={!canEditCode || busy}
+                disabled={!canManageStructure || busy}
                 onClick={() =>
                   void saveDraft({
                     templateKey: selectedKey,
@@ -309,7 +309,7 @@ export function NotFoundPageView({
         siteId={siteId}
         resource="not-found"
         label="Страница 404"
-        canEdit={canEdit || canEditCode}
+        canEdit={canEdit || canManageStructure}
         canApprove={canApprove}
         canPublishDirectly={canPublishDirectly}
         dirty={dirty}

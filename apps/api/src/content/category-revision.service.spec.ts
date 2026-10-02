@@ -1,15 +1,21 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import {
   CategoryEntity,
   CategoryStatus,
   PlatformRole,
   PublicationState,
+  SiteRole,
   SiteType,
 } from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('category revision adapter', () => {
   const actor = { userId: 'admin-id', platformRole: PlatformRole.WISPO_ADMIN };
+  const member = { userId: 'member-id', platformRole: PlatformRole.MEMBER };
   const publishedCategory = Object.assign(new CategoryEntity(), {
     id: 'category-id',
     siteId: 'site-id',
@@ -40,7 +46,7 @@ describe('category revision adapter', () => {
     updatedAt: new Date('2026-09-01T00:00:00.000Z'),
   });
 
-  function setup(category = publishedCategory) {
+  function setup(category = publishedCategory, role: SiteRole | null = null) {
     const draft = {
       id: 'draft-id',
       versionNumber: 2,
@@ -113,7 +119,18 @@ describe('category revision adapter', () => {
           layoutSettings: {},
         }),
       } as never,
-      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue(
+          role
+            ? {
+                userId: member.userId,
+                siteId: 'site-id',
+                role,
+                requiresApproval: false,
+              }
+            : null,
+        ),
+      } as never,
       categories as never,
       {} as never,
       articles as never,
@@ -183,6 +200,59 @@ describe('category revision adapter', () => {
     );
   });
 
+  it('forces the system category template when a content manager creates a category', async () => {
+    const { service, manager } = setup(
+      publishedCategory,
+      SiteRole.CONTENT_MANAGER,
+    );
+    manager.save.mockImplementation((value: CategoryEntity) =>
+      Promise.resolve(
+        value.slug
+          ? Object.assign(value, { id: 'created-category-id' })
+          : value,
+      ),
+    );
+
+    await expect(
+      service.createCategory('site-id', member, {
+        name: 'New category',
+        slug: 'new-category',
+        displayTemplateKey: 'privileged-category',
+        displayTemplateVersion: '9',
+        displayTemplateConfig: { layout: 'custom' },
+      }),
+    ).resolves.toMatchObject({
+      displayTemplateKey: 'standard-category',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: {},
+    });
+  });
+
+  it('keeps a site owner choice of an active category template on create', async () => {
+    const { service, manager } = setup(publishedCategory, SiteRole.OWNER);
+    manager.save.mockImplementation((value: CategoryEntity) =>
+      Promise.resolve(
+        value.slug
+          ? Object.assign(value, { id: 'created-category-id' })
+          : value,
+      ),
+    );
+
+    await expect(
+      service.createCategory('site-id', member, {
+        name: 'New category',
+        slug: 'new-category',
+        displayTemplateKey: 'feature-category',
+        displayTemplateVersion: '3',
+        displayTemplateConfig: { cards: 4 },
+      }),
+    ).resolves.toMatchObject({
+      displayTemplateKey: 'feature-category',
+      displayTemplateVersion: '3',
+      displayTemplateConfig: { cards: 4 },
+    });
+  });
+
   it('saves a published category edit only as a new revision', async () => {
     const { service, manager, revisions } = setup();
     const result = await service.updateCategory(
@@ -213,6 +283,84 @@ describe('category revision adapter', () => {
       slug: 'next-category',
     });
     expect(savedDraft.expectedDraftRevisionId).toBe('draft-id');
+  });
+
+  it('denies a category template change by a content manager', async () => {
+    const { service, revisions } = setup(
+      publishedCategory,
+      SiteRole.CONTENT_MANAGER,
+    );
+
+    await expect(
+      service.updateCategory('site-id', 'category-id', member, {
+        name: 'Draft category',
+        slug: 'draft-category',
+        displayTemplateKey: 'feature-category',
+        displayTemplateVersion: '3',
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(revisions.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('denies a category template config change by a content manager', async () => {
+    const category = Object.assign(new CategoryEntity(), publishedCategory, {
+      displayTemplateConfig: { compact: false },
+    });
+    const { service, revisions } = setup(category, SiteRole.CONTENT_MANAGER);
+
+    await expect(
+      service.updateCategory('site-id', 'category-id', member, {
+        name: 'Draft category',
+        slug: 'draft-category',
+        displayTemplateConfig: { compact: true },
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(revisions.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('allows a content manager to save category content when template config is structurally unchanged', async () => {
+    const category = Object.assign(new CategoryEntity(), publishedCategory, {
+      displayTemplateConfig: {
+        compact: true,
+        palette: { primary: 'violet', secondary: 'white' },
+      },
+    });
+    const { service, revisions } = setup(category, SiteRole.CONTENT_MANAGER);
+
+    await expect(
+      service.updateCategory('site-id', 'category-id', member, {
+        name: 'Draft category updated',
+        slug: 'draft-category',
+        displayTemplateConfig: {
+          palette: { secondary: 'white', primary: 'violet' },
+          compact: true,
+        },
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).resolves.toMatchObject({ name: 'Draft category updated' });
+    expect(revisions.saveDraft).toHaveBeenCalled();
+  });
+
+  it('allows a site owner to change the category template', async () => {
+    const { service, revisions } = setup(publishedCategory, SiteRole.OWNER);
+
+    await expect(
+      service.updateCategory('site-id', 'category-id', member, {
+        name: 'Draft category',
+        slug: 'draft-category',
+        displayTemplateKey: 'feature-category',
+        displayTemplateVersion: '3',
+        displayTemplateConfig: { cards: 4 },
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).resolves.toMatchObject({
+      displayTemplateKey: 'feature-category',
+      displayTemplateVersion: '3',
+      displayTemplateConfig: { cards: 4 },
+    });
+    expect(revisions.saveDraft).toHaveBeenCalled();
   });
 
   it('rejects a stale category edit before saving a revision', async () => {

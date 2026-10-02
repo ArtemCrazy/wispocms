@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CodeResourcesEditor } from "./code-resources-editor";
 import { SiteSettingsRevisionPanel } from "./site-settings-revision-panel";
 
 type TemplateTarget =
@@ -54,13 +53,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function MediaTemplatesView({
   siteId,
-  canEdit,
+  canManageStructure,
   canApprove,
   canPublishDirectly,
   onOpen,
 }: {
   siteId: string;
-  canEdit: boolean;
+  canManageStructure: boolean;
   canApprove: boolean;
   canPublishDirectly: boolean;
   onOpen: (target: TemplateTarget) => void;
@@ -240,7 +239,7 @@ export function MediaTemplatesView({
                   Шапка
                   <select
                     value={headerIdentity}
-                    disabled={!canEdit || saving}
+                    disabled={!canManageStructure || saving}
                     onChange={(event) => setHeaderIdentity(event.target.value)}
                   >
                     <option value="">Не выбрана</option>
@@ -258,7 +257,7 @@ export function MediaTemplatesView({
                   Подвал
                   <select
                     value={footerIdentity}
-                    disabled={!canEdit || saving}
+                    disabled={!canManageStructure || saving}
                     onChange={(event) => setFooterIdentity(event.target.value)}
                   >
                     <option value="">Не выбран</option>
@@ -274,7 +273,7 @@ export function MediaTemplatesView({
                 </label>
                 <button
                   type="button"
-                  disabled={!canEdit || saving}
+                  disabled={!canManageStructure || saving}
                   onClick={() => void saveLayoutTemplates()}
                 >
                   {saving ? "Сохраняем…" : "Применить"}
@@ -296,7 +295,7 @@ export function MediaTemplatesView({
         siteId={siteId}
         basePath={`metadata/layout-bindings/${siteId}`}
         label="Шаблоны шапки и подвала"
-        canEdit={canEdit}
+        canEdit={canManageStructure}
         canApprove={canApprove}
         canPublishDirectly={canPublishDirectly}
         dirty={
@@ -305,12 +304,6 @@ export function MediaTemplatesView({
         }
         refreshToken={layoutDraftRevisionId}
         onChanged={load}
-      />
-      <CodeResourcesEditor
-        siteId={siteId}
-        canEdit={canEdit}
-        canApprove={canApprove}
-        canPublishDirectly={canPublishDirectly}
       />
     </section>
   );

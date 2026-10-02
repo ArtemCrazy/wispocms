@@ -612,7 +612,7 @@ export class PrivacyService {
     const site = await this.requireSite(
       siteId,
       actor,
-      SitePermission.EDIT_CONTENT,
+      SitePermission.MANAGE_STRUCTURE,
     );
     const template = privacyDisplayTemplates.find(
       (candidate) =>

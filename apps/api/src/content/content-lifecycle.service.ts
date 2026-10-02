@@ -151,6 +151,21 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     return site;
   }
 
+  private async canManageStructure(siteId: string, actor: ContentActor) {
+    if (actor.platformRole === PlatformRole.WISPO_ADMIN) return true;
+    const access = await this.siteAccesses.findOne({
+      where: { userId: actor.userId, siteId },
+    });
+    return (
+      accessCoversSite(access, siteId) &&
+      hasSitePermission(
+        actor.platformRole,
+        access,
+        SitePermission.MANAGE_STRUCTURE,
+      )
+    );
+  }
+
   articleSnapshot(article: ArticleEntity): Record<string, unknown> {
     return {
       title: article.title,
@@ -479,6 +494,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     site: SiteEntity,
     article: ArticleEntity,
     snapshot: Record<string, unknown>,
+    canManageStructure = true,
   ) {
     const stringValue = (key: string, fallback: string) =>
       typeof snapshot[key] === 'string' ? snapshot[key] : fallback;
@@ -556,14 +572,12 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       )
         throw new NotFoundException('Изображение версии статьи не найдено');
 
-    const displayTemplateKey = stringValue(
-      'displayTemplateKey',
-      article.displayTemplateKey,
-    );
-    const displayTemplateVersion = stringValue(
-      'displayTemplateVersion',
-      article.displayTemplateVersion,
-    );
+    const displayTemplateKey = canManageStructure
+      ? stringValue('displayTemplateKey', article.displayTemplateKey)
+      : article.displayTemplateKey;
+    const displayTemplateVersion = canManageStructure
+      ? stringValue('displayTemplateVersion', article.displayTemplateVersion)
+      : article.displayTemplateVersion;
     if (
       !(await manager.exists(SiteContentTemplateEntity, {
         where: {
@@ -598,6 +612,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       displayTemplateKey,
       displayTemplateVersion,
       displayTemplateConfig:
+        canManageStructure &&
         snapshot.displayTemplateConfig !== null &&
         typeof snapshot.displayTemplateConfig === 'object' &&
         !Array.isArray(snapshot.displayTemplateConfig)
@@ -1287,6 +1302,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
       actor,
       SitePermission.EDIT_CONTENT,
     );
+    const canManageStructure = await this.canManageStructure(siteId, actor);
     return this.dataSource.transaction(async (manager) => {
       const article = await manager.findOne(ArticleEntity, {
         where: { id: articleId, siteId, deletedAt: IsNull() },
@@ -1308,6 +1324,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
         site,
         article,
         version.snapshot,
+        canManageStructure,
       );
       const slugChanged = restored.slug !== article.slug;
       if (slugChanged) {
@@ -1479,6 +1496,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     dto: DuplicateContentDto,
   ) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
+    const canManageStructure = await this.canManageStructure(siteId, actor);
     return this.dataSource.transaction(async (manager) => {
       const source = await manager.findOne(ArticleEntity, {
         where: { id: articleId, siteId, deletedAt: IsNull() },
@@ -1508,6 +1526,15 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           status: ArticleStatus.DRAFT,
           publicationState: PublicationState.DRAFT,
           editorialState: EditorialState.DRAFT,
+          displayTemplateKey: canManageStructure
+            ? source.displayTemplateKey
+            : 'standard-article',
+          displayTemplateVersion: canManageStructure
+            ? source.displayTemplateVersion
+            : '1',
+          displayTemplateConfig: canManageStructure
+            ? (source.displayTemplateConfig ?? {})
+            : {},
           publishedAt: null,
           revision: 0,
           deletedAt: null,
@@ -1559,6 +1586,7 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
     dto: DuplicateContentDto,
   ) {
     await this.requireSite(siteId, actor, SitePermission.EDIT_CONTENT);
+    const canManageStructure = await this.canManageStructure(siteId, actor);
     return this.dataSource.transaction(async (manager) => {
       const source = await manager.findOne(CategoryEntity, {
         where: { id: categoryId, siteId, deletedAt: IsNull() },
@@ -1588,6 +1616,15 @@ export class ContentLifecycleService implements OnModuleInit, OnModuleDestroy {
           slug: dto.slug,
           status: CategoryStatus.DRAFT,
           publicationState: PublicationState.DRAFT,
+          displayTemplateKey: canManageStructure
+            ? source.displayTemplateKey
+            : 'standard-category',
+          displayTemplateVersion: canManageStructure
+            ? source.displayTemplateVersion
+            : '1',
+          displayTemplateConfig: canManageStructure
+            ? (source.displayTemplateConfig ?? {})
+            : {},
           publishedAt: null,
           deletedAt: null,
           deletedByUserId: null,

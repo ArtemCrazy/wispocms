@@ -157,7 +157,6 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
         site_accesses: Array<{
           siteId: string;
           role: 'site_owner' | 'content_manager';
-          canEditCode: boolean;
           requiresApproval: boolean;
         }>;
         workspace_site_ids: string[];
@@ -170,7 +169,6 @@ export class ContentCenterService implements OnModuleInit, OnModuleDestroy {
           SELECT jsonb_agg(jsonb_build_object(
             'siteId', sa.site_id,
             'role', sa.role,
-            'canEditCode', sa.can_edit_code,
             'requiresApproval', sa.requires_approval
           ))
           FROM site_accesses sa

@@ -366,9 +366,7 @@ function Dashboard({
   const canEdit = capabilities.canEditContent;
   const canApprove = capabilities.canApprove;
   const canEditPublished = capabilities.canPublishDirectly;
-  const canViewCode = capabilities.canViewCode;
-  const canPublishCodeDirectly = capabilities.canPublishCodeDirectly;
-  const canEditCode = capabilities.canEditCode;
+  const canManageStructure = capabilities.canManageStructure;
   const canManageSettings = capabilities.canManageSettings;
   const contentMotionKey = [
     selectedWorkspaceId ?? "platform",
@@ -711,7 +709,7 @@ function Dashboard({
   const siteMenus: Record<string, SiteMenuItem[]> = {
     media: [
       { id: "site", icon: "template", label: "Сайт" },
-      { id: "templates", icon: "template", label: "Шаблоны и чанки" },
+      { id: "templates", icon: "template", label: "Шаблоны" },
       { id: "homepage", icon: "home", label: "Главная" },
       { id: "articles", icon: "blog", label: "Статьи" },
       ...mediaSystemPages,
@@ -760,7 +758,7 @@ function Dashboard({
   ).filter(
     (item) =>
       (item.id !== "banners" || hasBannerSlots) &&
-      (item.id !== "templates" || canViewCode) &&
+      (item.id !== "templates" || canManageStructure) &&
       (!["settings", "integration"].includes(item.id) || canManageSettings),
   );
   const siteTopTabs = (
@@ -2458,7 +2456,7 @@ function Dashboard({
               siteName={site.name}
               siteSlug={site.slug}
               canEdit={canEdit}
-              canEditCode={canEditCode}
+              canManageStructure={canManageStructure}
               canApprove={canApprove}
               canEditPublished={canEditPublished}
               onCountChange={setContentCount}
@@ -2486,6 +2484,7 @@ function Dashboard({
               siteName={site?.name}
               siteSlug={site?.slug}
               canEdit={canEdit}
+              canManageStructure={canManageStructure}
               canApprove={canApprove}
               canEditPublished={canEditPublished}
               onCountChange={setContentCount}
@@ -2513,6 +2512,7 @@ function Dashboard({
             siteId={site?.id}
             siteName={site?.name}
             canEdit={canEdit}
+            canManageStructure={canManageStructure}
             canApprove={canApprove}
             canPublishDirectly={canEditPublished}
             canManageLegalModels={isWispoAdmin}
@@ -2522,24 +2522,24 @@ function Dashboard({
           <NotFoundPageView
             siteId={site?.id}
             canEdit={canEdit}
-            canEditCode={canEditCode}
+            canManageStructure={canManageStructure}
             canApprove={canApprove}
             canPublishDirectly={canEditPublished}
           />
         ) : activeView === "site" && site?.siteType === "media" ? (
           <MediaSiteView
             siteName={site.name}
-            showTemplates={canViewCode}
+            showTemplates={canManageStructure}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "templates" &&
           site?.siteType === "media" &&
-          canViewCode ? (
+          canManageStructure ? (
           <MediaTemplatesView
             siteId={site.id}
-            canEdit={canEditCode}
+            canManageStructure={canManageStructure}
             canApprove={canApprove}
-            canPublishDirectly={canPublishCodeDirectly}
+            canPublishDirectly={canEditPublished}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "homepage-template" && site?.siteType === "media" ? (

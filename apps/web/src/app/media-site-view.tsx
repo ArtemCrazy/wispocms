@@ -27,8 +27,8 @@ export function MediaSiteView({
       {
         id: "templates",
         icon: "template",
-        title: "Шаблоны и чанки",
-        description: "Страницы, общие области и системные шаблоны сайта.",
+        title: "Шаблоны",
+        description: "Выбор готовых шаблонов страниц и общих областей сайта.",
       },
       {
         id: "variables",

@@ -96,28 +96,24 @@ describe('CMS revision storage', () => {
           return {
             role: SiteRole.OWNER,
             siteId: 'site-1',
-            canEditCode: true,
             requiresApproval: false,
           };
         if (userId === ownerReviewer.userId)
           return {
             role: SiteRole.OWNER,
             siteId: 'site-1',
-            canEditCode: false,
             requiresApproval: false,
           };
         if (userId === manager.userId)
           return {
             role: SiteRole.CONTENT_MANAGER,
             siteId: 'site-1',
-            canEditCode: false,
             requiresApproval: true,
           };
         if (userId === independentManager.userId)
           return {
             role: SiteRole.CONTENT_MANAGER,
             siteId: 'site-1',
-            canEditCode: false,
             requiresApproval: false,
           };
         return null;
@@ -481,78 +477,273 @@ describe('CMS revision storage', () => {
     ).toEqual({ title: 'Original' });
   });
 
-  it('does not let a content manager edit a code resource', async () => {
+  it('keeps the current template assignment when a content manager restores article content', async () => {
     const { service } = setup();
+    const first = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-1',
+      snapshot: {
+        title: 'Original',
+        displayTemplateKey: 'historic-article',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: { hero: 'historic' },
+      },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+    const current = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-1',
+      snapshot: {
+        title: 'Current',
+        displayTemplateKey: 'standard-article',
+        displayTemplateVersion: '3',
+        displayTemplateConfig: { hero: 'current' },
+      },
+      expectedDraftRevisionId: first.id,
+      actor: manager,
+    });
+
+    await service.restore(
+      'site-1',
+      'article',
+      'article-1',
+      first.id,
+      current.id,
+      manager,
+    );
+
     await expect(
-      service.saveDraft({
-        siteId: 'site-1',
-        resourceType: 'chunk',
-        entityId: 'chunk-1',
-        snapshot: { html: '<div>Restricted</div>' },
-        expectedDraftRevisionId: null,
-        actor: manager,
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+      service.current('site-1', 'article', 'article-1', manager),
+    ).resolves.toMatchObject({
+      draft: {
+        snapshot: {
+          title: 'Original',
+          displayTemplateKey: 'standard-article',
+          displayTemplateVersion: '3',
+          displayTemplateConfig: { hero: 'current' },
+        },
+      },
+    });
   });
 
-  it('does not reveal code history to a content manager', async () => {
+  it('keeps the current category template when a content manager restores category content', async () => {
     const { service } = setup();
-    await service.saveDraft({
+    const first = await service.saveDraft({
       siteId: 'site-1',
-      resourceType: 'chunk',
-      entityId: 'chunk-1',
-      snapshot: { html: '<h1>Private source</h1>' },
+      resourceType: 'category',
+      entityId: 'category-1',
+      snapshot: {
+        name: 'Historic category',
+        displayTemplateKey: 'historic-category',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: { cards: 2 },
+      },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+    const current = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'category',
+      entityId: 'category-1',
+      snapshot: {
+        name: 'Current category',
+        displayTemplateKey: 'standard-category',
+        displayTemplateVersion: '3',
+        displayTemplateConfig: { cards: 5 },
+      },
+      expectedDraftRevisionId: first.id,
+      actor: manager,
+    });
+
+    await service.restore(
+      'site-1',
+      'category',
+      'category-1',
+      first.id,
+      current.id,
+      manager,
+    );
+
+    await expect(
+      service.current('site-1', 'category', 'category-1', manager),
+    ).resolves.toMatchObject({
+      draft: {
+        snapshot: {
+          name: 'Historic category',
+          displayTemplateKey: 'standard-category',
+          displayTemplateVersion: '3',
+          displayTemplateConfig: { cards: 5 },
+        },
+      },
+    });
+  });
+
+  it('restores the historical template assignment for a site owner', async () => {
+    const { service } = setup();
+    const first = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'site_privacy',
+      entityId: 'privacy-1',
+      snapshot: {
+        title: 'Historic policy',
+        displayTemplate: {
+          key: 'historic-policy',
+          version: '2',
+          config: { legal: 'historic' },
+        },
+      },
       expectedDraftRevisionId: null,
       actor: owner,
     });
-    await expect(
-      service.listVersions('site-1', 'chunk', 'chunk-1', manager),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('lets an owner review and publish submitted code without code editing rights', async () => {
-    const { service } = setup();
-    const draft = await service.saveDraft({
+    const current = await service.saveDraft({
       siteId: 'site-1',
-      resourceType: 'chunk',
-      entityId: 'chunk-1',
-      snapshot: { html: '<h1>Review me</h1>' },
-      expectedDraftRevisionId: null,
+      resourceType: 'site_privacy',
+      entityId: 'privacy-1',
+      snapshot: {
+        title: 'Current policy',
+        displayTemplate: {
+          key: 'system-policy',
+          version: '4',
+          config: { legal: 'current' },
+        },
+      },
+      expectedDraftRevisionId: first.id,
       actor: owner,
     });
-    await service.submit('site-1', 'chunk', 'chunk-1', draft.id, owner);
+
+    await service.restore(
+      'site-1',
+      'site_privacy',
+      'privacy-1',
+      first.id,
+      current.id,
+      owner,
+    );
 
     await expect(
-      service.current('site-1', 'chunk', 'chunk-1', ownerReviewer),
-    ).resolves.toMatchObject({ reviewState: 'in_review' });
-    await expect(
-      service.saveDraft({
-        siteId: 'site-1',
-        resourceType: 'chunk',
-        entityId: 'chunk-1',
-        snapshot: { html: '<h1>Owner edit</h1>' },
-        expectedDraftRevisionId: draft.id,
-        actor: ownerReviewer,
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+      service.current('site-1', 'site_privacy', 'privacy-1', owner),
+    ).resolves.toMatchObject({
+      draft: {
+        snapshot: {
+          title: 'Historic policy',
+          displayTemplate: {
+            key: 'historic-policy',
+            version: '2',
+            config: { legal: 'historic' },
+          },
+        },
+      },
+    });
+  });
 
-    await service.approve(
+  it('keeps the current privacy template when a content manager restores policy content', async () => {
+    const { service } = setup();
+    const first = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'site_privacy',
+      entityId: 'privacy-1',
+      snapshot: {
+        title: 'Historic policy',
+        displayTemplate: {
+          key: 'historic-policy',
+          version: '2',
+          config: { legal: 'historic' },
+        },
+      },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+    const current = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'site_privacy',
+      entityId: 'privacy-1',
+      snapshot: {
+        title: 'Current policy',
+        displayTemplate: {
+          key: 'system-policy',
+          version: '4',
+          config: { legal: 'current' },
+        },
+      },
+      expectedDraftRevisionId: first.id,
+      actor: manager,
+    });
+
+    await service.restore(
       'site-1',
-      'chunk',
-      'chunk-1',
-      draft.id,
-      ownerReviewer,
+      'site_privacy',
+      'privacy-1',
+      first.id,
+      current.id,
+      manager,
     );
-    await service.publish(
-      'site-1',
-      'chunk',
-      'chunk-1',
-      draft.id,
-      ownerReviewer,
-    );
+
     await expect(
-      service.published('site-1', 'chunk', 'chunk-1', ownerReviewer),
-    ).resolves.toEqual({ html: '<h1>Review me</h1>' });
+      service.current('site-1', 'site_privacy', 'privacy-1', manager),
+    ).resolves.toMatchObject({
+      draft: {
+        snapshot: {
+          title: 'Historic policy',
+          displayTemplate: {
+            key: 'system-policy',
+            version: '4',
+            config: { legal: 'current' },
+          },
+        },
+      },
+    });
+  });
+
+  it('keeps the current 404 template when a content manager restores its content', async () => {
+    const { service } = setup();
+    const first = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'site_not_found',
+      entityId: 'not-found-1',
+      snapshot: {
+        title: 'Historic 404',
+        templateKey: 'historic-not-found',
+        templateVersion: '1',
+      },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+    const current = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'site_not_found',
+      entityId: 'not-found-1',
+      snapshot: {
+        title: 'Current 404',
+        templateKey: 'system-not-found',
+        templateVersion: '4',
+      },
+      expectedDraftRevisionId: first.id,
+      actor: manager,
+    });
+
+    await service.restore(
+      'site-1',
+      'site_not_found',
+      'not-found-1',
+      first.id,
+      current.id,
+      manager,
+    );
+
+    await expect(
+      service.current('site-1', 'site_not_found', 'not-found-1', manager),
+    ).resolves.toMatchObject({
+      draft: {
+        snapshot: {
+          title: 'Historic 404',
+          templateKey: 'system-not-found',
+          templateVersion: '4',
+        },
+      },
+    });
   });
 
   it('lists the immutable snapshots of only the requested resource newest first', async () => {

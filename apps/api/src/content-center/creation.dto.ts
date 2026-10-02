@@ -80,8 +80,12 @@ export class PublishCreatedArticleDto extends CreationRevisionDto {
   @MaxLength(160)
   @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   slug!: string;
-  @IsString() @MinLength(1) @MaxLength(80) templateKey!: string;
-  @IsString() @MinLength(1) @MaxLength(40) templateVersion!: string;
+  @IsOptional() @IsString() @MinLength(1) @MaxLength(80) templateKey?: string;
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  templateVersion?: string;
 }
 export class RestructureClustersDto {
   @IsIn(['split', 'merge']) kind!: 'split' | 'merge';

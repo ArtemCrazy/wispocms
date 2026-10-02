@@ -176,6 +176,7 @@ export function PrivacyPolicyView({
   siteId,
   siteName,
   canEdit = true,
+  canManageStructure = false,
   canApprove = false,
   canPublishDirectly = false,
   canManageLegalModels = false,
@@ -184,6 +185,7 @@ export function PrivacyPolicyView({
   siteId?: string;
   siteName?: string;
   canEdit?: boolean;
+  canManageStructure?: boolean;
   canApprove?: boolean;
   canPublishDirectly?: boolean;
   canManageLegalModels?: boolean;
@@ -204,6 +206,9 @@ export function PrivacyPolicyView({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [draftRevisionId, setDraftRevisionId] = useState<string | null>(null);
+  const availablePrivacyTabs = privacyTabs.filter(
+    ([id]) => canManageStructure || id !== "template",
+  );
 
   const applyState = useCallback((next: PrivacyState) => {
     setState(next);
@@ -346,7 +351,7 @@ export function PrivacyPolicyView({
   }
 
   async function saveTemplate() {
-    if (!siteId || !state || !canEdit) return;
+    if (!siteId || !state || !canManageStructure) return;
     const template = state.displayTemplates.find(
       (candidate) => candidate.key === templateKey,
     );
@@ -517,7 +522,7 @@ export function PrivacyPolicyView({
       ) : null}
 
       <div className="privacy-tabs" role="tablist" aria-label="Разделы политики">
-        {privacyTabs.map(([id, label], index) => (
+        {availablePrivacyTabs.map(([id, label], index) => (
           <button
             key={id}
             type="button"
@@ -532,15 +537,16 @@ export function PrivacyPolicyView({
                 event.key === "Home"
                   ? 0
                   : event.key === "End"
-                    ? privacyTabs.length - 1
+                    ? availablePrivacyTabs.length - 1
                     : event.key === "ArrowRight"
-                      ? (index + 1) % privacyTabs.length
+                      ? (index + 1) % availablePrivacyTabs.length
                       : event.key === "ArrowLeft"
-                        ? (index - 1 + privacyTabs.length) % privacyTabs.length
+                        ? (index - 1 + availablePrivacyTabs.length) %
+                          availablePrivacyTabs.length
                         : -1;
               if (nextIndex < 0) return;
               event.preventDefault();
-              const next = privacyTabs[nextIndex][0];
+              const next = availablePrivacyTabs[nextIndex][0];
               setTab(next);
               document.getElementById(`privacy-tab-${next}`)?.focus();
             }}
@@ -556,7 +562,7 @@ export function PrivacyPolicyView({
         </div>
       ) : null}
 
-      {tab === "template" ? (
+      {tab === "template" && canManageStructure ? (
         <div
           className="privacy-panel"
           role="tabpanel"
@@ -577,7 +583,7 @@ export function PrivacyPolicyView({
                     name="privacy-template"
                     value={template.key}
                     checked={templateKey === template.key}
-                    disabled={!canEdit}
+                    disabled={!canManageStructure}
                     onChange={() => {
                       setTemplateKey(template.key);
                       setTemplateDirty(true);
@@ -593,7 +599,7 @@ export function PrivacyPolicyView({
                 <input
                   type="checkbox"
                   checked={Boolean(templateConfig.showSectionNumbers)}
-                  disabled={!canEdit}
+                  disabled={!canManageStructure}
                   onChange={(event) => {
                     setTemplateConfig((current) => ({
                       ...current,
@@ -608,7 +614,7 @@ export function PrivacyPolicyView({
                 <span>Акцент</span>
                 <select
                   value={templateConfig.accentTone ?? "violet"}
-                  disabled={!canEdit}
+                  disabled={!canManageStructure}
                   onChange={(event) => {
                     setTemplateConfig((current) => ({
                       ...current,
@@ -631,7 +637,7 @@ export function PrivacyPolicyView({
               <h4>{templateConfig.showSectionNumbers ? "1. " : ""}Общие положения</h4>
               <p>Так будет выглядеть структура документа на публичной странице.</p>
             </div>
-            {canEdit ? (
+            {canManageStructure ? (
               <div className="settings-actions">
                 <span className={templateDirty ? "unsaved-indicator" : ""}>
                   {templateDirty ? "● Шаблон не сохранён" : "Шаблон сохранён"}

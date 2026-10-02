@@ -126,6 +126,31 @@ test("article exposes per-proposal decisions, unpublished current-version notice
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /type="file"/);
 });
+test("publication template control is hidden without structure permission and empty templates do not block publishing", () => {
+  const { CreationPublicationTemplateField } = load("creation-article");
+  const restricted = renderToStaticMarkup(
+    React.createElement(CreationPublicationTemplateField, {
+      canManageStructure: false,
+      templates: [],
+      value: "",
+      disabled: false,
+      onChange() {},
+    }),
+  );
+  const owner = renderToStaticMarkup(
+    React.createElement(CreationPublicationTemplateField, {
+      canManageStructure: true,
+      templates: [{ key: "editorial", version: "1", name: "Статья" }],
+      value: "editorial:1",
+      disabled: false,
+      onChange() {},
+    }),
+  );
+  assert.equal(restricted, "");
+  assert.ok(owner.includes("Шаблон статьи"));
+  assert.equal(state.publicationBlockedByTemplates(false, []), false);
+  assert.equal(state.publicationBlockedByTemplates(true, []), true);
+});
 test("run history does not expand; history has all three specified tabs and filters", () => {
   const html = renderToStaticMarkup(
     React.createElement(load("creation-history").CreationHistory, {

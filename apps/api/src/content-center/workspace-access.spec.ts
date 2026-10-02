@@ -12,7 +12,6 @@ describe('content center workspace scope', () => {
       const grant = (siteId: string) => ({
         siteId,
         role,
-        canEditCode: false,
         requiresApproval: false,
       });
       expect(canAccessContentCenter(employee, [grant('a')], ['a'])).toBe(true);
@@ -25,7 +24,7 @@ describe('content center workspace scope', () => {
       ).toBe(true);
     },
   );
-  it('keeps access when site flags differ', () => {
+  it('keeps access when site approval rules differ', () => {
     expect(
       canAccessContentCenter(
         employee,
@@ -33,13 +32,11 @@ describe('content center workspace scope', () => {
           {
             siteId: 'a',
             role: SiteRole.CONTENT_MANAGER,
-            canEditCode: false,
             requiresApproval: true,
           },
           {
             siteId: 'b',
             role: SiteRole.CONTENT_MANAGER,
-            canEditCode: true,
             requiresApproval: false,
           },
         ],

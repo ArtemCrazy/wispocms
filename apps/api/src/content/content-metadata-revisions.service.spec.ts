@@ -111,7 +111,7 @@ describe('ContentMetadataRevisionsService', () => {
     expect(revisions.assertSitePermission).toHaveBeenCalledWith(
       'site-id',
       actor,
-      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_STRUCTURE,
     );
   });
 

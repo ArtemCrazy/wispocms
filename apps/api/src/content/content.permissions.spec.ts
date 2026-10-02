@@ -27,78 +27,32 @@ describe('content permissions', () => {
     }
   });
 
-  it('does not turn a legacy workspace membership into full site access', () => {
-    expect(
-      hasSitePermission(
-        PlatformRole.EMPLOYEE,
-        WorkspaceRole.EMPLOYEE,
-        SitePermission.APPROVE,
-      ),
-    ).toBe(false);
-  });
-
   it('does not authorize legacy workspace roles without explicit site assignments', () => {
-    for (const role of [
-      WorkspaceRole.WORKSPACE_ADMIN,
-      WorkspaceRole.DEVELOPER,
-      WorkspaceRole.CONTENT_MANAGER,
-      WorkspaceRole.CLIENT_APPROVER,
-    ]) {
+    for (const role of Object.values(WorkspaceRole)) {
       expect(
         hasSitePermission(PlatformRole.EMPLOYEE, role, SitePermission.READ),
       ).toBe(false);
     }
   });
 
-  it('keeps code editing and user administration closed while allowing the owner to publish an approved code revision', () => {
+  it('lets the owner manage predefined site structure without exposing code permissions', () => {
     const access: SiteAccessGrant = {
       role: 'site_owner',
-      canEditCode: false,
       requiresApproval: false,
     };
     for (const permission of [
       SitePermission.READ,
       SitePermission.EDIT_CONTENT,
+      SitePermission.EDIT_PUBLISHED,
       SitePermission.APPROVE,
+      SitePermission.PUBLISH_CONTENT,
       SitePermission.MANAGE_SETTINGS,
-      SitePermission.PUBLISH_CODE,
-      SitePermission.VIEW_CODE,
-      'publish_content',
-    ] as SitePermission[]) {
+      SitePermission.MANAGE_STRUCTURE,
+    ]) {
       expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
         true,
       );
     }
-    for (const permission of [
-      SitePermission.EDIT_CODE,
-      SitePermission.MANAGE_USERS,
-    ]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
-        false,
-      );
-    }
-  });
-
-  it('grants code editing to an owner only through the explicit flag', () => {
-    const access: SiteAccessGrant = {
-      role: 'site_owner',
-      canEditCode: true,
-      requiresApproval: false,
-    };
-    expect(
-      hasSitePermission(
-        PlatformRole.EMPLOYEE,
-        access,
-        SitePermission.EDIT_CODE,
-      ),
-    ).toBe(true);
-    expect(
-      hasSitePermission(
-        PlatformRole.EMPLOYEE,
-        access,
-        SitePermission.PUBLISH_CODE,
-      ),
-    ).toBe(true);
     expect(
       hasSitePermission(
         PlatformRole.EMPLOYEE,
@@ -108,32 +62,26 @@ describe('content permissions', () => {
     ).toBe(false);
   });
 
-  it('lets a content manager publish directly when approval is disabled', () => {
+  it('lets an independent content manager publish data but not alter structure', () => {
     const access: SiteAccessGrant = {
       role: 'content_manager',
-      canEditCode: false,
       requiresApproval: false,
     };
-    expect(
-      hasSitePermission(
-        PlatformRole.EMPLOYEE,
-        access,
-        SitePermission.EDIT_CONTENT,
-      ),
-    ).toBe(true);
-    expect(
-      hasSitePermission(
-        PlatformRole.EMPLOYEE,
-        access,
-        SitePermission.PUBLISH_CONTENT,
-      ),
-    ).toBe(true);
+    for (const permission of [
+      SitePermission.READ,
+      SitePermission.EDIT_CONTENT,
+      SitePermission.EDIT_PUBLISHED,
+      SitePermission.PUBLISH_CONTENT,
+    ]) {
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
+        true,
+      );
+    }
     for (const permission of [
       SitePermission.APPROVE,
       SitePermission.MANAGE_SETTINGS,
-      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_STRUCTURE,
       SitePermission.MANAGE_USERS,
-      SitePermission.PUBLISH_CODE,
     ]) {
       expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
         false,
@@ -144,44 +92,24 @@ describe('content permissions', () => {
   it('requires review for a content manager when approval is enabled', () => {
     const access: SiteAccessGrant = {
       role: 'content_manager',
-      canEditCode: true,
       requiresApproval: true,
-    };
-    for (const permission of [
-      SitePermission.EDIT_CONTENT,
-      SitePermission.EDIT_CODE,
-      SitePermission.VIEW_CODE,
-    ]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
-        true,
-      );
-    }
-    for (const permission of [
-      SitePermission.APPROVE,
-      SitePermission.MANAGE_SETTINGS,
-      SitePermission.MANAGE_USERS,
-      SitePermission.PUBLISH_CONTENT,
-      SitePermission.PUBLISH_CODE,
-    ]) {
-      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
-        false,
-      );
-    }
-  });
-
-  it('keeps code hidden from a manager without the explicit code flag', () => {
-    const access: SiteAccessGrant = {
-      role: 'content_manager',
-      canEditCode: false,
-      requiresApproval: false,
     };
     expect(
       hasSitePermission(
         PlatformRole.EMPLOYEE,
         access,
-        SitePermission.VIEW_CODE,
+        SitePermission.EDIT_CONTENT,
       ),
-    ).toBe(false);
+    ).toBe(true);
+    for (const permission of [
+      SitePermission.APPROVE,
+      SitePermission.PUBLISH_CONTENT,
+      SitePermission.MANAGE_STRUCTURE,
+    ]) {
+      expect(hasSitePermission(PlatformRole.EMPLOYEE, access, permission)).toBe(
+        false,
+      );
+    }
   });
 
   it('requires editors to request review and approvers for other transitions', () => {

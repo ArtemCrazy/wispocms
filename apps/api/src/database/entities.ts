@@ -575,9 +575,6 @@ export class SiteAccessEntity {
   @Column({ type: 'varchar', length: 40 })
   role!: SiteRole;
 
-  @Column({ name: 'can_edit_code', type: 'boolean', default: false })
-  canEditCode!: boolean;
-
   @Column({ name: 'requires_approval', type: 'boolean', default: false })
   requiresApproval!: boolean;
 

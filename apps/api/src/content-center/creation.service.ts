@@ -331,11 +331,10 @@ export class CreationService {
     const [siteAccess] = await this.db.query<
       Array<{
         role: 'site_owner' | 'content_manager';
-        canEditCode: boolean;
         requiresApproval: boolean;
       }>
     >(
-      'SELECT role,can_edit_code AS "canEditCode",requires_approval AS "requiresApproval" FROM site_accesses WHERE user_id=$1 AND site_id=$2',
+      'SELECT role,requires_approval AS "requiresApproval" FROM site_accesses WHERE user_id=$1 AND site_id=$2',
       [a.userId, article.site_id],
     );
     const settings = await this.settings(w);
@@ -379,6 +378,20 @@ export class CreationService {
           [w],
         ),
       ]);
+    const siteAccesses = await this.db.query<
+      Array<{
+        siteId: string;
+        role: 'site_owner' | 'content_manager';
+        requiresApproval: boolean;
+      }>
+    >(
+      `SELECT site_id AS "siteId",role,requires_approval AS "requiresApproval"
+       FROM site_accesses WHERE user_id=$1 AND site_id=ANY($2::uuid[])`,
+      [a.userId, siteIds],
+    );
+    const accessBySite = new Map(
+      siteAccesses.map((access) => [access.siteId, access]),
+    );
     return {
       article,
       canPublishDirectly: hasSitePermission(
@@ -389,7 +402,14 @@ export class CreationService {
       version,
       versions,
       correction: correction[0] ?? null,
-      sites,
+      sites: sites.map((site) => ({
+        ...site,
+        canManageStructure: hasSitePermission(
+          a.platformRole,
+          accessBySite.get(site.id) ?? null,
+          SitePermission.MANAGE_STRUCTURE,
+        ),
+      })),
       categories,
       templates,
       media,

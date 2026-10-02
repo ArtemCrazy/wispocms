@@ -18,12 +18,14 @@ import {
   EditorialState,
   PlatformRole,
   PublicationState,
+  SiteRole,
   SiteEntity,
 } from '../database/entities';
 import { ContentLifecycleService } from './content-lifecycle.service';
 
 describe('ContentLifecycleService', () => {
   const actor = { userId: 'admin-id', platformRole: PlatformRole.WISPO_ADMIN };
+  const member = { userId: 'member-id', platformRole: PlatformRole.EMPLOYEE };
 
   it('captures all editable SEO and social fields in an article revision', () => {
     const { service } = setup({ id: 'article-id', siteId: 'site-id' });
@@ -691,6 +693,248 @@ describe('ContentLifecycleService', () => {
       ['siteId', 'fromSlug'],
     );
     expect(versions.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the current article template when a content manager restores a legacy version', async () => {
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Current',
+      slug: 'current',
+      body: 'Current body',
+      bodyDocument: null,
+      publicationState: PublicationState.DRAFT,
+      editorialState: EditorialState.CHANGES,
+      status: ArticleStatus.DRAFT,
+      revision: 5,
+      deletedAt: null,
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '3',
+      displayTemplateConfig: { hero: 'current' },
+    };
+    const { manager, memberships, service, versions } = setup(article);
+    memberships.findOne.mockResolvedValue({
+      userId: member.userId,
+      siteId: 'site-id',
+      role: SiteRole.CONTENT_MANAGER,
+      requiresApproval: false,
+    });
+    versions.findOne.mockResolvedValue({
+      id: 'old-version',
+      articleId: 'article-id',
+      versionNumber: 2,
+      snapshot: {
+        title: 'Historic',
+        slug: 'historic',
+        body: 'Historic body',
+        displayTemplateKey: 'historic-article',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: { hero: 'historic' },
+      },
+    });
+
+    const restored = await service.restoreArticleVersion(
+      'site-id',
+      'article-id',
+      'old-version',
+      member,
+      5,
+    );
+
+    expect(restored.title).toBe('Historic');
+    expect(restored.displayTemplateKey).toBe('standard-article');
+    expect(restored.displayTemplateVersion).toBe('3');
+    expect(restored.displayTemplateConfig).toEqual({ hero: 'current' });
+    expect(manager.save).toHaveBeenCalled();
+  });
+
+  it('restores the historical article template for a site owner', async () => {
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Current',
+      slug: 'current',
+      body: 'Current body',
+      bodyDocument: null,
+      publicationState: PublicationState.DRAFT,
+      editorialState: EditorialState.CHANGES,
+      status: ArticleStatus.DRAFT,
+      revision: 5,
+      deletedAt: null,
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '3',
+      displayTemplateConfig: { hero: 'current' },
+    };
+    const { memberships, service, versions } = setup(article);
+    memberships.findOne.mockResolvedValue({
+      userId: member.userId,
+      siteId: 'site-id',
+      role: SiteRole.OWNER,
+      requiresApproval: false,
+    });
+    versions.findOne.mockResolvedValue({
+      id: 'old-version',
+      articleId: 'article-id',
+      versionNumber: 2,
+      snapshot: {
+        title: 'Historic',
+        slug: 'historic',
+        body: 'Historic body',
+        displayTemplateKey: 'historic-article',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: { hero: 'historic' },
+      },
+    });
+
+    const restored = await service.restoreArticleVersion(
+      'site-id',
+      'article-id',
+      'old-version',
+      member,
+      5,
+    );
+
+    expect(restored.displayTemplateKey).toBe('historic-article');
+    expect(restored.displayTemplateVersion).toBe('1');
+    expect(restored.displayTemplateConfig).toEqual({ hero: 'historic' });
+  });
+
+  it('uses the system article template when a content manager duplicates an article', async () => {
+    const source = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Source',
+      slug: 'source',
+      body: 'Source body',
+      displayTemplateKey: 'feature-article',
+      displayTemplateVersion: '7',
+      displayTemplateConfig: { hero: true },
+      deletedAt: null,
+    };
+    const { manager, memberships, service } = setup(source);
+    memberships.findOne.mockResolvedValue({
+      userId: member.userId,
+      siteId: 'site-id',
+      role: SiteRole.CONTENT_MANAGER,
+      requiresApproval: false,
+    });
+    manager.exists.mockResolvedValue(false);
+
+    const duplicate = await service.duplicateArticle(
+      'site-id',
+      'article-id',
+      member,
+      { slug: 'source-copy' },
+    );
+
+    expect(duplicate.displayTemplateKey).toBe('standard-article');
+    expect(duplicate.displayTemplateVersion).toBe('1');
+    expect(duplicate.displayTemplateConfig).toEqual({});
+  });
+
+  it('keeps the source article template when a site owner duplicates an article', async () => {
+    const source = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Source',
+      slug: 'source',
+      body: 'Source body',
+      displayTemplateKey: 'feature-article',
+      displayTemplateVersion: '7',
+      displayTemplateConfig: { hero: true },
+      deletedAt: null,
+    };
+    const { manager, memberships, service } = setup(source);
+    memberships.findOne.mockResolvedValue({
+      userId: member.userId,
+      siteId: 'site-id',
+      role: SiteRole.OWNER,
+      requiresApproval: false,
+    });
+    manager.exists.mockResolvedValue(false);
+
+    const duplicate = await service.duplicateArticle(
+      'site-id',
+      'article-id',
+      member,
+      { slug: 'source-copy' },
+    );
+
+    expect(duplicate.displayTemplateKey).toBe('feature-article');
+    expect(duplicate.displayTemplateVersion).toBe('7');
+    expect(duplicate.displayTemplateConfig).toEqual({ hero: true });
+  });
+
+  it('uses the system category template when a content manager duplicates a category', async () => {
+    const source = {
+      id: 'category-id',
+      siteId: 'site-id',
+      name: 'Source category',
+      slug: 'source-category',
+      displayTemplateKey: 'feature-category',
+      displayTemplateVersion: '7',
+      displayTemplateConfig: { cards: 5 },
+      deletedAt: null,
+    };
+    const { manager, memberships, service } = setup({});
+    memberships.findOne.mockResolvedValue({
+      userId: member.userId,
+      siteId: 'site-id',
+      role: SiteRole.CONTENT_MANAGER,
+      requiresApproval: false,
+    });
+    manager.findOne.mockImplementation(async (entity) => {
+      if (entity === CategoryEntity) return source;
+      return null;
+    });
+    manager.exists.mockResolvedValue(false);
+
+    const duplicate = await service.duplicateCategory(
+      'site-id',
+      'category-id',
+      member,
+      { slug: 'source-category-copy' },
+    );
+
+    expect(duplicate.displayTemplateKey).toBe('standard-category');
+    expect(duplicate.displayTemplateVersion).toBe('1');
+    expect(duplicate.displayTemplateConfig).toEqual({});
+  });
+
+  it('keeps the source category template when a site owner duplicates a category', async () => {
+    const source = {
+      id: 'category-id',
+      siteId: 'site-id',
+      name: 'Source category',
+      slug: 'source-category',
+      displayTemplateKey: 'feature-category',
+      displayTemplateVersion: '7',
+      displayTemplateConfig: { cards: 5 },
+      deletedAt: null,
+    };
+    const { manager, memberships, service } = setup({});
+    memberships.findOne.mockResolvedValue({
+      userId: member.userId,
+      siteId: 'site-id',
+      role: SiteRole.OWNER,
+      requiresApproval: false,
+    });
+    manager.findOne.mockImplementation(async (entity) => {
+      if (entity === CategoryEntity) return source;
+      return null;
+    });
+    manager.exists.mockResolvedValue(false);
+
+    const duplicate = await service.duplicateCategory(
+      'site-id',
+      'category-id',
+      member,
+      { slug: 'source-category-copy' },
+    );
+
+    expect(duplicate.displayTemplateKey).toBe('feature-category');
+    expect(duplicate.displayTemplateVersion).toBe('7');
+    expect(duplicate.displayTemplateConfig).toEqual({ cards: 5 });
   });
 
   it('rejects a restored slug owned by another article or redirect', async () => {

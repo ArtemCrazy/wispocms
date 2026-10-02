@@ -34,7 +34,6 @@ import { PublicSiteController } from './public-site.controller';
 import { SiteResourceAdapterRegistryService } from './site-resource-adapter-registry';
 import { SiteResourceRevisionsController } from './site-resource-revisions.controller';
 import { SiteResourceRevisionsService } from './site-resource-revisions.service';
-import { CodeResourcesService } from './code-resources.service';
 import { ContentMetadataRevisionsController } from './content-metadata-revisions.controller';
 import { ContentMetadataRevisionsService } from './content-metadata-revisions.service';
 
@@ -83,7 +82,6 @@ import { ContentMetadataRevisionsService } from './content-metadata-revisions.se
       useExisting: SiteResourceAdapterRegistryService,
     },
     SiteResourceRevisionsService,
-    CodeResourcesService,
     ContentMetadataRevisionsService,
   ],
   exports: [
