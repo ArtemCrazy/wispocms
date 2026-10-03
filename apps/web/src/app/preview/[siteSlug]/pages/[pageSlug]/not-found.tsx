@@ -7,12 +7,12 @@ import {
   safeNotFoundTemplate,
   type NotFoundTemplateData,
 } from "../../../../not-found-template";
-import {
-  SkinovaSystemPage,
-  type SkinovaBanner,
-  type SkinovaCategory,
+import type {
+  SkinovaBanner,
+  SkinovaCategory,
 } from "../../../../skinova-site";
-import { SKINOVA_HEADER_TEMPLATE_KEY } from "../../../../skinova-template";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "../../../../template-package-contract";
+import { resolveTemplateComponent } from "../../../../template-runtime-registry";
 
 type PublicNotFoundData = {
   site: {
@@ -48,11 +48,22 @@ export default function PublicNotFound() {
     return () => controller.abort();
   }, [siteSlug]);
 
+  const systemPageRuntime = data
+    ? resolveTemplateComponent({
+        packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+        packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+        kind: "system_page",
+        key: data.template.key,
+        templateVersion: data.template.version,
+      })
+    : null;
   if (
-    data?.site.layoutSettings?.headerTemplateKey === SKINOVA_HEADER_TEMPLATE_KEY
-  )
+    data &&
+    systemPageRuntime?.implementationKey === "skinova-system-page"
+  ) {
+    const SystemPageRenderer = systemPageRuntime.renderer;
     return (
-      <SkinovaSystemPage
+      <SystemPageRenderer
         siteSlug={siteSlug}
         title={data.template.title}
         text={data.template.text}
@@ -63,6 +74,7 @@ export default function PublicNotFound() {
         layout={data.site.layoutSettings}
       />
     );
+  }
 
   return (
     <NotFoundTemplate

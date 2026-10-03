@@ -6,16 +6,18 @@ import {
   SKINOVA_BANNER_PREVIEW_MESSAGE,
   type SkinovaBannerPreviewPayload,
 } from "./skinova-banner-preview-context";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "./template-package-contract";
+import { resolveSlotComponent } from "./template-runtime-registry";
 
 function previewDimensions(
-  renderer: string,
+  implementationKey: string | null,
   mode: "desktop" | "mobile",
   compact: boolean,
   empty: boolean,
 ) {
-  if (renderer === SKINOVA_ARTICLE_BANNER_RENDERER)
+  if (implementationKey === SKINOVA_ARTICLE_BANNER_RENDERER)
     return { width: 320, height: 390 };
-  if (renderer === "skinova-promo-strip")
+  if (implementationKey === "skinova-promo-strip")
     return {
       width: mode === "mobile" || compact ? 390 : 720,
       height: empty ? 110 : 58,
@@ -39,17 +41,22 @@ export function SkinovaBannerPreviewFrame({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [scale, setScale] = useState(1);
+  const slotRuntime = resolveSlotComponent({
+    packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+    packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+    rendererKey: payload.renderer,
+  });
   const values = [
     payload.banner.title,
     payload.banner.subtitle,
     payload.banner.buttonText,
-    ...(payload.renderer === "skinova-promo-strip"
+    ...(slotRuntime?.implementationKey === "skinova-promo-strip"
       ? []
       : [payload.banner.mediaId]),
   ];
   const empty = !values.some((value) => value?.trim());
   const dimensions = previewDimensions(
-    payload.renderer,
+    slotRuntime?.implementationKey ?? null,
     payload.mode,
     compact,
     empty,

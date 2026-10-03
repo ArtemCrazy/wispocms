@@ -116,11 +116,13 @@ export enum ContentScheduleStatus {
 }
 
 export enum ContentTemplateKind {
+  HOMEPAGE = 'homepage',
   ARTICLES_LIST = 'articles_list',
   ARTICLE = 'article',
   CATEGORY = 'category',
   HEADER = 'header',
   FOOTER = 'footer',
+  SYSTEM_PAGE = 'system_page',
 }
 
 export enum CategoryStatus {
@@ -363,11 +365,141 @@ export class WorkspaceEntity {
   memberships!: WorkspaceMembershipEntity[];
 }
 
+@Entity('template_packages')
+@Check(
+  'CHK_template_packages_site_type',
+  `"site_type" IN ('media', 'corporate', 'ecommerce', 'landing')`,
+)
+export class TemplatePackageEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Index({ unique: true })
+  @Column({ name: 'package_id', type: 'varchar', length: 100 })
+  packageId!: string;
+
+  @Column({ type: 'varchar', length: 160 })
+  title!: string;
+
+  @Column({ name: 'site_type', type: 'varchar', length: 32 })
+  siteType!: SiteType;
+
+  @Column({ name: 'repository_url', type: 'varchar', length: 500 })
+  repositoryUrl!: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+
+  @OneToMany(
+    () => TemplatePackageVersionEntity,
+    (version) => version.templatePackage,
+  )
+  versions!: TemplatePackageVersionEntity[];
+
+  @OneToMany(() => SiteEntity, (site) => site.templatePackage)
+  sites!: SiteEntity[];
+}
+
+@Entity('template_package_versions')
+@Unique(['templatePackageId', 'packageVersion'])
+@Unique(['id', 'templatePackageId'])
+@Index(['templatePackageId', 'createdAt'])
+@Check(
+  'CHK_template_package_versions_runtime_mode',
+  `"runtime_mode" IN ('embedded-next', 'external')`,
+)
+@Check(
+  'CHK_template_package_versions_manifest_version',
+  `"manifest_version" = 1`,
+)
+@Check(
+  'CHK_template_package_versions_manifest_object',
+  `jsonb_typeof("manifest") = 'object'`,
+)
+export class TemplatePackageVersionEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'template_package_id', type: 'uuid' })
+  templatePackageId!: string;
+
+  @ManyToOne(
+    () => TemplatePackageEntity,
+    (templatePackage) => templatePackage.versions,
+    { onDelete: 'CASCADE' },
+  )
+  @JoinColumn({ name: 'template_package_id' })
+  templatePackage!: TemplatePackageEntity;
+
+  @Column({ name: 'package_version', type: 'varchar', length: 100 })
+  packageVersion!: string;
+
+  @Column({ name: 'source_revision', type: 'varchar', length: 160 })
+  sourceRevision!: string;
+
+  @Column({ name: 'release_digest', type: 'varchar', length: 128 })
+  releaseDigest!: string;
+
+  @Column({
+    name: 'artifact_digest',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
+  artifactDigest!: string | null;
+
+  @Column({ name: 'manifest_digest', type: 'varchar', length: 128 })
+  manifestDigest!: string;
+
+  @Column({ name: 'manifest_version', type: 'integer' })
+  manifestVersion!: number;
+
+  @Column({ type: 'jsonb' })
+  manifest!: Record<string, unknown>;
+
+  @Column({
+    name: 'cms_api_min_schema_version',
+    type: 'varchar',
+    length: 40,
+  })
+  cmsApiMinSchemaVersion!: string;
+
+  @Column({
+    name: 'cms_api_max_schema_version',
+    type: 'varchar',
+    length: 40,
+    nullable: true,
+  })
+  cmsApiMaxSchemaVersion!: string | null;
+
+  @Column({ name: 'built_at', type: 'timestamptz' })
+  builtAt!: Date;
+
+  @Column({ name: 'runtime_mode', type: 'varchar', length: 32 })
+  runtimeMode!: 'embedded-next' | 'external';
+
+  @Column({ name: 'runtime_url', type: 'varchar', length: 500, nullable: true })
+  runtimeUrl!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @OneToMany(() => SiteEntity, (site) => site.currentTemplatePackageVersion)
+  currentSites!: SiteEntity[];
+}
+
 @Entity('sites')
 @Unique(['workspaceId', 'slug'])
 @Check(
   'CHK_sites_site_type',
   `"site_type" IN ('media', 'corporate', 'ecommerce', 'landing')`,
+)
+@Check(
+  'CHK_sites_template_package_version_requires_package',
+  `"current_template_package_version_id" IS NULL OR "template_package_id" IS NOT NULL`,
 )
 export class SiteEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -431,6 +563,44 @@ export class SiteEntity {
     length: 32,
   })
   siteType!: SiteType;
+
+  @Column({ name: 'template_package_id', type: 'uuid', nullable: true })
+  templatePackageId!: string | null;
+
+  @ManyToOne(
+    () => TemplatePackageEntity,
+    (templatePackage) => templatePackage.sites,
+    {
+      nullable: true,
+      onDelete: 'SET NULL',
+    },
+  )
+  @JoinColumn({ name: 'template_package_id' })
+  templatePackage!: TemplatePackageEntity | null;
+
+  @Column({
+    name: 'current_template_package_version_id',
+    type: 'uuid',
+    nullable: true,
+  })
+  currentTemplatePackageVersionId!: string | null;
+
+  @ManyToOne(
+    () => TemplatePackageVersionEntity,
+    (version) => version.currentSites,
+    { nullable: true, onDelete: 'RESTRICT' },
+  )
+  @JoinColumn([
+    {
+      name: 'current_template_package_version_id',
+      referencedColumnName: 'id',
+    },
+    {
+      name: 'template_package_id',
+      referencedColumnName: 'templatePackageId',
+    },
+  ])
+  currentTemplatePackageVersion!: TemplatePackageVersionEntity | null;
 
   @Column({ name: 'seo_title', type: 'varchar', length: 200, nullable: true })
   seoTitle!: string | null;
@@ -2014,6 +2184,8 @@ export const databaseEntities = [
   UserEntity,
   AdminPasswordResetEntity,
   WorkspaceEntity,
+  TemplatePackageEntity,
+  TemplatePackageVersionEntity,
   SiteEntity,
   WorkspaceMembershipEntity,
   SiteAccessEntity,

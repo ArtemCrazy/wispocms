@@ -66,7 +66,10 @@ import {
   normalizeHostnameInput,
   normalizeRequestHost,
 } from '../platform/site-domain';
-import { buildPublicIntegrationManifest } from './public-integration-manifest';
+import {
+  buildPublicIntegrationManifest,
+  buildPublicTemplatePackageIdentity,
+} from './public-integration-manifest';
 import {
   bannerGeometryError,
   bannerSlotCompatibilityError,
@@ -315,6 +318,36 @@ export class ContentService {
     user: { id: string; fullName: string } | null | undefined,
   ) {
     return user ? { id: user.id, fullName: user.fullName } : null;
+  }
+
+  private async currentTemplatePackageIdentity(site: SiteEntity) {
+    const loadedIdentity = buildPublicTemplatePackageIdentity(site);
+    if (loadedIdentity) return loadedIdentity;
+    if (!site.templatePackageId || !site.currentTemplatePackageVersionId)
+      return null;
+    const identity = await this.sites
+      .createQueryBuilder('site')
+      .leftJoin('site.templatePackage', 'templatePackage')
+      .leftJoin('site.currentTemplatePackageVersion', 'currentVersion')
+      .select('templatePackage.packageId', 'packageId')
+      .addSelect('currentVersion.packageVersion', 'packageVersion')
+      .where('site.id = :siteId', { siteId: site.id })
+      .andWhere('templatePackage.id = :templatePackageId', {
+        templatePackageId: site.templatePackageId,
+      })
+      .andWhere('currentVersion.id = :currentVersionId', {
+        currentVersionId: site.currentTemplatePackageVersionId,
+      })
+      .andWhere('currentVersion.templatePackageId = :templatePackageId', {
+        templatePackageId: site.templatePackageId,
+      })
+      .getRawOne<{ packageId: string | null; packageVersion: string | null }>();
+    return identity?.packageId && identity.packageVersion
+      ? {
+          packageId: identity.packageId,
+          packageVersion: identity.packageVersion,
+        }
+      : null;
   }
 
   private mailTransport() {
@@ -594,6 +627,7 @@ export class ContentService {
       pages.find((page) => page.kind === PageKind.HOMEPAGE),
       banners,
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolveVariables(
       {
         site: {
@@ -601,6 +635,7 @@ export class ContentService {
           slug: site.slug,
           domain: site.domain,
           siteType: site.siteType,
+          templatePackage,
           seoTitle: site.seoTitle,
           seoDescription: site.seoDescription,
           canonicalUrl: this.publicCanonicalBase(site),
@@ -641,7 +676,11 @@ export class ContentService {
   async getPublicIntegrationManifest(siteSlug: string) {
     const site = await this.sites.findOne({
       where: { slug: siteSlug.trim().toLowerCase(), isActive: true },
-      relations: { linkedCommercialSite: true },
+      relations: {
+        linkedCommercialSite: true,
+        templatePackage: true,
+        currentTemplatePackageVersion: true,
+      },
     });
     if (!site) throw new NotFoundException('Сайт не найден');
     return buildPublicIntegrationManifest(site);
@@ -1003,10 +1042,12 @@ export class ContentService {
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1102,10 +1143,12 @@ export class ContentService {
         order: { title: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
         canonicalUrl: this.publicCanonicalBase(site),
@@ -1196,10 +1239,12 @@ export class ContentService {
       page ?? undefined,
       banners,
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1267,10 +1312,12 @@ export class ContentService {
       page ?? undefined,
       banners,
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1336,10 +1383,12 @@ export class ContentService {
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1454,10 +1503,12 @@ export class ContentService {
       banners,
       this.pageBannerAssignmentsFromSnapshot(selectedSnapshot),
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         siteType: site.siteType,
         seoTitle: site.seoTitle,
@@ -4486,10 +4537,12 @@ export class ContentService {
         order: { title: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
         canonicalUrl: null,

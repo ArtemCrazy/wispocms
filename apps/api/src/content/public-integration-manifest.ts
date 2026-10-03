@@ -1,7 +1,13 @@
-import { DomainStatus, SiteEntity, SiteType } from '../database/entities';
+import {
+  DomainStatus,
+  SiteEntity,
+  SiteType,
+  TemplatePackageEntity,
+  TemplatePackageVersionEntity,
+} from '../database/entities';
 import { getSiteContentCapabilities } from './site-content-capabilities';
 
-const PUBLIC_INTEGRATION_SCHEMA_VERSION = '1.1';
+const PUBLIC_INTEGRATION_SCHEMA_VERSION = '1.2';
 
 type IntegrationSite = Pick<
   SiteEntity,
@@ -11,7 +17,58 @@ type IntegrationSite = Pick<
     SiteEntity,
     'id' | 'name' | 'slug' | 'domain' | 'domainStatus' | 'isActive'
   > | null;
+  templatePackage?: Pick<TemplatePackageEntity, 'packageId'> | null;
+  currentTemplatePackageVersion?: Pick<
+    TemplatePackageVersionEntity,
+    | 'packageVersion'
+    | 'sourceRevision'
+    | 'releaseDigest'
+    | 'artifactDigest'
+    | 'manifest'
+  > | null;
 };
+
+export function buildPublicTemplatePackageIdentity(site: IntegrationSite) {
+  if (!site.templatePackage || !site.currentTemplatePackageVersion) return null;
+  return {
+    packageId: site.templatePackage.packageId,
+    packageVersion: site.currentTemplatePackageVersion.packageVersion,
+  };
+}
+
+function supportedTemplates(manifest: Record<string, unknown>) {
+  if (!Array.isArray(manifest.templates)) return [];
+  return manifest.templates.flatMap((value) => {
+    if (!value || typeof value !== 'object') return [];
+    const template = value as Record<string, unknown>;
+    if (
+      typeof template.kind !== 'string' ||
+      typeof template.key !== 'string' ||
+      typeof template.version !== 'string'
+    )
+      return [];
+    return [
+      {
+        kind: template.kind,
+        key: template.key,
+        version: template.version,
+      },
+    ];
+  });
+}
+
+function buildPublicTemplatePackageSummary(site: IntegrationSite) {
+  const identity = buildPublicTemplatePackageIdentity(site);
+  const version = site.currentTemplatePackageVersion;
+  if (!identity || !version) return null;
+  return {
+    ...identity,
+    sourceRevision: version.sourceRevision,
+    releaseDigest: version.releaseDigest,
+    artifactDigest: version.artifactDigest,
+    templates: supportedTemplates(version.manifest),
+  };
+}
 
 export function buildPublicIntegrationManifest(site: IntegrationSite) {
   const base = `/api/public/sites/${encodeURIComponent(site.slug)}`;
@@ -33,6 +90,7 @@ export function buildPublicIntegrationManifest(site: IntegrationSite) {
 
   return {
     schemaVersion: PUBLIC_INTEGRATION_SCHEMA_VERSION,
+    templatePackage: buildPublicTemplatePackageSummary(site),
     site: {
       name: site.name,
       slug: site.slug,
@@ -98,6 +156,8 @@ export function buildPublicIntegrationManifest(site: IntegrationSite) {
             'seoDescription',
             'canonicalUrl',
             'noIndex',
+            'systemTemplateKey',
+            'systemTemplateVersion',
           ]
         : [],
       article: capabilities.articles
@@ -108,6 +168,9 @@ export function buildPublicIntegrationManifest(site: IntegrationSite) {
             'body',
             'bodyDocument',
             'documentVersion',
+            'displayTemplateKey',
+            'displayTemplateVersion',
+            'displayTemplateConfig',
             'status',
             'category',
             'author',
@@ -135,6 +198,9 @@ export function buildPublicIntegrationManifest(site: IntegrationSite) {
             'seoDescription',
             'canonicalUrl',
             'noIndex',
+            'displayTemplateKey',
+            'displayTemplateVersion',
+            'displayTemplateConfig',
           ]
         : [],
       banner: capabilities.banners

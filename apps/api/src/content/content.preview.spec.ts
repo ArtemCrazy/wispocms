@@ -21,8 +21,24 @@ describe('ContentService authenticated preview', () => {
       name: 'Wispo Media',
       slug: 'wispo-media',
       siteType: SiteType.MEDIA,
+      templatePackageId: 'package-id',
+      currentTemplatePackageVersionId: 'version-id',
     };
-    const sites = { findOne: jest.fn().mockResolvedValue(site) };
+    const identityQuery = {
+      leftJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getRawOne: jest.fn().mockResolvedValue({
+        packageId: 'skinova-media',
+        packageVersion: '1',
+      }),
+    };
+    const sites = {
+      findOne: jest.fn().mockResolvedValue(site),
+      createQueryBuilder: jest.fn().mockReturnValue(identityQuery),
+    };
     const articles = { findOne: jest.fn(), find: jest.fn() };
     const categories = { find: jest.fn().mockResolvedValue([]) };
     const pages = { findOne: jest.fn(), find: jest.fn() };
@@ -38,11 +54,11 @@ describe('ContentService authenticated preview', () => {
       pages as never,
       banners as never,
     );
-    return { service, articles, pages, site };
+    return { service, articles, pages, site, sites, identityQuery };
   }
 
   it('returns a draft article only through the authenticated preview', async () => {
-    const { service, articles, pages } = setup();
+    const { service, articles, pages, sites, identityQuery } = setup();
     const draft = {
       id: 'article-id',
       siteId: 'site-id',
@@ -61,6 +77,22 @@ describe('ContentService authenticated preview', () => {
 
     expect(result.article).toBe(draft);
     expect(result.site.noIndex).toBe(true);
+    expect(result.site.templatePackage).toEqual({
+      packageId: 'skinova-media',
+      packageVersion: '1',
+    });
+    expect(sites.findOne).toHaveBeenCalledWith({ where: { id: 'site-id' } });
+    expect(identityQuery.select).toHaveBeenCalledWith(
+      'templatePackage.packageId',
+      'packageId',
+    );
+    expect(identityQuery.addSelect).toHaveBeenCalledWith(
+      'currentVersion.packageVersion',
+      'packageVersion',
+    );
+    expect(JSON.stringify(identityQuery.select.mock.calls)).not.toContain(
+      'manifest',
+    );
     expect(result.categories).toEqual([]);
     expect(articles.findOne).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -92,6 +124,10 @@ describe('ContentService authenticated preview', () => {
 
     expect(result.pages).toEqual([homepage, navigationPage]);
     expect(result.site.noIndex).toBe(true);
+    expect(result.site.templatePackage).toEqual({
+      packageId: 'skinova-media',
+      packageVersion: '1',
+    });
     expect(result.categories).toEqual([]);
     expect(pages.find).toHaveBeenCalledWith(
       expect.objectContaining({

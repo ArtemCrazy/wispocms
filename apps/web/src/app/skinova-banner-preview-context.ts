@@ -1,4 +1,6 @@
 import type { BannerSlotDefinition } from "./banner-slot";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "./template-package-contract";
+import { resolveSlotRuntime } from "./template-runtime-catalog";
 
 export const SKINOVA_ARTICLE_BANNER_RENDERER = "skinova-article-sidebar";
 
@@ -41,9 +43,17 @@ export function skinovaBannerPreviewContexts(
   slots: BannerSlotDefinition[],
 ): SkinovaBannerPreviewContext[] {
   const contexts = slots
-    .filter((slot) =>
-      ["skinova-promo-strip", "skinova-consultation"].includes(slot.renderer),
-    )
+    .filter((slot) => {
+      const runtime = resolveSlotRuntime({
+          packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+          packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+          rendererKey: slot.renderer,
+        });
+      return (
+        runtime?.implementationKey === "skinova-promo-strip" ||
+        runtime?.implementationKey === "skinova-consultation"
+      );
+    })
     .map((slot) => ({
       id: slot.id,
       label: slot.name,
@@ -64,7 +74,12 @@ export function skinovaBannerPreviewContexts(
           : "Выберите изображение для компьютера; текст и кнопка необязательны.",
     }));
 
-  if (contexts.length)
+  const articleRuntime = resolveSlotRuntime({
+    packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+    packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+    rendererKey: SKINOVA_ARTICLE_BANNER_RENDERER,
+  });
+  if (contexts.length && articleRuntime)
     contexts.push({
       id: "article_sidebar",
       label: "Баннер статьи",

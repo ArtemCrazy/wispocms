@@ -1,5 +1,366 @@
 # Wispo CMS — журнал параллельных доработок
 
+### 2026-10-02 · Автоматическая регистрация frontend-релизов
+
+- Статус: **реализация и локальная проверка Tasks 1–9 завершены; подтверждено
+  оформление отдельного локального commit в `codex/access-control-v2`**.
+- Коммит реализации: `feat: add frontend package release registry` — включает
+  код, миграции, тесты, архитектурную документацию и эту запись журнала. Push,
+  merge в `main` и выкладка не выполняются.
+- Текущий этап: Task 9 — итоговый интеграционный прогон реестра frontend-пакетов
+  Skinova — **завершён локально**. Созданы только временные объекты
+  `wispo-task9-20261003-*`: отдельные PostgreSQL, network и volume; рабочая
+  локальная БД, OpenServer, VDS, `main` и общий сервер не использовались.
+  На пустой БД штатный `bootstrap-local-database` применил первые 16 миграций и
+  обязательные локальные prerequisites, затем применены остальные: итоговый
+  ledger содержит 51 миграцию, включая `TemplatePackageRegistry1791789600000`
+  и `AssignSkinovaSystemTemplate1791793200000`. Новый integration spec имеет
+  fail-closed guard на literal `127.0.0.1`, protocol, порт, имя БД и отдельный
+  opt-in; query/fragment URL запрещены, поэтому параметры PostgreSQL не могут
+  переопределить проверенный authority.
+  Проверены register, идемпотентный повтор, конфликт digest, read-only
+  preflight, неизменность public manifest/site catalog до report-deployed и
+  неизменность реального каталога `site_content_templates` также при
+  report-deployed, появление current только после report-deployed, legacy
+  `NULL`, mismatch и системный audit. Реальный CLI запускался из отдельного
+  чистого Git snapshot с ephemeral commits; защита от dirty release inputs не
+  ослаблялась.
+- Файлы Task 9: добавлен
+  `apps/api/src/template-packages/template-package.integration.spec.ts`,
+  обновлены `docs/react-site-architecture.md` и эта существующая запись
+  журнала. Схема БД, migrations и формат сохраняемых значений в Task 9 не
+  менялись; все созданные package/audit данные находились только в disposable
+  БД. После проверок временные PostgreSQL container, network, volume и Git
+  snapshot удалены по их точным именам; рабочие контейнеры остались запущены.
+  Data-migration/backfill для внешних окружений отсутствует.
+- Проверки Task 9: integration lifecycle и DB guard — 4/4; полный API Jest —
+  118 suites и 885 tests passed, 6 opt-in suites skipped; API build — PASS; новый spec
+  ESLint — PASS; web `tsc`, ESLint и build — PASS; root build через
+  `npm run build` — PASS; isolated Playwright package workflow — 10/10.
+  Полный общий API ESLint по-прежнему сообщает 9 существовавших ошибок в
+  `ai`/`content-center` spec-файлах. Общий web contract-набор: 168/170; две
+  существовавшие несвязанные проверки ожидают прежнюю навигацию статей и старый
+  404 contract. Эти legacy-ошибки не маскировались и Task 9 их не меняет.
+  До подтверждения этап оставался без commit. Push, merge в `main`, физическая
+  выкладка, активация и rollback не выполнялись.
+- Предыдущий этап: Task 8 — read-only состояние frontend-пакета на странице
+  «Шаблоны» — завершён локально; итоговые spec- и quality-review получили
+  статус **APPROVED**. Владелец видит
+  только текущую версию, Wispo admin — текущую версию и совместимых кандидатов,
+  content manager не получает пункт меню и не рендерит раздел; отдельный
+  `isWispoAdmin` не подменяется структурным правом. Preview-ссылки отображаются
+  только из ответа API, действий активации, rollback, загрузки manifest и
+  release token в UI нет. Ошибка release-read остаётся внутри package-панели и
+  не блокирует существующий каталог шаблонов. Схема и данные БД в Task 8 не
+  изменяются. Первый spec-review вернул три Important: stale cross-site race,
+  ложноположительный manager workflow без доказанной hydration и недостаточное
+  покрытие loading/empty/error. Все три замечания закрыты отдельным TDD-циклом;
+  quality-review затем вернул одно Important и два Minor: current ожидал
+  candidates, длинные identifiers могли расширять mobile-панель, а полный Git
+  revision был доступен только через hover title. Все три замечания также
+  закрыты отдельным TDD-циклом; повторный quality-review завершён со статусом
+  **APPROVED**.
+- Текущий этап: Task 7 реализован и после обрыва соединения продолжен с
+  итогового quality/security-review. Review не выявил Critical, но вернул
+  четыре Important: digest должен строиться из точного Git tree и закрывать
+  dirty/symlink-входы; охватывать все public/preview entrypoint Skinova;
+  граф импортов должен разбираться AST-парсером с fail-closed динамическими
+  импортами; release token допустимо отправлять по HTTP только на строгий
+  loopback. Все четыре замечания закрыты локально и проверены. Повторный quality-review
+  запросил ещё четыре локальных исправления: включить convention build-config
+  в release digest/dirty scope, корректно разбирать CSS import, запрещать
+  gitlink/non-regular Git entries и гарантированно очищать request timeout при
+  pre-network ошибке. Все четыре повторных замечания закрыты локально;
+  новый re-review выявил, что opaque YAML/lock/Dockerfile ошибочно проходили
+  через Babel parser. Type routing исправлен и проверен локально. Финальный
+  повторный review завершён со статусом **APPROVED**; Task 7 завершён локально.
+  На тот момент общий блок Tasks 1–9 оставался **в работе**; сейчас локальная
+  реализация и проверка блока завершены. Commit/push/выкладка не выполнялись.
+  Добавлена локальная CI-like команда Skinova с независимыми операциями
+  register, preflight и report-deployed. Один запуск выполняет ровно одну
+  операцию; регистрация не вызывает preflight или deploy-report. Схема и
+  данные БД в Task 7 не изменяются; команда работает только через внутренний
+  API.
+- Текущий review: повторная проверка manifest-валидатора выявила и закрыла
+  обход запрета на кодовые поля через составные имена (`rawHtml`,
+  `templateHtml`, `componentJsx` и варианты с разделителями). Token-aware
+  классификация сохраняет допустимые бизнес-поля `sourceUrl` и `postcode`.
+  Review Task 5 закрыл две Important-регрессии: гонки уникальных вставок и
+  атомарность доменной мутации с audit/no-op retry. Исправления выполнены
+  отдельным TDD-циклом без запуска БД.
+  Edge-review также закрыл package-race с разными версиями и сериализацию
+  concurrent deploy-report через row lock. Последующий security-review закрыл
+  сохранение query/fragment в repository и external runtime URL; отдельный
+  TDD-контракт запрещает эти части URL, сохраняя допустимые path/port.
+  Quality-review Task 6 разделил deployed compatibility и lifecycle кандидата:
+  current сохраняет `ready|mismatch` и безопасные причины, а в candidates
+  попадают только совместимые версии со статусом `registered`. Также устранена
+  загрузка JSONB manifest на обычных public/preview путях: identity читается
+  отдельным узким TypeORM select по обоим pointer сайта.
+- Владелец / задача / ветка: Roman; реестр `TemplatePackage`, автоматическая
+  регистрация кандидата из CI/служебной команды и точная фиксация фактически
+  развёрнутой версии на
+  примере Skinova; `codex/access-control-v2`.
+- Что изменяется и зачем: проектируется связь конкретной сборки React-сайта с
+  CMS без хранения и редактирования исходного кода. Промежуточные Git-коммиты
+  CMS не регистрирует; только проверенная сборка становится неизменяемым
+  кандидатом. Физическая активация и rollback отнесены к отдельному следующему
+  этапу с неизменяемыми build-артефактами.
+  Ручная загрузка manifest через интерфейс администратора не планируется.
+- Файлы / модули: архитектурная спецификация и implementation plan; в Web
+  добавлены сериализуемый manifest template Skinova с фактическими draft-07
+  схемами сохраняемых CMS entity data и явными requirements route context,
+  package-aware runtime catalog, отдельные строго типизированные React
+  component bindings шаблонов/баннерных renderer и совместимые re-export
+  прежних Skinova-констант. Встроенные `articles_list`, `header` и `footer`
+  описаны как integrated capabilities существующих поверхностей, а не как
+  ложные самостоятельные компоненты. Nullable-поля статьи совпадают с
+  `ArticleEntity`, а runtime context ограничен типизированным словарём реальных
+  props renderer; route adapters явно собирают эти ключи. Для реального
+  исполнения schema/binding тестов добавлены локальные dev-зависимости Ajv и
+  tsx. Public/CMS-preview главной, статьи и категории, системные страницы и
+  banner preview переведены на общий package-aware resolver. Неизвестная
+  identity больше не выбирает Skinova неявно; 404 использует собственные
+  `template.key/version`, а не шаблон header. Реализованы API-типы, opaque DTO,
+  строгая серверная валидация manifest и отдельный fail-closed `release-token`
+  guard. Валидатор проверяет точную структуру, числовые версии и совместимость
+  CMS API 1.2, уникальность template identity, slot key и renderer, optional
+  nullable `artifactDigest`, лимиты размера,
+  глубины и количества узлов, чистые JSON-значения, отсутствие исходного или
+  исполняемого кода и компиляцию каждой schema строгим Ajv как draft-07.
+  Repository принимает только HTTPS без credentials, query и fragment;
+  runtime URL принимает HTTP(S) без credentials, query и fragment и отклоняет
+  literal IP, localhost, single-label и служебные/private suffix. URL path и
+  явный port остаются допустимыми. Remote JSON Schema references запрещены. Guard
+  читает секрет только из `WISPO_RELEASE_TOKEN`, принимает его только через
+  `x-wispo-release-token`, сравнивает SHA-256 buffers через timing-safe compare
+  и не возвращает значение в ошибке. Ajv добавлен runtime-зависимостью API;
+  источником lock остаётся только корневой workspace lockfile.
+  Task 5 добавила `template-package.service/controller/module`, подключение к
+  `AppModule` и безопасный системный метод `AuditService`: три internal-route
+  доступны только по release token, API активации и rollback отсутствуют.
+  Task 6 добавила отдельные пользовательские read-controller: владелец сайта и
+  Wispo admin читают только текущую фактически развёрнутую версию, а список
+  кандидатов того же стабильного пакета доступен только Wispo admin. Public и
+  preview payload содержат nullable identity текущего пакета; integration
+  manifest 1.2 возвращает безопасную сводку версии и поддерживаемые template
+  identity без полного manifest. Preview URL формируется сервером: текущий
+  embedded build, включая его строку в candidates, использует штатный
+  `/preview/:siteSlug`, external-кандидат — только сохранённый после валидации
+  `runtimeUrl`, а ещё не развёрнутый embedded-кандидат — `null`.
+  Task 7 добавила `scripts/template-package-release.mjs` и реальный CLI
+  contract-test. Полный manifest строится из versioned template с точным
+  `git rev-parse HEAD`, детерминированным canonical UTC `builtAt` из timestamp
+  того же Git commit (`git show -s --format=%cI HEAD`), `artifactDigest: null` и
+  детерминированным SHA-256 по canonical manifest без самоссылочных build-полей,
+  полному набору фактических route/runtime entrypoint. Next entrypoint
+  (`page`, `route`, `layout`, `not-found`, `error`, `loading`, `template`)
+  динамически обнаруживаются под preview-корнем; отдельно включены proxy,
+  корневой layout, banner preview и runtime registry/catalog. Их рекурсивный
+  локальный import-граф разбирается AST-парсером (static/side-effect import,
+  export-from/export-namespace, literal `require` и dynamic import), а
+  `public/skinova/**` включается рекурсивно. Комментарии и строки не создают
+  ложных зависимостей; нелитеральный dynamic import/require, неразрешимый
+  локальный импорт, symlink и gitlink закрывают выпуск безопасной ошибкой.
+  CSS import разбираются comment-aware scanner для quoted и unquoted
+  `url(...)` форм. В graph/digest/dirty gate также входят фактические
+  convention build inputs: Next/PostCSS/TypeScript config, Web package и
+  Dockerfile, корневые package/workspace/lock. Dependency scan выполняется
+  только для JS/TS variants и CSS; JSON, YAML, lock, Dockerfile и остальные
+  convention inputs фреймируются как opaque Git bytes.
+  Относительные импорты и настроенный alias `@/` разрешаются с
+  extension/index semantics.
+  Имена POSIX-путей и raw bytes фреймируются длиной и сортируются побайтно.
+  Все bytes manifest, source graph и public assets читаются из exact Git tree
+  указанного HEAD, а не из платформенно-зависимого checkout; relevant
+  tracked/untracked изменения запрещают запуск до HTTP-запроса. Это устраняет
+  расхождение revision/digest и CRLF/LF между Windows и Linux.
+  Token берётся только из env и отправляется только release-token header;
+  remote API допускается только по HTTPS, а HTTP — лишь для literal loopback
+  `127.0.0.1`/`::1`; вывод и HTTP/network ошибки используют безопасный
+  allowlist. В корневом
+  `package.json` добавлены три отдельные команды, а local env/compose получают
+  только placeholder/config без реального секрета.
+  Task 8 добавила на существующую страницу «Шаблоны» отдельную read-only
+  package-панель со статусами загрузки, пустого состояния, несовместимости и
+  локальной ошибки. Текущая фактически развёрнутая версия читается владельцем
+  и Wispo admin; совместимые зарегистрированные кандидаты запрашиваются и
+  показываются только Wispo admin. Длинные revision/digest безопасно
+  переносятся, preview-ссылка использует только серверный `previewUrl`, а
+  адаптивные стили переиспользуют действующие токены и типографику CMS.
+  Переключение сайта защищено одновременно `key` компонента, AbortController и
+  монотонным request sequence: запоздавшие current/candidates/error/finally
+  предыдущего сайта не меняют новый экран. Ошибки current и candidates
+  независимы, поэтому недоступный список кандидатов не скрывает успешно
+  прочитанную текущую версию. Current и candidates имеют раздельные loading-
+  lifecycle: быстрый current отображается сразу и не ждёт даже неопределённо
+  долгий candidates request. Полный Git revision current и каждого кандидата
+  присутствует в rendered DOM, а 100-символьные package id/version и digest
+  переносятся без горизонтального переполнения mobile-панели. Прямой URL
+  закрытого раздела «Шаблоны» для content manager заменяется на доступный
+  корневой экран сайта.
+- БД — схема: добавлена, но не применялась ни к одной БД, аддитивная миграция
+  `TemplatePackageRegistry1791789600000`. Она создаёт `template_packages` и
+  неизменяемые `template_package_versions`, nullable-ссылки пакета и текущей
+  версии в `sites`, индексы, FK и DB-trigger запрета изменения записанной
+  версии. Составной FK и CHECK не позволяют связать сайт с версией другого
+  пакета. Каталог `site_content_templates` принимает новые виды `homepage` и
+  `system_page`; существующие строки миграция не меняет. Manifest хранится как
+  JSON-объект формата 1 вместе с canonical digest, release/artifact digest,
+  Git revision, диапазоном CMS API и runtime-данными.
+- БД — данные и формат: добавлена, но не применялась ни к одной БД, отдельная
+  идемпотентная миграция `AssignSkinovaSystemTemplate1791793200000`. Она
+  назначает `skinova@1` текущим и опубликованным системным шаблоном только
+  импортированной странице `privacy-policy` при одновременном совпадении
+  точных ID страницы и сайта, slug страницы и сайта и только если все четыре
+  поля identity равны `NULL`. Остальные сайты и страницы не затрагиваются.
+  Реестровая миграция не создаёт фиктивный commit, digest или версию Skinova;
+  после запуска кода локальная CI-like команда отдельно зарегистрирует и
+  отметит фактически развёрнутую сборку.
+  Task 5 БД не запускала и реальные данные не меняла. При будущем вызове
+  registration создаёт только пакет/immutable-версию с вычисленным сервером
+  canonical digest; preflight пишет только безопасный audit; deploy-report
+  транзакционно обновляет два package-pointer сайта и audit, не изменяя
+  `site_content_templates` даже при mismatch. При PostgreSQL `23505` первая
+  transaction откатывается, затем одна новая transaction повторяет полный
+  `registerCandidate`: это позволяет создать другую версию уже победившего
+  package. Только при втором `23505` выполняется финальный refetch/compare
+  identity, release digest и canonical manifest; другие ошибки БД не
+  маскируются. Audit регистрации и фактического изменения deployed pointer
+  пишется тем же `EntityManager`; no-op retry audit не дублирует, а ошибка audit
+  откатывает доменную мутацию. Deploy-report берёт `pessimistic_write` lock на
+  Site до проверки pointer; read-only preflight lock не использует.
+  Task 6 выполняет только чтение, audit не пишет, schema/data migration и
+  ручные изменения данных не добавляет; БД не запускалась. Task 7 также не
+  меняет схему, формат сохраняемых значений или данные и не подключалась к БД.
+  Task 8 меняет только Web UI и изолированные тесты: схема, формат сохраняемых
+  значений и данные БД не затронуты; тесты работают через route interception и
+  к БД не подключаются.
+- Совместимость / пересечения с параллельной работой: текущие опубликованные
+  сайты продолжают работать без активного frontend-release; новая проверка
+  включается только после явной служебной регистрации и deploy-report пакета.
+- Проверки и оставшиеся ограничения: TDD RED зафиксирован отсутствующим
+  manifest/plain runtime catalog, затем прямыми route/banner ветками Skinova.
+  После реализации schema/runtime contract-набор — 17/17, executable TSX
+  bindings — 3/3, TypeScript, ESLint изменённых файлов и production Web build
+  — успешно. Для схемы и точечного Skinova-backfill отдельно зафиксирован TDD
+  RED, затем целевые migration/data-source тесты — 11/11, ESLint изменённых
+  API-файлов и production API build — успешно. Для manifest/guard отдельно
+  зафиксирован TDD RED; security-review regressions отдельно дали ожидаемый
+  RED (28 тестов и ещё 3 для path-aware `source`), после исправления итоговый
+  целевой набор manifest/guard — 114/114, ESLint всех новых файлов и production
+  API build — успешно.
+  Для Task 5 отдельно зафиксирован ожидаемый RED на отсутствующих service,
+  controller и system audit. Review-race/atomicity тесты отдельно дали
+  ожидаемый RED на семи проверках; два дополнительных edge-race теста также
+  дали ожидаемый RED. URL security-review отдельно дал ожидаемый RED: 4 новых
+  проверки не отклоняли query/fragment при 105 остальных успешных; после
+  исправления validator — 109/109. Итоговый расширенный набор Task 4+5 —
+  144/144, адресный ESLint и production API build успешны. Тесты используют
+  repository-mocks и не подключаются к локальной или внешней БД.
+  Для Task 6 зафиксирован ожидаемый RED: отсутствовали manifest schema 1.2,
+  package identity в public/preview, методы `current`/`candidates` и
+  пользовательские read-controller. После реализации целевой набор — 34/34,
+  полный API unit/regression suite — 884/884 при 76 штатно пропущенных тестах,
+  адресный ESLint и production API build успешны. Проверены owner-only доступ
+  к своему site/current, запрет для content manager и чужого владельца,
+  platform-admin-only candidates, legacy `NULL`, отсутствие full manifest и
+  отсутствие мутаций/audit.
+  Quality-review отдельно дал ожидаемый RED на четырёх проверках: current
+  embedded candidate имел `previewUrl: null` и compatibility status вместо
+  lifecycle status, несовместимый кандидат не фильтровался, обычный public
+  payload загружал полную version relation, а preview без неё терял identity.
+  После исправления единый Task 3–6 regression-набор — 172/172, адресный
+  ESLint и production API build успешны; две новые TypeScript-ошибки в
+  `template-package.read.spec.ts` устранены без правок исторических ошибок
+  других тестов. Полный manifest загружается только endpoint integration
+  manifest; public/preview используют narrow select `packageId/packageVersion`.
+  Validator нормализует завершающую точку hostname, принимает только canonical
+  UTC `builtAt` с секундами либо миллисекундами и проверяет полный lowercase
+  SHA или безопасный Git ref. Точные поля исходного/исполняемого кода
+  отклоняются, включая вложенный `source`; обязательный корневой
+  `manifest.source` разрешён явно. Harmless HTML-разметка и техническая проза в
+  JSON Schema не считаются кодом без высокодостоверного executable-признака.
+  DTO тестируется с фактическим
+  глобальным режимом `whitelist`: вложенный manifest остаётся непрозрачным для
+  предварительного strip и неизвестные/опасные поля доходят до строгого
+  валидатора. TypeORM metadata отдельно
+  собрана без подключения к БД: две колонки сайта, одиночный и составной FK и
+  обе уникальности версии разрешаются корректно. Миграции намеренно не
+  запускались: проверка на отдельной БД остаётся для интеграционного этапа.
+  Статическая URL-проверка не выполняет DNS resolution, поэтому защита от DNS
+  rebinding должна дополнительно обеспечиваться сетевой политикой preview-
+  окружения; сам API по runtime URL сетевые запросы не выполняет. Task 5
+  реализовала идемпотентную служебную регистрацию кандидатов, read-only
+  preflight и транзакционный deploy-report с безопасным системным аудитом;
+  регистрация не
+  меняет каталог шаблонов и текущие указатели сайтов. Пользовательский read API
+  реализован в Task 6; Task 7 добавила локальную CI-like команду. CI/CD и
+  отдельный репозиторий Skinova пока только моделируются служебной командой;
+  внешняя автоматизация и VDS не затрагиваются. Для Task 7 зафиксирован
+  ожидаемый RED 0/6 на отсутствующем release CLI; отдельные regressions дали
+  RED 5/6 на stale self-referential build-полях и 6/7 на token-forwarding
+  через redirect. Spec-review TDD отдельно зафиксировал RED на разных `builtAt`
+  у двух неизменившихся регистраций, отсутствии import-safe collector,
+  зависании принятого, но не отвечающего HTTP-запроса и отсутствии безопасной
+  проверки некорректного Git timestamp; все четыре класса регрессий закрыты.
+  Итоговый behavior-набор после повторного quality/security-review — 21/21.
+  Повторный TDD-цикл сначала дал ожидаемый RED 0/6 на build inputs, CSS import,
+  gitlink и timeout lifecycle, затем GREEN 6/6. Re-review type routing отдельно
+  дал RED 0/2 на production-like YAML lock/Dockerfile bytes, затем GREEN 2/2.
+  Полный набор проверяет
+  методы/path/body/header каждой независимой операции,
+  два полностью одинаковых manifest для одного Git commit/tree, canonical
+  digest, независимость от traversal order, mtime и CRLF checkout,
+  чувствительность к committed transitive bytes/path, полный preview route
+  discovery и AST/CSS import graph, fail-closed dirty tracked/untracked
+  source/build inputs, symlink/gitlink, nonliteral dynamic import/require и
+  missing local import, а также отсутствие request timer до успешной сборки
+  body,
+  обязательный env token, запрет redirect, ограниченный timeout, отсутствие
+  утечек, strict HTTPS/loopback policy и безопасное сообщение 409 о повышении
+  `packageVersion`. Binary/font coverage рекурсивного collector проверена
+  fixture-файлом WOFF2; защита symlink дополнительно проверена mutation RED
+  (без проверки mode тест падает, после восстановления GREEN 1/1). Текущий
+  intentionally dirty root корректно не может
+  выпустить релиз до утверждённого коммита; lifecycle Task 9 должен выполняться
+  на committed tree. Task 3–6 API regression — 12 suites / 172 tests.
+  Node 22 syntax, загрузка Babel parser, compose config, Web production build
+  и API production build проверены локально. Nested
+  lockfile, `pnpm-workspace.yaml`, БД, VDS и внешние сервисы не изменялись.
+  Для Task 8 до production-кода зафиксирован ожидаемый RED role/UI-контракта
+  0/4; после реализации контракт — 4/4, релевантные Web contract-регрессии —
+  25/25. Первый review-TDD отдельно дал ожидаемый RED: manager оставался на
+  закрытом `view=templates`, delayed response сайта A перезаписывал уже
+  выбранный сайт B, а ошибка candidates скрывала успешно прочитанный current;
+  по группе resilience остальные loading/null-current/current-error сценарии
+  уже проходили 3/4. После исправления полностью изолированный Playwright
+  workflow — 8/8. Quality-review TDD отдельно дал ожидаемый RED 0/3: current
+  не появлялся до завершения deferred candidates, full source revision не был
+  найден в DOM, а mobile-панель с 100-символьными валидными identifiers имела
+  `scrollWidth > clientWidth`. После исправления эти сценарии — 3/3, полный
+  изолированный workflow — 10/10. Финальная родительская перепроверка также
+  дала contract 4/4, workflow 10/10, TypeScript/ESLint без ошибок и успешную
+  production Web build; desktop/mobile screenshots сохранены вне репозитория.
+  Workflow проверяет current+candidates для Wispo admin, current-only и
+  отсутствие platform-запроса для владельца, отсутствие меню/страницы и всех
+  release-read запросов для content manager после положительной проверки
+  hydration/доступного экрана, серверный preview URL, отсутствие release-
+  мутаций, stale cross-site response, delayed loading, пустое состояние и
+  независимые current/candidates loading/errors при рабочем каталоге шаблонов,
+  полный Git revision в DOM и mobile wrapping длинных identifiers. Web
+  TypeScript, адресный ESLint и production build успешны.
+- Коммит реализации: не создан — только после локальной проверки и
+  подтверждения владельцем.
+- Выкладка: не было. `main`, GitHub, VDS и внешние БД не изменялись.
+- Восстановление: `down()` схемы отказывается удалять реестр, пока существуют
+  пакеты, версии, привязки сайта или строки новых template-kind. `down()`
+  data-миграции снимает назначение только при полном совпадении точной строки и
+  всех четырёх значений `skinova@1`; отдельного provenance-маркера у присваивания
+  нет, поэтому это best-effort защита. Destructive down на внешней БД не
+  запускается вместо штатного восстановления; нужны резервная копия и
+  предварительная проверка на отдельной БД.
+
 ### 2026-10-02 · Удаление редактирования кода из CMS
 
 - Статус: **Готово, не выложено**.

@@ -6,8 +6,14 @@
   "scripts": {
     "dev:web": "pnpm --dir apps/web dev",
     "dev:api": "pnpm --dir apps/api start:dev",
+    "template-package:register:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs register",
+    "template-package:preflight:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs preflight",
+    "template-package:report-deployed:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs report-deployed",
     "build": "pnpm --dir apps/web build && pnpm --dir apps/api build",
     "lint": "pnpm --dir apps/web lint && pnpm --dir apps/api lint",
     "test": "pnpm --dir apps/api test --runInBand"
+  },
+  "devDependencies": {
+    "@babel/parser": "7.29.8"
   }
 }

@@ -485,13 +485,26 @@ function Dashboard({
           workspaceItem.sites.some((siteItem) => siteItem.id === siteId),
         );
         if (targetWorkspace) {
+          const targetSite = targetWorkspace.sites.find(
+            (siteItem) => siteItem.id === siteId,
+          );
+          if (!targetSite) return;
+          const requestedView = view as View;
+          const effectiveView: View =
+            requestedView === "templates" &&
+            !siteCapabilities(isWispoAdmin, targetSite.access)
+              .canManageStructure
+              ? targetSite.siteType === "media"
+                ? "site"
+                : "homepage"
+              : requestedView;
           setSelectedWorkspaceId(targetWorkspace.id);
           setExpandedWorkspaceId(targetWorkspace.id);
           setSelectedSiteId(siteId);
-          setActiveView(view as View);
+          setActiveView(effectiveView);
           const restoredSettings = url.searchParams.get("settings");
           if (
-            view === "settings" &&
+            effectiveView === "settings" &&
             ["management", "domain", "dates", "product"].includes(
               restoredSettings ?? "",
             )
@@ -499,13 +512,17 @@ function Dashboard({
             setSiteSettingsSection(restoredSettings as SiteSettingsSection);
           }
           const settingsView = ["globals", "integration", "settings"].includes(
-            view,
+            effectiveView,
           );
           setSiteSectionExpanded(!settingsView);
           setSettingsSectionExpanded(settingsView);
           setContentCenterExpanded(false);
           setNavigationTarget(null);
           loadSiteStructure(siteId);
+          if (effectiveView !== requestedView) {
+            url.searchParams.set("view", effectiveView);
+            window.history.replaceState({}, "", url);
+          }
           return;
         }
       }
@@ -2536,7 +2553,9 @@ function Dashboard({
           site?.siteType === "media" &&
           canManageStructure ? (
           <MediaTemplatesView
+            key={site.id}
             siteId={site.id}
+            isWispoAdmin={isWispoAdmin}
             canManageStructure={canManageStructure}
             canApprove={canApprove}
             canPublishDirectly={canEditPublished}

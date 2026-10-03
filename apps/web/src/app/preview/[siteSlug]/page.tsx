@@ -21,15 +21,12 @@ import {
 } from "../../public-server-data";
 import { resolvePublicBannerHref } from "../../public-banner-link";
 import {
-  SkinovaHome,
   type SkinovaArticle,
   type SkinovaBanner,
   type SkinovaCategory,
 } from "../../skinova-site";
-import {
-  SKINOVA_HOME_TEMPLATE_KEY,
-  SKINOVA_TEMPLATE_VERSION,
-} from "../../skinova-template";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "../../template-package-contract";
+import { resolveTemplateComponent } from "../../template-runtime-registry";
 
 type PageBlock = {
   id: string;
@@ -293,10 +290,17 @@ export default async function PublicSitePage({
     );
   }
 
-  if (
-    homepage?.systemTemplateKey === SKINOVA_HOME_TEMPLATE_KEY &&
-    homepage.systemTemplateVersion === SKINOVA_TEMPLATE_VERSION
-  ) {
+  const homepageRuntime = homepage
+    ? resolveTemplateComponent({
+        packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+        packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+        kind: "homepage",
+        key: homepage.systemTemplateKey ?? "",
+        templateVersion: homepage.systemTemplateVersion ?? "",
+      })
+    : null;
+  if (homepageRuntime?.implementationKey === "skinova-home") {
+    const HomepageRenderer = homepageRuntime.renderer;
     return (
       <>
         {cmsPreview ? (
@@ -306,7 +310,7 @@ export default async function PublicSitePage({
             <Link href="/">Вернуться в CMS</Link>
           </div>
         ) : null}
-        <SkinovaHome
+        <HomepageRenderer
           siteSlug={siteSlug}
           categories={data.categories ?? []}
           articles={data.articles as SkinovaArticle[]}

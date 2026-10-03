@@ -19,12 +19,12 @@ import {
   NotFoundTemplate,
   type NotFoundTemplateData,
 } from "../../../../not-found-template";
-import {
-  SkinovaSystemPage,
-  type SkinovaBanner,
-  type SkinovaCategory,
+import type {
+  SkinovaBanner,
+  SkinovaCategory,
 } from "../../../../skinova-site";
-import { SKINOVA_HEADER_TEMPLATE_KEY } from "../../../../skinova-template";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "../../../../template-package-contract";
+import { resolveTemplateComponent } from "../../../../template-runtime-registry";
 
 type PageBlock = {
   id: string;
@@ -63,6 +63,8 @@ type PublicPageData = {
     ogDescription: string | null;
     ogImageMediaId: string | null;
     structuredData: Record<string, unknown> | null;
+    systemTemplateKey: string | null;
+    systemTemplateVersion: string | null;
   };
   pages: Array<{ id: string; title: string; slug: string }>;
   banners: SkinovaBanner[];
@@ -215,10 +217,18 @@ export default async function PublicInnerPage({
 
   const data = result.data;
   const { page, pages, site } = data;
+  const systemPageRuntime = resolveTemplateComponent({
+    packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+    packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+    kind: "system_page",
+    key: page.systemTemplateKey ?? "",
+    templateVersion: page.systemTemplateVersion ?? "",
+  });
   if (
-    site.layoutSettings.headerTemplateKey === SKINOVA_HEADER_TEMPLATE_KEY &&
+    systemPageRuntime?.implementationKey === "skinova-system-page" &&
     (page.slug === "404" || page.slug === "privacy-policy")
   ) {
+    const SystemPageRenderer = systemPageRuntime.renderer;
     const firstBlock = page.blocks[0];
     return (
       <>
@@ -229,7 +239,7 @@ export default async function PublicInnerPage({
             <Link href="/">Вернуться в CMS</Link>
           </div>
         ) : null}
-        <SkinovaSystemPage
+        <SystemPageRenderer
           siteSlug={siteSlug}
           title={firstBlock?.title || page.title}
           text={

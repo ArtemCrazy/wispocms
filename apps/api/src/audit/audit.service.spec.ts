@@ -78,6 +78,75 @@ describe('audit logging', () => {
     );
   });
 
+  it('stores a safe system event without accepting token or manifest payloads', async () => {
+    const auditLogs = {
+      create: jest.fn((entry: Record<string, unknown>) => entry),
+      save: jest.fn((entry: Record<string, unknown>) => Promise.resolve(entry)),
+    };
+    const service = new AuditService(
+      auditLogs as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    await service.recordSystemEvent({
+      event: 'template_package_registered',
+      entityId: 'version-id',
+      packageId: 'skinova-media',
+      packageVersion: '1',
+      releaseDigest: 'a'.repeat(64),
+      status: 'registered',
+      reasons: [],
+    });
+
+    expect(auditLogs.save).toHaveBeenCalledTimes(1);
+    const savedEvent = JSON.stringify(auditLogs.save.mock.calls[0][0]);
+    expect(savedEvent).toContain('Release pipeline');
+    expect(savedEvent).toContain('template_package_version');
+    expect(savedEvent).toContain('template_package_registered');
+    expect(savedEvent).toContain('skinova-media');
+    expect(savedEvent).not.toMatch(/token|manifest|secret/i);
+  });
+
+  it('uses the transaction repository for an atomic system event', async () => {
+    const injectedAuditLogs = {
+      create: jest.fn((entry: Record<string, unknown>) => entry),
+      save: jest.fn((entry: Record<string, unknown>) => Promise.resolve(entry)),
+    };
+    const transactionAuditLogs = {
+      create: jest.fn((entry: Record<string, unknown>) => entry),
+      save: jest.fn((entry: Record<string, unknown>) => Promise.resolve(entry)),
+    };
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(transactionAuditLogs),
+    };
+    const service = new AuditService(
+      injectedAuditLogs as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    await service.recordSystemEvent(
+      {
+        event: 'template_package_deployed',
+        entityId: 'version-id',
+        workspaceId: 'workspace-id',
+        siteId: 'site-id',
+        packageId: 'skinova-media',
+        packageVersion: '1',
+        releaseDigest: 'a'.repeat(64),
+        status: 'ready',
+        reasons: [],
+      },
+      manager as never,
+    );
+
+    expect(manager.getRepository).toHaveBeenCalled();
+    expect(transactionAuditLogs.save).toHaveBeenCalledTimes(1);
+    expect(injectedAuditLogs.save).not.toHaveBeenCalled();
+  });
+
   it('returns 403 for site history outside employee assignments', async () => {
     const service = new AuditService(
       {} as never,

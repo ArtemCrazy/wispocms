@@ -14,7 +14,7 @@ describe('buildPublicIntegrationManifest', () => {
   it('describes the versioned public contract using portable relative paths', () => {
     const manifest = buildPublicIntegrationManifest(site);
 
-    expect(manifest.schemaVersion).toBe('1.1');
+    expect(manifest.schemaVersion).toBe('1.2');
     expect(manifest.site).toEqual({
       name: site.name,
       slug: site.slug,
@@ -25,6 +25,7 @@ describe('buildPublicIntegrationManifest', () => {
     expect(manifest.endpoints.site).toBe('/api/public/sites/wispo-media');
     expect(manifest.endpoints.manifest).not.toMatch(/^https?:\/\//);
     expect(manifest.rendering.arbitraryCodeInCms).toBe(false);
+    expect(manifest.templatePackage).toBeNull();
   });
 
   it.each([
@@ -59,10 +60,66 @@ describe('buildPublicIntegrationManifest', () => {
     );
     expect(manifest.routes.category).toBe('/categories/{categorySlug}');
     expect(manifest.contentModel.article).toEqual(
-      expect.arrayContaining(['bodyDocument', 'documentVersion']),
+      expect.arrayContaining([
+        'bodyDocument',
+        'documentVersion',
+        'displayTemplateKey',
+        'displayTemplateVersion',
+        'displayTemplateConfig',
+      ]),
     );
     expect(manifest.contentModel.category).toEqual(
-      expect.arrayContaining(['name', 'slug', 'status', 'canonicalUrl']),
+      expect.arrayContaining([
+        'name',
+        'slug',
+        'status',
+        'canonicalUrl',
+        'displayTemplateKey',
+        'displayTemplateVersion',
+        'displayTemplateConfig',
+      ]),
+    );
+    expect(manifest.contentModel.page).toEqual(
+      expect.arrayContaining(['systemTemplateKey', 'systemTemplateVersion']),
+    );
+  });
+
+  it('publishes only the current package identity and supported templates', () => {
+    const manifest = buildPublicIntegrationManifest({
+      ...site,
+      templatePackage: {
+        packageId: 'skinova-media',
+      },
+      currentTemplatePackageVersion: {
+        packageVersion: '1',
+        sourceRevision: '0123456789abcdef0123456789abcdef01234567',
+        releaseDigest: 'a'.repeat(64),
+        artifactDigest: null,
+        manifest: {
+          secret: 'must-not-leak',
+          templates: [
+            {
+              kind: 'article',
+              key: 'skinova-article',
+              version: '1',
+              dataSchema: { type: 'object' },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(manifest.templatePackage).toEqual({
+      packageId: 'skinova-media',
+      packageVersion: '1',
+      sourceRevision: '0123456789abcdef0123456789abcdef01234567',
+      releaseDigest: 'a'.repeat(64),
+      artifactDigest: null,
+      templates: [{ kind: 'article', key: 'skinova-article', version: '1' }],
+    });
+    expect(JSON.stringify(manifest.templatePackage)).not.toContain('secret');
+    expect(JSON.stringify(manifest.templatePackage)).not.toContain(
+      'dataSchema',
     );
   });
 

@@ -50,6 +50,8 @@ import { RemainingMetadataRevisionTypes1790210000000 } from './migrations/179021
 import { SiteAccessAssignments1791523200000 } from './migrations/1791523200000-SiteAccessAssignments';
 import { AdminPasswordEmailConfirmation1791613200000 } from './migrations/1791613200000-AdminPasswordEmailConfirmation';
 import { RemoveCmsCodeEditing1791703200000 } from './migrations/1791703200000-RemoveCmsCodeEditing';
+import { TemplatePackageRegistry1791789600000 } from './migrations/1791789600000-TemplatePackageRegistry';
+import { AssignSkinovaSystemTemplate1791793200000 } from './migrations/1791793200000-AssignSkinovaSystemTemplate';
 
 export function createDataSourceOptions(): DataSourceOptions {
   return {
@@ -106,6 +108,8 @@ export function createDataSourceOptions(): DataSourceOptions {
       SiteAccessAssignments1791523200000,
       AdminPasswordEmailConfirmation1791613200000,
       RemoveCmsCodeEditing1791703200000,
+      TemplatePackageRegistry1791789600000,
+      AssignSkinovaSystemTemplate1791793200000,
     ],
     migrationsRun: true,
     migrationsTransactionMode: 'all',
