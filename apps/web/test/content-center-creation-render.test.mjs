@@ -74,6 +74,19 @@ test("launch dialog loads the actual context before enabling generation; all blo
   ]) assert.match(launchBlockReason({ ...props, ...override }), message);
 });
 
+test("table requires selected topics before preparation and exposes explicit select all", () => {
+  const { CreationTable } = load("creation-table");
+  const clusters = [{ id: "active", number: 1, title: "Тема", direction: "", queries: [], archived: false }, { id: "old", number: 2, title: "Архив", direction: "", queries: [], archived: true }];
+  const props = { data: { clusters, articles: [], sites: [], settings: { platforms: [] } }, filtered: clusters, selected: [], setSelected() {}, filters: { search: "", direction: "", status: "", recommendation: "" }, setFilter() {}, onAdd() {}, onCluster() {}, onArticle() {}, onMerge() {}, onPrepare() {} };
+  const empty = renderToStaticMarkup(React.createElement(CreationTable, props));
+  assert.match(empty, /disabled="">Подготовить статьи/);
+  assert.match(empty, /Выбрать все актуальные темы \(1\)/);
+  assert.doesNotMatch(empty, /<textarea/);
+  const selected = renderToStaticMarkup(React.createElement(CreationTable, { ...props, selected: ["active", "old"] }));
+  assert.match(selected, />Подготовить статьи \(1\)/);
+  assert.doesNotMatch(selected, /disabled="">Подготовить статьи/);
+});
+
 test("progress renders real outcomes, cluster details, empty state and retry only for production failures", () => {
   const { CreationProgress, RecentRunList } = load("creation-progress");
   const run = { id: "r", number: 4, kind: "production", status: "partial", cluster_count: 1, created_at: "2026-10-02T00:00:00Z", actor_name: "Редактор", operations: [
