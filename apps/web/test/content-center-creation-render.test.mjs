@@ -85,6 +85,18 @@ test("table requires selected topics before preparation and exposes explicit sel
   const selected = renderToStaticMarkup(React.createElement(CreationTable, { ...props, selected: ["active", "old"] }));
   assert.match(selected, />Подготовить статьи \(1\)/);
   assert.doesNotMatch(selected, /disabled="">Подготовить статьи/);
+  for (const count of [0, 1, 2]) {
+    const sites = Array.from({ length: count }, (_, i) => ({ id: `s${i}`, name: `Площадка ${i}` }));
+    const html = renderToStaticMarkup(React.createElement(CreationTable, { ...props, data: { ...props.data, sites, settings: { platforms: sites.map(s => ({ siteId: s.id })) } } }));
+    const head = html.match(/<thead>(.*?)<\/thead>/s)[1];
+    assert.equal((head.match(/<tr>/g) || []).length, count > 1 ? 2 : 1);
+    if (count === 1) {
+      assert.doesNotMatch(head, /Площадка 0/);
+      assert.match(head, /Статья и статус/);
+      assert.match(head, /Рекомендация AI/);
+    }
+    if (count === 2) assert.match(head, /Площадка 0.*Площадка 1/s);
+  }
 });
 
 test("progress renders real outcomes, cluster details, empty state and retry only for production failures", () => {

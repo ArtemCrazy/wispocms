@@ -60,6 +60,7 @@ export function CreationTable({
     size,
   );
   const platforms = tablePlatforms(data);
+  const headerRows = platforms.length > 1 ? 2 : 1;
   const activeRows = collapsed.active
     ? []
     : page.rows.filter((c) => !c.archived);
@@ -223,7 +224,7 @@ export function CreationTable({
           </colgroup>
           <thead>
             <tr>
-              <th rowSpan={2} className={styles.matrixCheck}>
+              <th rowSpan={headerRows} className={styles.matrixCheck}>
                 <input
                   ref={checkbox}
                   type="checkbox"
@@ -241,53 +242,89 @@ export function CreationTable({
                   }
                 />
               </th>
-              <th rowSpan={2} scope="col" className={styles.matrixIndex}>
+              <th
+                rowSpan={headerRows}
+                scope="col"
+                className={styles.matrixIndex}
+              >
                 №
               </th>
-              <th rowSpan={2} scope="col" className={styles.matrixTitle}>
+              <th
+                rowSpan={headerRows}
+                scope="col"
+                className={styles.matrixTitle}
+              >
                 Кластер
               </th>
-              <th rowSpan={2} scope="col" className={styles.matrixDirection}>
+              <th
+                rowSpan={headerRows}
+                scope="col"
+                className={styles.matrixDirection}
+              >
                 Направление
               </th>
-              <th rowSpan={2} scope="col" className={styles.matrixNumber}>
+              <th
+                rowSpan={headerRows}
+                scope="col"
+                className={styles.matrixNumber}
+              >
                 Запросов
               </th>
-              <th rowSpan={2} scope="col" className={styles.matrixNumber}>
+              <th
+                rowSpan={headerRows}
+                scope="col"
+                className={styles.matrixNumber}
+              >
                 Общая частотность
               </th>
-              <th rowSpan={2} scope="col" className={styles.matrixNumber}>
+              <th
+                rowSpan={headerRows}
+                scope="col"
+                className={styles.matrixNumber}
+              >
                 Точная частотность
               </th>
-              {platforms.map((p) => (
-                <th
-                  colSpan={2}
-                  scope="colgroup"
-                  className={styles.matrixPlatformHead}
-                  key={p.id}
-                >
-                  {p.name}
-                  {!p.connected && <small>Не подключена</small>}
-                </th>
-              ))}
-              {!platforms.length && (
-                <th rowSpan={2} scope="col">
-                  Площадки
-                </th>
-              )}
-            </tr>
-            <tr>
-              {platforms.map((p) => (
-                <Fragment key={p.id}>
+              {platforms.length === 1 && (
+                <>
                   <th scope="col" className={styles.matrixStatus}>
                     Статья и статус
+                    {!platforms[0].connected && (
+                      <small> · Площадка не подключена</small>
+                    )}
                   </th>
                   <th scope="col" className={styles.matrixRecommendation}>
                     Рекомендация AI
                   </th>
-                </Fragment>
-              ))}
+                </>
+              )}
+              {platforms.length > 1 &&
+                platforms.map((p) => (
+                  <th
+                    colSpan={2}
+                    scope="colgroup"
+                    className={styles.matrixPlatformHead}
+                    key={p.id}
+                  >
+                    {p.name}
+                    {!p.connected && <small>Не подключена</small>}
+                  </th>
+                ))}
+              {!platforms.length && <th scope="col">Площадки</th>}
             </tr>
+            {platforms.length > 1 && (
+              <tr>
+                {platforms.map((p) => (
+                  <Fragment key={p.id}>
+                    <th scope="col" className={styles.matrixStatus}>
+                      Статья и статус
+                    </th>
+                    <th scope="col" className={styles.matrixRecommendation}>
+                      Рекомендация AI
+                    </th>
+                  </Fragment>
+                ))}
+              </tr>
+            )}
           </thead>
           <tbody>
             {([false, true] as const).map((archived) => {
