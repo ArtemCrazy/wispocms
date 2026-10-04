@@ -30,8 +30,9 @@
 
 ### 2026-10-04 · Отступы стрелок фильтров
 
-- Статус: **В работе**. Артём / Codex, `feature/creation-publication-stage-7`. Tier 0: три select-фильтра таблицы, единый отступ стрелки справа и резерв под неё. Нативные select и их обработчики сохраняются; БД, данные, API и миграции не меняются.
-- Файл: `content-center-view.module.css`. Проверки и выкладка ожидаются.
+- Статус: **Выложено**. Артём / Codex, `feature/creation-publication-stage-7`. Tier 0: три select-фильтра таблицы, единый отступ стрелки справа и резерв под неё. Нативные select и их обработчики сохраняются; БД, данные, API и миграции не меняются.
+- Файл: `content-center-view.module.css`. Diff --check, production build/TypeScript пройдены. Browser подтвердил у всех трёх фильтров padding-right 42px, стрелку 16×16 с отступом 14px и центровкой по высоте; существующая SVG возвращает HTTP 200. Для forced-colors сохранена нативная стрелка.
+- Выкладка 04.10.2026: `8e745a0`, web image `wispo-cms-web:select-8e745a0` (`1d99550315b8`), API health ok. Откат: `wispo-cms-web:before-select-8e745a0`, исходники `dialog-1f39f2d`, архив `wispo-1f39f2d.tar.gz` на сервере и в `E:/backups/Wispo-CMS-archive-20260924/customer/releases/20261001-access-control/` с совпавшей SHA256.
 
 ### 2026-10-04 · Оформление окна подготовки статей
 
