@@ -88,6 +88,9 @@ test("table shows explicit selected topic names after rows and keeps preparation
   assert.doesNotMatch(empty, /Выбрать все актуальные темы/);
   assert.match(empty, /Выбрать все темы для работы на этой странице/);
   assert.match(empty, /Добавить тему/);
+  assert.match(empty, /<button aria-expanded="false"[^>]*>.*?Архивные темы/s);
+  assert.match(empty, /<button aria-expanded="true"[^>]*>.*?Темы для работы/s);
+  assert.doesNotMatch(empty, />Архив<\/button>/);
   assert.ok(empty.indexOf("Подготовить статьи</button>") > empty.indexOf("</table>"));
   assert.doesNotMatch(empty, /<textarea/);
   const selected = renderToStaticMarkup(React.createElement(CreationTable, { ...props, selected: ["active", "old"] }));
@@ -165,10 +168,11 @@ test("creation table groups platforms, keeps archives read-only and renders arti
   }));
   assert.match(html, /colSpan="2" scope="colgroup"[^>]*>Сайт/);
   assert.match(html, /Практический гид/);
-  assert.match(html, /Актуальные кластеры/);
-  assert.match(html, /Архивные кластеры/);
-  assert.match(html, /Выбрать кластер 1/);
-  assert.doesNotMatch(html, /Выбрать кластер 2/);
+  assert.match(html, /Темы для работы/);
+  assert.match(html, /Архивные темы/);
+  assert.match(html, /Выбрать тему «Уход за кожей»/);
+  assert.doesNotMatch(html, /Выбрать тему «Архивный кластер»/);
+  assert.doesNotMatch(html, />Архивный кластер<\/button>/);
   assert.match(html, /Не создана/);
   assert.match(html, /Страница 1 из 1/);
 });

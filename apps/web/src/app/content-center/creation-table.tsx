@@ -51,7 +51,7 @@ export function CreationTable({
   const [pagination, setPagination] = useState({ key: "", page: 1 });
   const [collapsed, setCollapsed] = useState({
     active: false,
-    archived: false,
+    archived: true,
   });
   const filterKey = JSON.stringify([filters, size]);
   const page = clusterPage(
