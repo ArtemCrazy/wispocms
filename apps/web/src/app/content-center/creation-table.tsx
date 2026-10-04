@@ -98,19 +98,6 @@ export function CreationTable({
         </h2>
         <button onClick={onAdd}>+ Добавить тему</button>
       </div>
-      {onPrepare && (
-        <div className={styles.topicIntro}>
-          <p className={styles.muted}>
-            Каждая строка — тема будущей статьи. Тема и связанные поисковые
-            запросы называются кластером. Новую тему можно задать через
-            «Добавить тему».
-          </p>
-          <p>
-            Отметьте нужные строки галочками слева. Затем нажмите «Подготовить
-            статьи» под таблицей.
-          </p>
-        </div>
-      )}
       <div className={styles.contentTableFilters}>
         <label className={`${styles.field} ${styles.contentTableSearch}`}>
           <span className={styles.visuallyHidden}>Поиск по темам</span>
