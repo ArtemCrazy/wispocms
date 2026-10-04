@@ -31,7 +31,7 @@
 ### 2026-10-04 · Выравнивание стрелок групп
 
 - Статус: **Выложено**. Артём / Codex, `feature/creation-publication-stage-7`. Tier 0: центровка стрелок относительно чекбоксов и текста, без изменения раскрытия групп, данных, API, БД или миграций.
-- Файлы: `creation-table.tsx`, `content-center-view.module.css`. ESLint, diff --check, production build/TypeScript пройдены. Browser: центры SVG и чекбоксов совпали (x=56), центры SVG по Y совпали с центрами строк; сворачивание/раскрытие обеих групп проверено.
+- Файлы: `creation-table.tsx`, `content-center-view.module.css`. ESLint, diff --check, production build/TypeScript пройдены. Browser: центры SVG и чекбоксов совпали (x=56), центры SVG по Y совпали с центрами строк. Повторный клик по группам не подтверждён: Browser вернул `No node found at given location`; обработчики раскрытия не менялись.
 - Выкладка 04.10.2026: `05da0a3`, web image `wispo-cms-web:arrows-05da0a3` (`f092d3d2e77c`), API health ok. Откат: `wispo-cms-web:before-arrows-05da0a3`, исходники `header-9d7c260`, архив `wispo-9d7c260.tar.gz` на сервере и в `E:/backups/Wispo-CMS-archive-20260924/customer/releases/20261001-access-control/` с совпавшей SHA256.
 
 ### 2026-10-04 · Компактная шапка таблицы
