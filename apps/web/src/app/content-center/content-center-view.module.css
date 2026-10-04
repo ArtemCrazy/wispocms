@@ -326,6 +326,21 @@
 .creationQueryEditor .field:first-of-type {
   grid-column: 1/-1;
 }
+.topicEditorForm { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.topicEditorDialog .creationQueryEditor { display: grid; gap: 12px; margin: 16px 0; }
+.topicEditorDialog .creationQueryEditor > div { grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 145px)); align-items: end; gap: 12px; padding: 14px; margin: 0; background: #faf9fd; }
+.topicEditorDialog .creationQueryEditor .field { min-width: 0; margin: 0; grid-column: auto; font-size: 13px; }
+.topicEditorDialog .creationQueryEditor .creationCheckbox { grid-column: 1 / 3; grid-row: 1; align-self: center; margin: 0; font-size: 13px; }
+.topicEditorDialog .creationQueryEditor .queryTextField { grid-column: 1; grid-row: 2; }
+.topicEditorDialog .queryRemove { grid-column: 3; grid-row: 1; justify-self: end; align-self: center; padding: 6px 10px; font-size: 12px; }
+.topicEditorDialog input[type="radio"], .topicEditorDialog input[type="checkbox"] { width: 18px; height: 18px; min-height: 0; padding: 0; }
+.topicEditorDialog .creationCheckbox { margin: 16px 0 0; }
+@media (max-width: 600px) {
+  .topicEditorDialog .creationQueryEditor > div { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
+  .topicEditorDialog .creationQueryEditor .creationCheckbox { grid-column: 1; }
+  .topicEditorDialog .queryRemove { grid-column: 2; }
+  .topicEditorDialog .creationQueryEditor .queryTextField { grid-column: 1 / -1; }
+}
 .creationPublication {
   border-top: 1px solid #e3e2ed;
   margin-top: 18px;

@@ -494,8 +494,10 @@ export function CreationView({
           title={clusterEdit.id ? "Редактирование кластера" : "Новый кластер"}
           close={() => setClusterEdit(null)}
           busy={busy}
+          className={`${styles.launchDialog} ${styles.topicEditorDialog}`}
         >
           <form
+            className={styles.topicEditorForm}
             onSubmit={(e) => {
               e.preventDefault();
               void act(async () => {
@@ -509,123 +511,135 @@ export function CreationView({
               });
             }}
           >
-            <p className={styles.muted}>
-              Название формируется по основному запросу. Направление — метка для
-              группировки, не отдельная сущность.
-            </p>
-            <label className={styles.field}>
-              Направление
-              <input
-                maxLength={160}
-                value={clusterEdit.direction}
-                onChange={(e) =>
-                  setClusterEdit({ ...clusterEdit, direction: e.target.value })
-                }
-              />
-            </label>
-            <div className={styles.creationQueryEditor}>
-              {clusterEdit.queries.map((q, i) => (
-                <div key={i}>
-                  <label className={styles.creationCheckbox}>
-                    <input
-                      type="radio"
-                      name="primary-query"
-                      aria-label={`Основной запрос ${i + 1}`}
-                      checked={q.primary}
-                      onChange={() =>
-                        setClusterEdit({
-                          ...clusterEdit,
-                          queries: clusterEdit.queries.map((q, j) => ({
-                            ...q,
-                            primary: i === j,
-                          })),
-                        })
-                      }
-                    />
-                    Основной
-                  </label>
-                  <label className={styles.field}>
-                    Запрос {i + 1}
-                    <input
-                      required
-                      maxLength={240}
-                      value={q.text}
-                      onChange={(e) =>
-                        setClusterEdit({
-                          ...clusterEdit,
-                          queries: clusterEdit.queries.map((q, j) =>
-                            i === j ? { ...q, text: e.target.value } : q,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  {(["general", "exact"] as const).map((k) => (
-                    <label key={k} className={styles.field}>
-                      {k === "general" ? "Общая" : "Точная"} частотность
+            <div className={styles.launchBody}>
+              <p className={styles.muted}>
+                Название формируется по основному запросу. Направление — метка
+                для группировки, не отдельная сущность.
+              </p>
+              <label className={styles.field}>
+                Направление
+                <input
+                  maxLength={160}
+                  value={clusterEdit.direction}
+                  onChange={(e) =>
+                    setClusterEdit({
+                      ...clusterEdit,
+                      direction: e.target.value,
+                    })
+                  }
+                />
+              </label>
+              <div className={styles.creationQueryEditor}>
+                {clusterEdit.queries.map((q, i) => (
+                  <div key={i}>
+                    <label className={styles.creationCheckbox}>
                       <input
-                        type="number"
+                        type="radio"
+                        name="primary-query"
+                        aria-label={`Основной запрос ${i + 1}`}
+                        checked={q.primary}
+                        onChange={() =>
+                          setClusterEdit({
+                            ...clusterEdit,
+                            queries: clusterEdit.queries.map((q, j) => ({
+                              ...q,
+                              primary: i === j,
+                            })),
+                          })
+                        }
+                      />
+                      Основной
+                    </label>
+                    <label
+                      className={`${styles.field} ${styles.queryTextField}`}
+                    >
+                      Запрос {i + 1}
+                      <input
                         required
-                        min={0}
-                        max={2147483647}
-                        value={q[k]}
+                        maxLength={240}
+                        value={q.text}
                         onChange={(e) =>
                           setClusterEdit({
                             ...clusterEdit,
                             queries: clusterEdit.queries.map((q, j) =>
-                              i === j
-                                ? { ...q, [k]: Number(e.target.value) }
-                                : q,
+                              i === j ? { ...q, text: e.target.value } : q,
                             ),
                           })
                         }
                       />
                     </label>
-                  ))}
-                  <button
-                    type="button"
-                    disabled={clusterEdit.queries.length === 1}
-                    onClick={() => {
-                      const queries = clusterEdit.queries.filter(
-                        (_q, j) => j !== i,
-                      );
-                      if (q.primary)
-                        queries[0] = { ...queries[0], primary: true };
-                      setClusterEdit({ ...clusterEdit, queries });
-                    }}
-                  >
-                    Убрать запрос
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              type="button"
-              disabled={clusterEdit.queries.length >= 500}
-              onClick={() =>
-                setClusterEdit({
-                  ...clusterEdit,
-                  queries: [
-                    ...clusterEdit.queries,
-                    { ...emptyQuery(), primary: false },
-                  ],
-                })
-              }
-            >
-              Добавить запрос
-            </button>
-            <label className={styles.creationCheckbox}>
-              <input
-                type="checkbox"
-                checked={clusterEdit.archived}
-                onChange={(e) =>
-                  setClusterEdit({ ...clusterEdit, archived: e.target.checked })
+                    {(["general", "exact"] as const).map((k) => (
+                      <label key={k} className={styles.field}>
+                        {k === "general" ? "Общая" : "Точная"} частотность
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={2147483647}
+                          value={q[k]}
+                          onChange={(e) =>
+                            setClusterEdit({
+                              ...clusterEdit,
+                              queries: clusterEdit.queries.map((q, j) =>
+                                i === j
+                                  ? { ...q, [k]: Number(e.target.value) }
+                                  : q,
+                              ),
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                    <button
+                      type="button"
+                      className={styles.queryRemove}
+                      aria-label={`Убрать запрос ${i + 1}`}
+                      disabled={clusterEdit.queries.length === 1}
+                      onClick={() => {
+                        const queries = clusterEdit.queries.filter(
+                          (_q, j) => j !== i,
+                        );
+                        if (q.primary)
+                          queries[0] = { ...queries[0], primary: true };
+                        setClusterEdit({ ...clusterEdit, queries });
+                      }}
+                    >
+                      Убрать запрос
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={clusterEdit.queries.length >= 500}
+                onClick={() =>
+                  setClusterEdit({
+                    ...clusterEdit,
+                    queries: [
+                      ...clusterEdit.queries,
+                      { ...emptyQuery(), primary: false },
+                    ],
+                  })
                 }
-              />
-              В архиве (не участвует в запуске)
-            </label>
-            {error && <p className={styles.error}>{error}</p>}
-            <div className={styles.actions}>
+              >
+                Добавить запрос
+              </button>
+              <label className={styles.creationCheckbox}>
+                <input
+                  type="checkbox"
+                  checked={clusterEdit.archived}
+                  onChange={(e) =>
+                    setClusterEdit({
+                      ...clusterEdit,
+                      archived: e.target.checked,
+                    })
+                  }
+                />
+                В архиве (не участвует в запуске)
+              </label>
+              {error && <p className={styles.error}>{error}</p>}
+            </div>
+            <div className={styles.launchFooter}>
               <button className={styles.primary} disabled={busy}>
                 Сохранить кластер
               </button>
