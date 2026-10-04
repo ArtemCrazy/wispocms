@@ -203,6 +203,10 @@
 .contentTableFilters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 18px 0; }
 .contentTableFilters .field { margin: 0; min-width: 0; }
 .contentTableFilters input, .contentTableFilters select { width: 100%; min-width: 0; min-height: 40px; padding: 9px 12px; border: 1px solid #dedbe9; border-radius: 7px; background: white; color: #51495e; font: inherit; font-weight: 400; }
+.view .contentTableFilters select { appearance: none; padding-right: 42px; background-image: url("/icons/weeek/workspace-chevron.svg"); background-repeat: no-repeat; background-position: right 14px center; background-size: 16px 16px; }
+@media (forced-colors: active) {
+  .view .contentTableFilters select { appearance: auto; background-image: none; }
+}
 .contentTableSearch { grid-column: 1 / -1; }
 .tableSelection { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 12px; background: #f4f0ff; border-radius: 8px; font-size: 13px; }
 .contentTableScroll { max-width: 100%; overflow: auto; border: 1px solid #e8e5f1; border-radius: 9px; }
