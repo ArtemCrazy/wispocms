@@ -71,7 +71,7 @@ export function CreationProgress({
         {run.kind === "correction" ? "Корректировка" : "Запуск"} №{run.number} ·{" "}
         {creationDate(run.created_at)}
       </p>
-      <div className={styles.runProgressBar} data-error={hasErrors}>
+      <div className={styles.creationProgressMeter} data-error={hasErrors}>
         <progress
           aria-label="Обработанные операции"
           max={100}

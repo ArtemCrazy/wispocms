@@ -104,15 +104,15 @@
 .runPanels { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .runPanels .cardHead { flex-wrap: wrap; gap: 8px; }
 .runMeta, .runCounts { color: #81798d; font-size: 12px; margin: 8px 0 12px; }
-.runProgressBar { display: flex; align-items: center; gap: 16px; }
-.runProgressBar progress { appearance: none; width: 100%; height: 8px; border: 0; border-radius: 10px; background: #eae4fa; accent-color: #7054ec; overflow: hidden; }
-.runProgressBar progress::-webkit-progress-bar { background: #eae4fa; border-radius: 10px; }
-.runProgressBar progress::-webkit-progress-value { background: #7054ec; border-radius: 10px; }
-.runProgressBar progress::-moz-progress-bar { background: #7054ec; }
-.runProgressBar[data-error="true"] progress { accent-color: #c27936; }
-.runProgressBar[data-error="true"] progress::-webkit-progress-value { background: #c27936; }
-.runProgressBar[data-error="true"] progress::-moz-progress-bar { background: #c27936; }
-.runProgressBar strong { font-variant-numeric: tabular-nums; min-width: 40px; color: #514166; }
+.creationProgressMeter { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; min-width: 0; margin-top: 8px; }
+.creationProgressMeter progress { display: block; appearance: none; width: 100%; min-width: 0; height: 8px; margin: 0; border: 0; border-radius: 10px; background: #eae4fa; accent-color: #7054ec; overflow: hidden; }
+.creationProgressMeter progress::-webkit-progress-bar { background: #eae4fa; border-radius: 10px; }
+.creationProgressMeter progress::-webkit-progress-value { background: #7054ec; border-radius: 10px; }
+.creationProgressMeter progress::-moz-progress-bar { background: #7054ec; }
+.creationProgressMeter[data-error="true"] progress { accent-color: #c27936; }
+.creationProgressMeter[data-error="true"] progress::-webkit-progress-value { background: #c27936; }
+.creationProgressMeter[data-error="true"] progress::-moz-progress-bar { background: #c27936; }
+.creationProgressMeter strong { font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; white-space: nowrap; line-height: 1.55; color: #514166; }
 .runMessage { margin: 8px 0; font-size: 13px; color: #716780; }
 .runSteps { list-style: none; padding: 0; margin: 20px 0 0; }
 .runSteps li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px; margin: 12px 0; color: #81798d; font-size: 13px; }
