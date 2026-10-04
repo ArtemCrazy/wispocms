@@ -201,7 +201,26 @@ export function CreationTable({
         role="region"
         aria-label="Кластеры и статьи по площадкам"
       >
-        <table className={styles.contentMatrix}>
+        <table
+          className={styles.contentMatrix}
+          style={{ minWidth: 940 + Math.max(1, platforms.length) * 500 }}
+        >
+          <colgroup>
+            <col style={{ width: 44 }} />
+            <col style={{ width: 48 }} />
+            <col style={{ width: 300 }} />
+            <col style={{ width: 200 }} />
+            <col style={{ width: 88 }} />
+            <col style={{ width: 130 }} />
+            <col style={{ width: 130 }} />
+            {platforms.map((p) => (
+              <Fragment key={p.id}>
+                <col style={{ width: 280 }} />
+                <col style={{ width: 220 }} />
+              </Fragment>
+            ))}
+            {!platforms.length && <col style={{ width: 500 }} />}
+          </colgroup>
           <thead>
             <tr>
               <th rowSpan={2} className={styles.matrixCheck}>
@@ -222,7 +241,7 @@ export function CreationTable({
                   }
                 />
               </th>
-              <th rowSpan={2} scope="col">
+              <th rowSpan={2} scope="col" className={styles.matrixIndex}>
                 №
               </th>
               <th rowSpan={2} scope="col" className={styles.matrixTitle}>
