@@ -548,50 +548,70 @@ export function CreationArticle({
               ref={articleRef}
               aria-label="Актуальная статья"
             >
-              <h2>Актуальная статья</h2>
-              <p className={styles.muted}>
-                Выделите текст статьи для точечной корректировки. Инструкция
-                вводится отдельно.
-              </p>
-              <button
-                disabled={!selection}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  if (selection) choose(selection.target, selection.fragment);
-                }}
-              >
-                Изменить выделенный фрагмент с помощью AI
-              </button>
-              <div className={styles.creationElement}>
-                <h2 data-ai-target="title">{version.snapshot.title}</h2>
-                <button onClick={() => choose("title")}>
-                  Изменить с помощью AI
+              <div className={styles.articleReadingTools}>
+                <h2>Актуальная статья</h2>
+                <p className={styles.muted}>
+                  Выделите текст статьи для точечной корректировки. Инструкция
+                  вводится отдельно.
+                </p>
+                <button
+                  disabled={!selection}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    if (selection) choose(selection.target, selection.fragment);
+                  }}
+                >
+                  Изменить выделенный фрагмент с помощью AI
                 </button>
               </div>
-              {version.snapshot.excerpt && (
-                <div className={styles.creationElement}>
-                  <p data-ai-target="excerpt">{version.snapshot.excerpt}</p>
-                  <button onClick={() => choose("excerpt")}>
-                    Изменить с помощью AI
-                  </button>
-                </div>
-              )}
-              {version.snapshot.document.blocks.map((b) => (
-                <div key={b.id} className={styles.creationElement}>
-                  <div data-ai-target={`block:${b.id}`}>
-                    <Block
-                      block={b}
-                      siteSlug={articleSite?.slug ?? article.site_id}
-                    />
-                  </div>
+              <article
+                className={styles.articleProse}
+                aria-label="Текст актуальной статьи"
+              >
+                <div
+                  className={`${styles.creationElement} ${styles.articleTitle}`}
+                >
+                  <h2 data-ai-target="title">{version.snapshot.title}</h2>
                   <button
-                    aria-label={`Изменить с помощью AI: ${b.id}`}
-                    onClick={() => choose(`block:${b.id}`)}
+                    aria-label="Изменить заголовок с помощью AI"
+                    title="Изменить заголовок с помощью AI"
+                    onClick={() => choose("title")}
                   >
-                    Изменить с помощью AI
+                    AI
                   </button>
                 </div>
-              ))}
+                {version.snapshot.excerpt && (
+                  <div
+                    className={`${styles.creationElement} ${styles.articleLead}`}
+                  >
+                    <p data-ai-target="excerpt">{version.snapshot.excerpt}</p>
+                    <button
+                      aria-label="Изменить описание с помощью AI"
+                      title="Изменить описание с помощью AI"
+                      onClick={() => choose("excerpt")}
+                    >
+                      AI
+                    </button>
+                  </div>
+                )}
+                {version.snapshot.document.blocks.map((b) => (
+                  <div key={b.id} className={styles.creationElement}>
+                    <div data-ai-target={`block:${b.id}`}>
+                      <Block
+                        block={b}
+                        siteSlug={articleSite?.slug ?? article.site_id}
+                      />
+                    </div>
+                    <button
+                      aria-label={`Изменить с помощью AI: ${b.id}`}
+                      title="Изменить этот блок с помощью AI"
+                      onClick={() => choose(`block:${b.id}`)}
+                    >
+                      AI
+                    </button>
+                  </div>
+                ))}
+              </article>
             </section>
             <section
               ref={correctionRef}

@@ -253,6 +253,13 @@ test("article exposes per-proposal decisions, unpublished current-version notice
   ])
     assert.ok(html.includes(label), label);
   assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /<article[^>]*aria-label="Текст актуальной статьи"/);
+  assert.match(html, /data-ai-target="title"/);
+  assert.match(html, /data-ai-target="excerpt"/);
+  assert.match(html, /data-ai-target="block:one"/);
+  assert.match(html, /aria-label="Изменить заголовок с помощью AI"/);
+  assert.match(html, /aria-label="Изменить с помощью AI: one"/);
+  assert.doesNotMatch(html, />Изменить с помощью AI<\/button>/);
   assert.match(html, /type="file"/);
   assert.match(html, /Media/);
   assert.doesNotMatch(html, /Wrong platform/);

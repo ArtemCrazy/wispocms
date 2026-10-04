@@ -435,11 +435,94 @@
   }
 }
 .creationElement {
-  padding: 18px 0;
+  position: relative;
+  padding: 0 44px 0 0;
+  margin: 0 0 18px;
+}
+.articleProse .creationElement > button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 32px;
+  min-height: 32px;
+  padding: 4px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 20px;
+  color: #756c92;
+  background: #faf9fd;
+  border: 1px solid #e9e5f2;
+  border-radius: 8px;
+}
+.articleProse .creationElement > button:hover,
+.articleProse .creationElement > button:focus-visible {
+  color: #6243cc;
+  background: #f0ebff;
+  border-color: #a992ef;
+}
+.articleReadingTools {
+  padding-bottom: 20px;
+  margin-bottom: 32px;
   border-bottom: 1px solid #eeedf4;
 }
-.creationElement button {
-  margin-top: 12px;
+.articleProse {
+  max-width: 740px;
+  margin: 0 auto;
+  font-size: 16px;
+  line-height: 1.75;
+  color: #292735;
+}
+.articleProse p,
+.articleProse figure {
+  margin: 0;
+}
+.articleProse h2,
+.articleProse h3,
+.articleProse h4 {
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 28px 0 12px;
+  color: #242030;
+}
+.articleProse h2 { font-size: 24px; }
+.articleProse h3 { font-size: 21px; }
+.articleProse h4 { font-size: 18px; }
+.articleProse .articleTitle h2 {
+  margin: 0;
+  font-size: clamp(24px, 2.2vw, 32px);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.articleProse .articleLead {
+  color: #696176;
+  font-size: 18px;
+  margin-bottom: 28px;
+}
+.articleProse ul,
+.articleProse ol {
+  margin: 0;
+  padding-left: 24px;
+}
+.articleProse ul { list-style: disc; }
+.articleProse ol { list-style: decimal; }
+.articleProse li + li { margin-top: 8px; }
+.articleProse blockquote {
+  margin: 0;
+  padding: 12px 18px;
+  border-left: 3px solid #b8a5ed;
+  background: #f8f6fc;
+}
+.articleProse cite,
+.articleProse figcaption {
+  display: block;
+  margin-top: 8px;
+  color: #756c86;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .articleProse { font-size: 15px; line-height: 1.7; }
+  .articleProse .articleLead { font-size: 16px; }
+  .articleProse .creationElement { padding-right: 38px; }
 }
 .creationText {
   white-space: pre-wrap;
