@@ -79,17 +79,28 @@ test("launch dialog loads the actual context before enabling generation; all blo
   ]) assert.match(launchBlockReason({ ...props, ...override }), message);
 });
 
-test("table requires selected topics before preparation and exposes explicit select all", () => {
+test("table shows explicit selected topic names after rows and keeps preparation disabled without selection", () => {
   const { CreationTable } = load("creation-table");
   const clusters = [{ id: "active", number: 1, title: "Тема", direction: "", queries: [], archived: false }, { id: "old", number: 2, title: "Архив", direction: "", queries: [], archived: true }];
   const props = { data: { clusters, articles: [], sites: [], settings: { platforms: [] } }, filtered: clusters, selected: [], setSelected() {}, filters: { search: "", direction: "", status: "", recommendation: "" }, setFilter() {}, onAdd() {}, onCluster() {}, onArticle() {}, onMerge() {}, onPrepare() {} };
   const empty = renderToStaticMarkup(React.createElement(CreationTable, props));
   assert.match(empty, /disabled="">Подготовить статьи/);
-  assert.match(empty, /Выбрать все актуальные темы \(1\)/);
+  assert.doesNotMatch(empty, /Выбрать все актуальные темы/);
+  assert.match(empty, /Выбрать все темы для работы на этой странице/);
+  assert.match(empty, /Добавить тему/);
+  assert.ok(empty.indexOf("Подготовить статьи</button>") > empty.indexOf("</table>"));
   assert.doesNotMatch(empty, /<textarea/);
   const selected = renderToStaticMarkup(React.createElement(CreationTable, { ...props, selected: ["active", "old"] }));
   assert.match(selected, />Подготовить статьи \(1\)/);
   assert.doesNotMatch(selected, /disabled="">Подготовить статьи/);
+  assert.match(selected, /data-selected="true"/);
+  const summary = selected.slice(selected.indexOf('aria-label="Выбранные темы для подготовки"'));
+  assert.match(summary, /Выбрано тем: 1/);
+  assert.match(summary, /Убрать из выбора тему «Тема»/);
+  assert.doesNotMatch(summary, /Убрать из выбора тему «Архив»/);
+  const filteredSelection = renderToStaticMarkup(React.createElement(CreationTable, { ...props, filtered: [], selected: ["active"] }));
+  assert.match(filteredSelection, /Вне отображаемых строк: 1/);
+  assert.match(filteredSelection, /Убрать из выбора тему «Тема»/);
   for (const count of [0, 1, 2]) {
     const sites = Array.from({ length: count }, (_, i) => ({ id: `s${i}`, name: `Площадка ${i}` }));
     const html = renderToStaticMarkup(React.createElement(CreationTable, { ...props, data: { ...props.data, sites, settings: { platforms: sites.map(s => ({ siteId: s.id })) } } }));

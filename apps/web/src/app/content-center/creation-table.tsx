@@ -67,6 +67,9 @@ export function CreationTable({
   const selectedActive = data.clusters.filter(
     (c) => !c.archived && selected.includes(c.id),
   );
+  const hiddenSelectedCount = selectedActive.filter(
+    (c) => !activeRows.some((row) => row.id === c.id),
+  ).length;
   const allChecked =
     activeRows.length > 0 && activeRows.every((c) => selected.includes(c.id));
   const someChecked = activeRows.some((c) => selected.includes(c.id));
@@ -90,53 +93,32 @@ export function CreationTable({
     >
       <div className={styles.cardHead}>
         <h2>
-          Таблица контента{" "}
+          Темы и статьи{" "}
           <span className={styles.tableCount}>{data.clusters.length}</span>
         </h2>
-        <button onClick={onAdd}>+ Добавить кластер</button>
+        <button onClick={onAdd}>+ Добавить тему</button>
       </div>
       {onPrepare && (
-        <div className={styles.launchSelection}>
+        <div className={styles.topicIntro}>
           <p className={styles.muted}>
-            Сначала отметьте темы в таблице. Затем проверьте материалы и
-            площадки перед созданием статей.
+            Каждая строка — тема будущей статьи. Тема и связанные поисковые
+            запросы называются кластером. Новую тему можно задать через
+            «Добавить тему».
           </p>
-          <div className={styles.actions}>
-            <button
-              disabled={!data.clusters.some((c) => !c.archived)}
-              onClick={() =>
-                setSelected(
-                  data.clusters.filter((c) => !c.archived).map((c) => c.id),
-                )
-              }
-            >
-              Выбрать все актуальные темы (
-              {data.clusters.filter((c) => !c.archived).length})
-            </button>
-            <button
-              className={styles.primary}
-              disabled={prepareDisabled || !selectedActive.length}
-              onClick={onPrepare}
-            >
-              Подготовить статьи
-              {selectedActive.length ? ` (${selectedActive.length})` : ""}
-            </button>
-          </div>
-          {!selectedActive.length && (
-            <p className={styles.muted}>
-              Темы не выбраны. Без выбора запуск не начнётся.
-            </p>
-          )}
+          <p>
+            Отметьте нужные строки галочками слева. Затем нажмите «Подготовить
+            статьи» под таблицей.
+          </p>
         </div>
       )}
       <div className={styles.contentTableFilters}>
         <label className={`${styles.field} ${styles.contentTableSearch}`}>
-          <span className={styles.visuallyHidden}>Поиск по кластерам</span>
+          <span className={styles.visuallyHidden}>Поиск по темам</span>
           <input
             type="search"
             value={filters.search}
             onChange={(e) => setFilter("search", e.target.value)}
-            placeholder="Поиск по кластеру, запросу или статье…"
+            placeholder="Поиск по теме, запросу или статье…"
           />
         </label>
         <label className={styles.field}>
@@ -182,20 +164,6 @@ export function CreationTable({
           </select>
         </label>
       </div>
-      {selectedActive.length > 0 && (
-        <div className={styles.tableSelection}>
-          <strong>Выбрано кластеров: {selectedActive.length}</strong>
-          <span className={styles.muted}>
-            Выбор сохраняется между страницами
-          </span>
-          <button className={styles.link} onClick={() => setSelected([])}>
-            Снять выбор
-          </button>
-          <button disabled={selectedActive.length < 2} onClick={onMerge}>
-            Объединить выбранные
-          </button>
-        </div>
-      )}
       <div
         className={styles.contentTableScroll}
         tabIndex={0}
@@ -228,7 +196,8 @@ export function CreationTable({
                 <input
                   ref={checkbox}
                   type="checkbox"
-                  aria-label="Выбрать актуальные кластеры на этой странице"
+                  aria-label="Выбрать все темы для работы на этой странице"
+                  title="Выбрать все темы для работы на этой странице"
                   disabled={!activeRows.length}
                   checked={allChecked}
                   onChange={(e) =>
@@ -254,7 +223,7 @@ export function CreationTable({
                 scope="col"
                 className={styles.matrixTitle}
               >
-                Кластер
+                Тема (кластер)
               </th>
               <th
                 rowSpan={headerRows}
@@ -369,7 +338,7 @@ export function CreationTable({
                             />
                           </svg>
                         </span>
-                        {archived ? "Архивные кластеры" : "Актуальные кластеры"}
+                        {archived ? "Архивные темы" : "Темы для работы"}
                         <span className={styles.tableCount}>
                           {
                             filtered.filter((c) => c.archived === archived)
@@ -384,6 +353,11 @@ export function CreationTable({
                       <tr
                         key={c.id}
                         className={archived ? styles.matrixArchive : undefined}
+                        data-selected={
+                          !archived && selected.includes(c.id)
+                            ? "true"
+                            : undefined
+                        }
                       >
                         <td className={styles.matrixCheck}>
                           {archived ? (
@@ -391,7 +365,7 @@ export function CreationTable({
                           ) : (
                             <input
                               type="checkbox"
-                              aria-label={`Выбрать кластер ${c.number}`}
+                              aria-label={`Выбрать тему «${c.title}»`}
                               checked={selected.includes(c.id)}
                               onChange={(e) =>
                                 setSelected(
@@ -513,14 +487,12 @@ export function CreationTable({
       {!filtered.length && (
         <div className={styles.matrixEmpty}>
           <strong>
-            {data.clusters.length
-              ? "Кластеры не найдены"
-              : "Добавьте первый кластер"}
+            {data.clusters.length ? "Темы не найдены" : "Добавьте первую тему"}
           </strong>
           <p>
             {data.clusters.length
               ? "Попробуйте изменить поиск или фильтры."
-              : "Добавьте подготовленные поисковые запросы — здесь появятся статьи и рекомендации по площадкам."}
+              : "Нажмите «Добавить тему», укажите, о чём хотите написать, и добавьте связанные поисковые запросы."}
           </p>
           {data.clusters.length > 0 && (
             <button onClick={resetFilters}>Сбросить фильтры</button>
@@ -563,6 +535,74 @@ export function CreationTable({
           </button>
         </nav>
       </div>
+      {onPrepare && (
+        <section
+          className={styles.topicSelection}
+          aria-label="Выбранные темы для подготовки"
+        >
+          <div className={styles.topicSelectionHead}>
+            <h3 aria-live="polite">
+              {selectedActive.length
+                ? `Выбрано тем: ${selectedActive.length}`
+                : "Выберите темы для статей"}
+            </h3>
+            {selectedActive.length > 0 && (
+              <button className={styles.link} onClick={() => setSelected([])}>
+                Снять весь выбор
+              </button>
+            )}
+          </div>
+          {selectedActive.length > 0 ? (
+            <>
+              <ul className={styles.selectedTopics}>
+                {selectedActive.map((c) => (
+                  <li key={c.id}>
+                    <span>{c.title}</span>
+                    <button
+                      aria-label={`Убрать из выбора тему «${c.title}»`}
+                      onClick={() =>
+                        setSelected(selected.filter((id) => id !== c.id))
+                      }
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {hiddenSelectedCount > 0 && (
+                <p className={styles.muted}>
+                  Вне отображаемых строк: {hiddenSelectedCount}. Эти темы тоже
+                  выбраны — фильтры и смена страницы не снимают выбор.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className={styles.muted}>
+              Поставьте галочку слева от нужной темы в таблице выше. Архивные
+              темы в подготовку не входят.
+            </p>
+          )}
+          <div className={styles.topicSelectionFooter}>
+            <p className={styles.muted}>
+              На следующем шаге вы увидите исходные материалы и площадки и
+              сможете добавить пожелания.
+            </p>
+            <div className={styles.actions}>
+              {selectedActive.length > 1 && (
+                <button onClick={onMerge}>Объединить темы</button>
+              )}
+              <button
+                className={styles.primary}
+                disabled={prepareDisabled || !selectedActive.length}
+                onClick={onPrepare}
+              >
+                Подготовить статьи
+                {selectedActive.length ? ` (${selectedActive.length})` : ""}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
     </section>
   );
 }
