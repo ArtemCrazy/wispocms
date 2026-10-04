@@ -281,7 +281,7 @@ export function CreationView({
           key={base}
           base={base}
           run={data.run}
-          showHistory={location.screen === "table"}
+          showHistory={false}
           retryDisabled={busy || voice || !data.ai.connected}
           onRetry={() => {
             setRetry(true);
