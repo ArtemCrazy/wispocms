@@ -213,115 +213,123 @@ export function CreationLauncher({
       title={retryRunId ? "Повторить подготовку статей" : "Подготовить статьи"}
       close={close}
       busy={busy || voice}
+      className={styles.launchDialog}
     >
-      <p className={styles.muted}>
-        Проверьте, о чём пишем, на основе чего и для каких площадок. Затем
-        добавьте пожелания, если они нужны.
-      </p>
-      {review && (
-        <>
-          <div className={styles.launchOverview}>
-            <section className={styles.launchSection}>
-              <h3>1. Выбранные темы · {topics.length}</h3>
-              <ul>
-                {topics.map((c) => (
-                  <li key={c.id}>{c.title}</li>
-                ))}
-              </ul>
-              {!topics.length && <p>Нет выбранных актуальных тем.</p>}
-            </section>
-            <section className={styles.launchSection}>
-              <h3>2. Основа для статей</h3>
-              {review.prepared ? (
-                <>
-                  <strong>
-                    {review.prepared.prompt_title || "Обработанная информация"}{" "}
-                    · версия {review.prepared.number}
-                  </strong>
-                  <p className={styles.muted}>
-                    {creationDate(review.prepared.created_at)}
+      <div className={styles.launchBody}>
+        <p className={styles.muted}>
+          Проверьте, о чём пишем, на основе чего и для каких площадок. Затем
+          добавьте пожелания, если они нужны.
+        </p>
+        {review && (
+          <>
+            <div className={styles.launchOverview}>
+              <section className={styles.launchSection}>
+                <h3>1. Выбранные темы · {topics.length}</h3>
+                <ul>
+                  {topics.map((c) => (
+                    <li key={c.id}>{c.title}</li>
+                  ))}
+                </ul>
+                {!topics.length && <p>Нет выбранных актуальных тем.</p>}
+              </section>
+              <section className={styles.launchSection}>
+                <h3>2. Основа для статей</h3>
+                {review.prepared ? (
+                  <>
+                    <strong>
+                      {review.prepared.prompt_title ||
+                        "Обработанная информация"}{" "}
+                      · версия {review.prepared.number}
+                    </strong>
+                    <p className={styles.muted}>
+                      {creationDate(review.prepared.created_at)}
+                    </p>
+                    {documentUrl && (
+                      <a href={documentUrl} target="_blank" rel="noreferrer">
+                        Прочитать исходный документ ↗
+                      </a>
+                    )}
+                    <p className={styles.muted}>
+                      Автоматически используется последняя обработанная версия.
+                      Исходные ссылки и файлы заново не собираются.
+                    </p>
+                  </>
+                ) : (
+                  <p>
+                    Обработанной информации пока нет. В основу войдут темы,
+                    существующие статьи и правила проекта. Новые факты о
+                    компании AI не получит.
                   </p>
-                  {documentUrl && (
-                    <a href={documentUrl} target="_blank" rel="noreferrer">
-                      Прочитать исходный документ ↗
-                    </a>
-                  )}
-                  <p className={styles.muted}>
-                    Автоматически используется последняя обработанная версия.
-                    Исходные ссылки и файлы заново не собираются.
-                  </p>
-                </>
-              ) : (
-                <p>
-                  Обработанной информации пока нет. В основу войдут темы,
-                  существующие статьи и правила проекта. Новые факты о компании
-                  AI не получит.
+                )}
+              </section>
+              <section className={styles.launchSection}>
+                <h3>3. Подключённые площадки</h3>
+                <ul>
+                  {platforms.map((p) => (
+                    <li key={p.siteId}>
+                      {review.overview.sites.find((s) => s.id === p.siteId)
+                        ?.name ?? "Площадка недоступна"}
+                    </li>
+                  ))}
+                </ul>
+                {!platforms.length && (
+                  <p>Сначала подключите площадку в «Площадки и правила».</p>
+                )}
+                <p className={styles.muted}>
+                  AI определит релевантность каждой теме. Применяются постоянные
+                  правила проекта и площадок, учитываются существующие статьи.
                 </p>
-              )}
-            </section>
-            <section className={styles.launchSection}>
-              <h3>3. Подключённые площадки</h3>
-              <ul>
-                {platforms.map((p) => (
-                  <li key={p.siteId}>
-                    {review.overview.sites.find((s) => s.id === p.siteId)
-                      ?.name ?? "Площадка недоступна"}
-                  </li>
-                ))}
-              </ul>
-              {!platforms.length && (
-                <p>Сначала подключите площадку в «Площадки и правила».</p>
-              )}
-              <p className={styles.muted}>
-                AI определит релевантность каждой теме. Применяются постоянные
-                правила проекта и площадок, учитываются существующие статьи.
+              </section>
+            </div>
+            {retryRunId && (
+              <p className={styles.notice}>
+                Повторяются только ошибочные операции. Пожелания и файл
+                предыдущего запуска автоматически не восстанавливаются.
               </p>
-            </section>
-          </div>
-          {retryRunId && (
-            <p className={styles.notice}>
-              Повторяются только ошибочные операции. Пожелания и файл
-              предыдущего запуска автоматически не восстанавливаются.
+            )}
+            <div className={styles.launchInstruction}>
+              <CreationInstruction
+                base={base}
+                value={instruction}
+                setValue={setInstruction}
+                file={file}
+                setFile={setFile}
+                disabled={busy || running}
+                onVoice={onVoice}
+                allowFile={review.overview.ai.supportsFiles}
+                label="4. Пожелания к статьям — необязательно"
+                compact
+              />
+            </div>
+            <p className={styles.muted}>
+              Новые статьи сохранятся как черновики; для существующих AI может
+              предложить правки. Статьи со снятой публикацией или
+              нерассмотренными предложениями пропускаются. Автоматической
+              публикации нет.
             </p>
-          )}
-          <CreationInstruction
-            base={base}
-            value={instruction}
-            setValue={setInstruction}
-            file={file}
-            setFile={setFile}
-            disabled={busy || running}
-            onVoice={onVoice}
-            allowFile={review.overview.ai.supportsFiles}
-            label="4. Пожелания к статьям — необязательно"
-          />
-          <p className={styles.muted}>
-            Новые статьи сохранятся как черновики; для существующих AI может
-            предложить правки. Статьи со снятой публикацией или нерассмотренными
-            предложениями пропускаются. Автоматической публикации нет.
+          </>
+        )}
+        {error && (
+          <p role="alert" className={styles.error}>
+            {error}
           </p>
-        </>
-      )}
-      {error && (
-        <p role="alert" className={styles.error}>
-          {error}
-        </p>
-      )}
-      {reason && (
-        <p role="status" className={styles.muted}>
-          {reason}
-        </p>
-      )}
-      <div className={styles.actions}>
+        )}
+        {reason && (
+          <p role="status" className={styles.muted}>
+            {reason}
+          </p>
+        )}
+      </div>
+      <div className={styles.launchFooter}>
+        <button disabled={busy || voice} onClick={close}>
+          Назад к темам
+        </button>
         <button
           className={styles.primary}
           disabled={Boolean(reason)}
           onClick={() => void start()}
         >
           {busy ? "Запускаем…" : "Создать статьи"}
-        </button>
-        <button disabled={busy || voice} onClick={close}>
-          Назад к темам
         </button>
       </div>
     </CreationDialog>

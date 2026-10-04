@@ -41,11 +41,13 @@ export function CreationDialog({
   close,
   busy,
   children,
+  className = "",
 }: {
   title: string;
   close: () => void;
   busy: boolean;
   children: ReactNode;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -54,7 +56,7 @@ export function CreationDialog({
   return (
     <dialog
       ref={ref}
-      className={styles.dialog}
+      className={`${styles.dialog} ${className}`}
       aria-label={title}
       onCancel={(e) => {
         e.preventDefault();
@@ -83,6 +85,7 @@ export function CreationInstruction({
   action,
   label = "Задача для текущего запуска",
   allowFile = true,
+  compact = false,
 }: {
   base: string;
   value: string;
@@ -96,6 +99,7 @@ export function CreationInstruction({
   action?: ReactNode;
   label?: string;
   allowFile?: boolean;
+  compact?: boolean;
 }) {
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -125,7 +129,9 @@ export function CreationInstruction({
         </button>
       </div>
       <label className={styles.field}>
-        <span className={launcher ? styles.visuallyHidden : undefined}>
+        <span
+          className={launcher || compact ? styles.visuallyHidden : undefined}
+        >
           {label}
         </span>
         <textarea
@@ -163,13 +169,15 @@ export function CreationInstruction({
               setFile(chosen ?? null);
             }}
           />
-          <button
-            type="button"
-            disabled={disabled || !allowFile}
-            onClick={() => fileRef.current?.click()}
-          >
-            Прикрепить файл
-          </button>
+          {(!compact || allowFile) && (
+            <button
+              type="button"
+              disabled={disabled || !allowFile}
+              onClick={() => fileRef.current?.click()}
+            >
+              Прикрепить файл
+            </button>
+          )}
           {file && (
             <>
               <span className={styles.launcherFileName} title={file.name}>
@@ -210,6 +218,7 @@ export function CreationInstruction({
       </p>
       {!launcher && (
         <SpeechInput
+          compact={compact}
           disabled={disabled}
           onTranscript={(text) =>
             setValue(appendDictation(valueRef.current, text).value)

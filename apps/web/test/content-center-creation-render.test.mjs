@@ -66,6 +66,11 @@ test("launch dialog loads the actual context before enabling generation; all blo
   assert.match(instruction, /Пожелания — необязательно/);
   assert.match(instruction, /disabled="">Прикрепить файл/);
   assert.match(instruction, /Вложения пока недоступны/);
+  const compact = renderToStaticMarkup(React.createElement(CreationInstruction, { ...props, value: "Пожелание", setValue() {}, file: null, allowFile: false, compact: true, label: "Пожелания — необязательно", disabled: false }));
+  assert.doesNotMatch(compact, />Прикрепить файл</);
+  assert.match(compact, /<textarea/);
+  assert.match(compact, /Вложения пока недоступны/);
+  assert.equal((compact.match(/<h3/g) || []).length, 1);
   assert.equal(launchBlockReason(props), "");
   for (const [override, message] of [
     [{ busy: true }, /текущего действия/], [{ running: true }, /текущего запуска/],
