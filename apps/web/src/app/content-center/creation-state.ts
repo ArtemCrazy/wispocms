@@ -233,7 +233,7 @@ export function filterClusters(
 }
 export function launchClusters(clusters: Cluster[], selected: string[]) {
   return clusters.filter(
-    (c) => !c.archived && (!selected.length || selected.includes(c.id)),
+    (c) => !c.archived && selected.includes(c.id),
   );
 }
 export function unpublishedChanges(

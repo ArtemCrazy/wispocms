@@ -81,6 +81,8 @@ export function CreationInstruction({
   children,
   launcher = false,
   action,
+  label = "Задача для текущего запуска",
+  allowFile = true,
 }: {
   base: string;
   value: string;
@@ -92,6 +94,8 @@ export function CreationInstruction({
   children?: ReactNode;
   launcher?: boolean;
   action?: ReactNode;
+  label?: string;
+  allowFile?: boolean;
 }) {
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [error, setError] = useState("");
@@ -106,7 +110,11 @@ export function CreationInstruction({
         {launcher ? (
           <h2>Запустить подготовку контента</h2>
         ) : (
-          <h3>Дополнительная инструкция</h3>
+          <h3>
+            {label === "Задача для текущего запуска"
+              ? "Дополнительная инструкция"
+              : label}
+          </h3>
         )}
         <button
           type="button"
@@ -118,7 +126,7 @@ export function CreationInstruction({
       </div>
       <label className={styles.field}>
         <span className={launcher ? styles.visuallyHidden : undefined}>
-          Задача для текущего запуска
+          {label}
         </span>
         <textarea
           rows={4}
@@ -140,7 +148,7 @@ export function CreationInstruction({
             ref={fileRef}
             type="file"
             hidden
-            disabled={disabled}
+            disabled={disabled || !allowFile}
             aria-label="Файл для текущего запуска"
             accept=".pdf,.docx,.xlsx,.pptx,.png,.jpg,.jpeg,.txt,.md,.csv"
             onChange={(e) => {
@@ -157,7 +165,7 @@ export function CreationInstruction({
           />
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabled || !allowFile}
             onClick={() => fileRef.current?.click()}
           >
             Прикрепить файл
@@ -196,8 +204,9 @@ export function CreationInstruction({
         )}
       </div>
       <p className={launcher ? styles.launcherFileHint : styles.muted}>
-        Инструкция и файл относятся только к этому запуску, не становятся
-        материалами проекта. Файл — до 10 МБ.
+        {allowFile
+          ? "Инструкция и файл относятся только к этому запуску, не становятся материалами проекта. Файл — до 10 МБ."
+          : "Пожелания действуют только для этого запуска. Вложения пока недоступны для подключённого AI."}
       </p>
       {!launcher && (
         <SpeechInput

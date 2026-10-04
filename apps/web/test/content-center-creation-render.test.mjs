@@ -47,26 +47,30 @@ function load(name) {
   cache.set(name, module.exports);
   return module.exports;
 }
-test("launcher renders instruction, local attachment and selection scope with explicit blocking reasons", () => {
-  const { CreationLauncher, launchBlockReason } = load("creation-launcher");
+test("launch dialog loads the actual context before enabling generation; all blocking reasons remain explicit", () => {
+  const { CreationLauncher, launchBlockReason, latestPrepared, launchReviewSignature } = load("creation-launcher");
   const props = { base: "/api/test", instruction: "Добавь примеры", setInstruction() {}, file: { name: "brief.txt", size: 80 }, setFile() {}, busy: false, running: false, voice: false, connected: true, clusterCount: 3, platformCount: 2, hasSelection: false, onVoice() {}, onLaunch() {} };
   const render = (overrides = {}) => renderToStaticMarkup(React.createElement(CreationLauncher, { ...props, ...overrides }));
   const html = render();
-  for (const label of ["Запустить подготовку контента", "Список промптов", "Прикрепить файл", "Убрать файл", "brief.txt", "Добавь примеры", "Все актуальные кластеры", "Фильтры таблицы не ограничивают запуск.", "Голосовой ввод"])
-    assert.ok(html.includes(label), label);
-  assert.match(html, /maxLength="12000"/);
-  assert.match(html, /type="file"/);
-  assert.doesNotMatch(html, /aria-describedby="creation-launch-blocked"/);
-  assert.match(render({ hasSelection: true }), /Выбрано актуальных кластеров/);
-  assert.doesNotMatch(render({ hasSelection: true }), /Фильтры таблицы не ограничивают запуск/);
-  assert.match(render({ running: true }), /disabled="" aria-describedby="creation-launch-blocked"/);
-  assert.match(render({ busy: true }), /type="file" hidden="" disabled=""/);
-  assert.doesNotMatch(render({ file: null }), /Убрать файл/);
+  assert.match(html, /Подготовить статьи/);
+  assert.match(html, /Проверяем состав задания/);
+  assert.match(html, /disabled="">Создать статьи/);
+  assert.doesNotMatch(html, /Все актуальные кластеры|Фильтры таблицы не ограничивают/);
+  assert.equal(latestPrepared([{ id: "older", number: 1 }, { id: "latest", number: 9 }]).id, "latest");
+  assert.equal(latestPrepared([]), null);
+  const review = { prepared: { id: "v9" }, overview: { settings: { revision: 1, platforms: [] }, clusters: [{ id: "c", revision: 1, archived: false }], articles: [] } };
+  assert.notEqual(launchReviewSignature(review, ["c"]), launchReviewSignature({ ...review, prepared: { id: "v10" } }, ["c"]));
+  assert.notEqual(launchReviewSignature(review, ["c"]), launchReviewSignature(review, []));
+  const { CreationInstruction } = load("creation-shared");
+  const instruction = renderToStaticMarkup(React.createElement(CreationInstruction, { ...props, value: "Пожелание", setValue() {}, allowFile: false, label: "Пожелания — необязательно", disabled: false }));
+  assert.match(instruction, /Пожелания — необязательно/);
+  assert.match(instruction, /disabled="">Прикрепить файл/);
+  assert.match(instruction, /Вложения пока недоступны/);
   assert.equal(launchBlockReason(props), "");
   for (const [override, message] of [
     [{ busy: true }, /текущего действия/], [{ running: true }, /текущего запуска/],
     [{ voice: true }, /диктовку/], [{ connected: false }, /подключите AI/],
-    [{ clusterCount: 0 }, /кластер/], [{ platformCount: 0 }, /площадки/],
+    [{ clusterCount: 0 }, /Выберите.*тему/], [{ platformCount: 0 }, /площадки/],
   ]) assert.match(launchBlockReason({ ...props, ...override }), message);
 });
 

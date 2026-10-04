@@ -6,9 +6,10 @@ test('creation deep links remain inside the workspace content center',()=>{
   assert.equal(creationLocation(new URLSearchParams('creation=versions&contentId=article&contentVersion=2')).version,2);
   assert.equal(creationLocation(new URLSearchParams('creation=unknown')).screen,'table');
 });
-test('empty selection means all active clusters, not the filtered list',()=>{
+test('empty selection never launches all themes; selection is explicit and excludes archives',()=>{
   const clusters=[cluster('a'),cluster('b'),cluster('archived',true)];
-  assert.deepEqual(launchClusters(clusters,[]).map(c=>c.id),['a','b']);
+  assert.deepEqual(launchClusters(clusters,[]).map(c=>c.id),[]);
+  assert.deepEqual(launchClusters(clusters,['a','b']).map(c=>c.id),['a','b']);
   assert.deepEqual(launchClusters(clusters,['b','archived']).map(c=>c.id),['b']);
 });
 test('status and recommendation filters must match the same platform article; archives stay searchable',()=>{

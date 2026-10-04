@@ -276,29 +276,7 @@ export function CreationView({
           статей станут доступны после подключения API.
         </div>
       )}
-      {location.screen === "table" && (
-        <CreationLauncher
-          base={parentBase}
-          instruction={instruction}
-          setInstruction={setInstruction}
-          file={file}
-          setFile={setFile}
-          busy={busy}
-          running={running}
-          voice={voice}
-          connected={data.ai.connected}
-          clusterCount={selectedClusters.length}
-          platformCount={data.settings.platforms.length}
-          hasSelection={Boolean(selected.length)}
-          onVoice={setVoice}
-          onLaunch={() => {
-            setRetry(false);
-            setLaunchConfirm(true);
-          }}
-        />
-      )}
-      {(location.screen === "table" ||
-        (location.screen === "article" && data.run)) && (
+      {location.screen === "article" && data.run && (
         <CreationRunPanels
           key={base}
           base={base}
@@ -340,6 +318,31 @@ export function CreationView({
             onArticle={(id) => navigate({ screen: "article", id })}
             onMerge={() =>
               setRestructure({ kind: "merge", clusters: selectedClusters })
+            }
+            prepareDisabled={busy || running}
+            onPrepare={() => {
+              if (!selectedClusters.length) return;
+              setRetry(false);
+              setLaunchConfirm(true);
+            }}
+          />
+          <CreationRunPanels
+            key={base}
+            base={base}
+            run={data.run}
+            showHistory
+            retryDisabled={busy || voice || !data.ai.connected}
+            onRetry={() => {
+              setRetry(true);
+              setLaunchConfirm(true);
+            }}
+            onHistory={() =>
+              navigate({
+                screen: "history",
+                historyTab: "runs",
+                id: null,
+                clusterContext: null,
+              })
             }
           />
         </>
@@ -658,56 +661,35 @@ export function CreationView({
         />
       )}
       {launchConfirm && (
-        <CreationDialog
-          title={
+        <CreationLauncher
+          base={parentBase}
+          clusterIds={
             retry
-              ? "Повторить операции с ошибкой?"
-              : "Запустить создание контента?"
+              ? [
+                  ...new Set(
+                    data.run?.operations
+                      .filter((o) => o.status === "failed")
+                      .map((o) => o.clusterId) ?? [],
+                  ),
+                ]
+              : selected
           }
-          close={() => setLaunchConfirm(false)}
-          busy={busy}
-        >
-          <p>
-            {retry
-              ? "Будут повторены только неудачные операции последнего запуска с актуальными данными. Старый файл не переносится — прикрепите его заново при необходимости."
-              : `Будут обработаны ${selectedClusters.length} актуальных кластеров. AI определит релевантность подключённых площадок.`}
-          </p>
-          <p>
-            Статьи с незавершёнными предложениями и снятые с публикации не
-            проверяются повторно. Публикация и снятие не выполняются
-            автоматически.
-          </p>
-          {error && <p className={styles.error}>{error}</p>}
-          <div className={styles.actions}>
-            <button
-              disabled={busy}
-              className={styles.primary}
-              onClick={() =>
-                void act(async () => {
-                  const form = new FormData();
-                  form.append(
-                    "payload",
-                    JSON.stringify({
-                      clusterIds: retry ? [] : selected,
-                      instruction,
-                      ...(retry ? { retryRunId: data.run!.id } : {}),
-                    }),
-                  );
-                  if (file) form.append("file", file);
-                  await creationRequest(`${base}/runs`, "POST", form);
-                  setInstruction("");
-                  setFile(null);
-                  setLaunchConfirm(false);
-                })
-              }
-            >
-              Подтвердить запуск
-            </button>
-            <button disabled={busy} onClick={() => setLaunchConfirm(false)}>
-              Отмена
-            </button>
-          </div>
-        </CreationDialog>
+          retryRunId={retry ? (data.run?.id ?? null) : null}
+          instruction={instruction}
+          setInstruction={setInstruction}
+          file={file}
+          setFile={setFile}
+          voice={voice}
+          onVoice={setVoice}
+          close={() => {
+            setVoice(false);
+            setLaunchConfirm(false);
+          }}
+          onStarted={async () => {
+            setLaunchConfirm(false);
+            await refresh();
+          }}
+        />
       )}
     </div>
   );

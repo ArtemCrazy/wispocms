@@ -101,6 +101,12 @@
 .historyCard .matrixBadge[data-tone="warning"] { color: #99602b; background: #fff1de; }
 @media (max-width: 1150px) { .historyFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .historySearch { grid-column: 1 / -1; } }
 @media (max-width: 700px) { .historyFilters, .historyComparison { grid-template-columns: 1fr; } .historyTabs { gap: 10px; } }
+.launchSelection { margin-bottom: 20px; }
+.launchOverview { display: grid; gap: 12px; margin: 20px 0; }
+.launchSection { min-width: 0; border: 1px solid #e4ddf4; border-radius: 12px; padding: 16px; overflow-wrap: anywhere; }
+.launchSection h3 { margin: 0 0 10px; font-size: 14px; }
+.launchSection ul { margin: 0; padding-left: 20px; max-height: 180px; overflow: auto; }
+.launchSection li + li { margin-top: 6px; }
 .runPanels { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .runPanels .cardHead { flex-wrap: wrap; gap: 8px; }
 .runMeta, .runCounts { color: #81798d; font-size: 12px; margin: 8px 0 12px; }

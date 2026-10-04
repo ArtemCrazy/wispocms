@@ -31,6 +31,8 @@ export function CreationTable({
   onCluster,
   onArticle,
   onMerge,
+  onPrepare,
+  prepareDisabled = false,
 }: {
   data: Overview;
   filtered: Cluster[];
@@ -42,6 +44,8 @@ export function CreationTable({
   onCluster: (id: string) => void;
   onArticle: (id: string) => void;
   onMerge: () => void;
+  onPrepare?: () => void;
+  prepareDisabled?: boolean;
 }) {
   const [size, setSize] = useState(10);
   const [pagination, setPagination] = useState({ key: "", page: 1 });
@@ -90,6 +94,40 @@ export function CreationTable({
         </h2>
         <button onClick={onAdd}>+ Добавить кластер</button>
       </div>
+      {onPrepare && (
+        <div className={styles.launchSelection}>
+          <p className={styles.muted}>
+            Сначала отметьте темы в таблице. Затем проверьте материалы и
+            площадки перед созданием статей.
+          </p>
+          <div className={styles.actions}>
+            <button
+              disabled={!data.clusters.some((c) => !c.archived)}
+              onClick={() =>
+                setSelected(
+                  data.clusters.filter((c) => !c.archived).map((c) => c.id),
+                )
+              }
+            >
+              Выбрать все актуальные темы (
+              {data.clusters.filter((c) => !c.archived).length})
+            </button>
+            <button
+              className={styles.primary}
+              disabled={prepareDisabled || !selectedActive.length}
+              onClick={onPrepare}
+            >
+              Подготовить статьи
+              {selectedActive.length ? ` (${selectedActive.length})` : ""}
+            </button>
+          </div>
+          {!selectedActive.length && (
+            <p className={styles.muted}>
+              Темы не выбраны. Без выбора запуск не начнётся.
+            </p>
+          )}
+        </div>
+      )}
       <div className={styles.contentTableFilters}>
         <label className={`${styles.field} ${styles.contentTableSearch}`}>
           <span className={styles.visuallyHidden}>Поиск по кластерам</span>
