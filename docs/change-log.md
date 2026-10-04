@@ -30,8 +30,9 @@
 
 ### 2026-10-04 · Вертикальный центр содержимого строк
 
-- Статус: **В работе**. Артём / Codex, `feature/creation-publication-stage-7`. Tier 0: только `vertical-align` ячеек таблицы создания контента; ширины и поведение без изменений. БД, данные, API и миграции не затронуты.
-- Файл: `content-center-view.module.css`. Проверки и выкладка ожидаются.
+- Статус: **Выложено**. Артём / Codex, `feature/creation-publication-stage-7`. Tier 0: только `vertical-align` ячеек таблицы создания контента; ширины и поведение без изменений. БД, данные, API и миграции не затронуты.
+- Файл: `content-center-view.module.css`. Diff --check, production build/TypeScript пройдены. Browser: все девять ячеек обеих строк имеют middle; центр кнопки названия совпадает с центром активной строки, вместо прежнего выравнивания по верхнему краю.
+- Выкладка 04.10.2026: `d75b642`, web image `wispo-cms-web:center-d75b642` (`934478ab5672`), API health ok. Откат: `wispo-cms-web:before-center-d75b642`, исходники `arrows-05da0a3`; архив `wispo-05da0a3.tar.gz` на сервере и в `E:/backups/Wispo-CMS-archive-20260924/customer/releases/20261001-access-control/` с совпавшей SHA256.
 
 ### 2026-10-04 · Выравнивание стрелок групп
 
