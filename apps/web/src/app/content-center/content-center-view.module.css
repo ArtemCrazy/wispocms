@@ -210,9 +210,9 @@
 .contentMatrix .matrixRecommendation summary { display: inline-flex; align-items: baseline; }
 .matrixRecommendation p { max-width: 240px; margin: 8px 0 0; font-size: 12px; color: #706a80; overflow-wrap: anywhere; }
 .view .contentMatrix .matrixGroup th { background: #f6f5fa; padding: 0; }
-.view .matrixGroup button { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 0; background: transparent; padding: 10px 12px; color: #3e3258; font-weight: 600; text-align: left; }
-.matrixGroup button > span:first-child { width: 18px; font-size: 18px; line-height: 1; }
-.matrixGroup .tableCount { margin-left: 2px; padding: 1px 7px; border-radius: 5px; background: #ebe8f2; font-size: 12px; }
+.view .matrixGroup button { width: 100%; display: flex; align-items: center; gap: 0; border: 0; border-radius: 0; background: transparent; padding: 10px 0; color: #3e3258; font-weight: 600; text-align: left; }
+.matrixGroup button > span:first-child { display: flex; justify-content: center; align-items: center; flex-shrink: 0; line-height: 1; }
+.matrixGroup .tableCount { margin-left: 10px; padding: 1px 7px; border-radius: 5px; background: #ebe8f2; font-size: 12px; }
 .matrixArchive { background: #fcfbfe; color: #9993a4; }
 .view .matrixArchive .matrixTitle button { color: #80758f; }
 .matrixEmpty { text-align: center; padding: 32px 16px; color: #736c81; }

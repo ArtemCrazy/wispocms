@@ -344,8 +344,30 @@ export function CreationTable({
                           })
                         }
                       >
-                        <span aria-hidden="true">
-                          {collapsed[group] ? "›" : "⌄"}
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            flexBasis: `${(44 / (940 + Math.max(1, platforms.length) * 500)) * 100}%`,
+                          }}
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                          >
+                            <path
+                              d={
+                                collapsed[group]
+                                  ? "M6 4l4 4-4 4"
+                                  : "M4 6l4 4 4-4"
+                              }
+                              stroke="currentColor"
+                              strokeWidth="1.75"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
                         </span>
                         {archived ? "Архивные кластеры" : "Актуальные кластеры"}
                         <span className={styles.tableCount}>
