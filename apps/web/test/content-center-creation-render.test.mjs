@@ -314,6 +314,7 @@ test("publication validates platform, category, template and explicit move witho
   const { publicationFormState, CreationPublicationForm } = load("creation-publication");
   const details = { canPublishDirectly: true, article: { id: "a", cluster_id: "c", site_id: "s", revision: 3, current_number: 2, published_number: 1, status: "published", cms_article_id: "cms", category_id: "cat" }, correction: null, sites: [{ id: "s", name: "Сайт" }, { id: "s2", name: "Вторая площадка" }], categories: [{ id: "cat", site_id: "s", name: "Раздел" }, { id: "cat2", site_id: "s2", name: "Другой раздел" }], templates: [{ site_id: "s", key: "editorial:v2", version: "1", name: "Статья" }, { site_id: "s2", key: "editorial:v2", version: "1", name: "Статья" }] };
   const data = { articles: [] };
+  details.sites.forEach(site => { site.canManageStructure = true; });
   const input = { revision: 3, siteId: "s", categoryId: "cat", slug: "new-article", templateKey: "editorial:v2", templateVersion: "1", confirmMove: false };
   const state = (changed = {}, modifiedDetails = {}, modifiedData = {}) => publicationFormState({ ...details, ...modifiedDetails }, { ...data, ...modifiedData }, { ...input, ...changed });
   assert.equal(state().blocked, "");
@@ -342,8 +343,38 @@ test("publication validates platform, category, template and explicit move witho
   const blocked = renderToStaticMarkup(React.createElement(CreationPublicationForm, { ...props, details: { ...details, categories: [] } }));
   assert.match(blocked, /aria-describedby="publication-blocked"/);
   assert.match(blocked, /нет опубликованных разделов/);
+  const managerDetails = { ...details, templates: [], sites: details.sites.map(site => ({ ...site, canManageStructure: false })) };
+  assert.equal(publicationFormState(managerDetails, data, { ...input, templateKey: undefined, templateVersion: undefined }).blocked, "");
+  const manager = renderToStaticMarkup(React.createElement(CreationPublicationForm, { ...props, details: managerDetails }));
+  assert.doesNotMatch(manager, /Шаблон статьи/);
+  assert.doesNotMatch(manager, /disabled=""[^>]*>Отправить в публикацию/);
 });
 
+test("publication template control is hidden without structure permission and empty templates do not block publishing", () => {
+  const { CreationPublicationTemplateField } = load("creation-article");
+  const restricted = renderToStaticMarkup(
+    React.createElement(CreationPublicationTemplateField, {
+      canManageStructure: false,
+      templates: [],
+      value: "",
+      disabled: false,
+      onChange() {},
+    }),
+  );
+  const owner = renderToStaticMarkup(
+    React.createElement(CreationPublicationTemplateField, {
+      canManageStructure: true,
+      templates: [{ key: "editorial", version: "1", name: "Статья" }],
+       value: JSON.stringify(["editorial", "1"]),
+      disabled: false,
+      onChange() {},
+    }),
+  );
+  assert.equal(restricted, "");
+  assert.ok(owner.includes("Шаблон статьи"));
+  assert.equal(state.publicationBlockedByTemplates(false, []), false);
+  assert.equal(state.publicationBlockedByTemplates(true, []), true);
+});
 test("run history does not expand; history has all three specified tabs and filters", () => {
   const html = renderToStaticMarkup(
     React.createElement(load("creation-history").CreationHistory, {

@@ -184,7 +184,6 @@ export class AuthService {
                 ? null
                 : {
                     role: access!.role,
-                    canEditCode: access!.canEditCode,
                     requiresApproval: access!.requiresApproval,
                   },
             };

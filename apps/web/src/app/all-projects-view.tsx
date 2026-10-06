@@ -54,7 +54,6 @@ type PlatformUser = {
     workspaceId: string;
     workspaceName: string;
     role: "site_owner" | "content_manager";
-    canEditCode: boolean;
     requiresApproval: boolean;
   }>;
 };
@@ -246,7 +245,6 @@ export function AllProjectsView({
             {
               siteId: settingsContext.site.id,
               role: "content_manager" as const,
-              canEditCode: false,
               requiresApproval: false,
             },
           ];

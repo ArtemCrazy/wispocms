@@ -9,8 +9,8 @@ import {
   ContentEventEntity,
   ContentStatusScheduleEntity,
   SiteContentTemplateEntity,
-  SiteEntity,
   SiteAccessEntity,
+  SiteEntity,
   PlatformRole,
   databaseEntities,
 } from '../database/entities';
@@ -47,6 +47,10 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       category = randomUUID(),
       category2 = randomUUID();
     const actor = { userId: randomUUID(), platformRole: PlatformRole.EMPLOYEE };
+    const managerActor = {
+      userId: randomUUID(),
+      platformRole: PlatformRole.EMPLOYEE,
+    };
     let root: DataSource,
       db: DataSource,
       service: CreationService,
@@ -99,8 +103,8 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         await q.release();
       }
       await db.query(
-        "INSERT INTO users(id,email,password_hash,full_name,platform_role) VALUES($1,'creation-test@example.test','not-a-login-hash','Editor','employee')",
-        [actor.userId],
+        "INSERT INTO users(id,email,password_hash,full_name,platform_role) VALUES($1,'creation-test@example.test','not-a-login-hash','Editor','employee'),($2,'creation-manager@example.test','not-a-login-hash','Manager','employee')",
+        [actor.userId, managerActor.userId],
       );
       await db.query(
         "INSERT INTO workspaces(id,name,slug) VALUES($1,'Test','creation-test'),($2,'Other','creation-other')",
@@ -111,16 +115,29 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         [actor.userId, workspace, [site, site2]],
       );
       await db.query(
+        "INSERT INTO workspace_memberships(user_id,workspace_id,role,site_ids) VALUES($1,$2,'wispo_manager',$3)",
+        [managerActor.userId, workspace, [site, site2]],
+      );
+      await db.query(
         "INSERT INTO sites(id,workspace_id,name,slug,site_type) VALUES($1,$2,'Media','creation-media','media'),($3,$2,'Second','creation-second','media'),($4,$5,'Foreign','creation-foreign','media')",
         [site, workspace, site2, foreignSite, other],
       );
       await db.query(
-        "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'site_owner',false),($1,$3,'site_owner',false)",
-        [actor.userId, site, site2],
+        `INSERT INTO site_content_templates(site_id,kind,key,version,name,config) VALUES
+          ($1,'article','editorial','1','Статья','{"layout":"default"}'::jsonb),
+          ($1,'article','alternate','2','Другой шаблон','{"layout":"alternate"}'::jsonb),
+          ($1,'article','standard-article','1','Системный шаблон','{"layout":"system"}'::jsonb),
+          ($2,'article','editorial','1','Статья','{"layout":"default"}'::jsonb),
+          ($2,'article','alternate','2','Другой шаблон','{"layout":"alternate"}'::jsonb),
+          ($2,'article','standard-article','1','Системный шаблон','{"layout":"system"}'::jsonb),
+          ($3,'article','editorial','1','Статья','{"layout":"default"}'::jsonb)`,
+        [site, site2, foreignSite],
       );
       await db.query(
-        "INSERT INTO site_content_templates(site_id,kind,key,version,name) VALUES($1,'article','editorial','1','Статья'),($2,'article','editorial','1','Статья'),($3,'article','editorial','1','Статья')",
-        [site, site2, foreignSite],
+        `INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES
+          ($1,$2,'site_owner',false),($1,$3,'site_owner',false),
+          ($4,$2,'content_manager',false),($4,$3,'content_manager',false)`,
+        [actor.userId, site, site2, managerActor.userId],
       );
       await db.query(
         "INSERT INTO categories(id,site_id,name,slug,display_template_key,display_template_version,publication_state) VALUES($1,$2,'Уход','care','editorial','1','published')",
@@ -200,12 +217,12 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
           service.details(workspace, actor, article.id),
         ).rejects.toThrow('недоступно');
         await db.query(
-          "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'content_manager',true)",
-          [actor.userId, site2],
-        );
-        await db.query(
           "UPDATE site_accesses SET role='content_manager',requires_approval=true WHERE user_id=$1",
           [actor.userId],
+        );
+        await db.query(
+          "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'content_manager',true)",
+          [actor.userId, site2],
         );
         expect(
           (await service.details(workspace, actor, article.id))
@@ -217,8 +234,8 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         expect(await db.getRepository(ArticleEntity).count()).toBe(0);
       } finally {
         await db.query(
-          "INSERT INTO site_accesses(user_id,site_id,role,requires_approval) VALUES($1,$2,'site_owner',false),($1,$3,'site_owner',false) ON CONFLICT(user_id,site_id) DO UPDATE SET role='site_owner',requires_approval=false",
-          [actor.userId, site, site2],
+          "UPDATE site_accesses SET role='site_owner',requires_approval=false WHERE user_id=$1",
+          [actor.userId],
         );
       }
     });
@@ -292,6 +309,124 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       slug: 'test-article',
       templateKey: 'editorial',
       templateVersion: '1',
+    });
+
+    it('reports structure capability per available site', async () => {
+      const { article } = await create();
+      const details = await service.details(
+        workspace,
+        managerActor,
+        article.id,
+      );
+      expect(details.sites).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: site, canManageStructure: false }),
+        ]),
+      );
+    });
+
+    it('ignores a content manager template override on initial publication', async () => {
+      const { article } = await create();
+      await publication.publish(workspace, managerActor, article.id, {
+        ...publishDto(1),
+        templateKey: 'alternate',
+        templateVersion: '2',
+      });
+      expect(
+        await db.getRepository(ArticleEntity).findOneByOrFail({ siteId: site }),
+      ).toMatchObject({
+        displayTemplateKey: 'standard-article',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: { layout: 'system' },
+      });
+    });
+
+    it('preserves the established template on same-site publication by a content manager', async () => {
+      const { article } = await create();
+      await publication.publish(workspace, actor, article.id, {
+        ...publishDto(1),
+        templateKey: 'alternate',
+        templateVersion: '2',
+      });
+      await publication.publish(workspace, managerActor, article.id, {
+        ...publishDto(2),
+        templateKey: 'editorial',
+        templateVersion: '1',
+      });
+      expect(
+        await db.getRepository(ArticleEntity).findOneByOrFail({ siteId: site }),
+      ).toMatchObject({
+        displayTemplateKey: 'alternate',
+        displayTemplateVersion: '2',
+        displayTemplateConfig: { layout: 'alternate' },
+      });
+    });
+
+    it('uses the target site default template when a content manager moves a publication', async () => {
+      const { article } = await create();
+      await service.saveSettings(workspace, actor, {
+        revision: 1,
+        rules: 'Rules',
+        platforms: [
+          { siteId: site, rules: '' },
+          { siteId: site2, rules: '' },
+        ],
+      });
+      await publication.publish(workspace, managerActor, article.id, {
+        ...publishDto(1),
+        templateKey: 'alternate',
+        templateVersion: '2',
+      });
+      await publication.publish(workspace, managerActor, article.id, {
+        ...publishDto(2),
+        siteId: site2,
+        categoryId: category2,
+        slug: 'moved-article',
+        confirmMove: true,
+        templateKey: 'alternate',
+        templateVersion: '2',
+      });
+      expect(
+        await db
+          .getRepository(ArticleEntity)
+          .findOneByOrFail({ siteId: site2 }),
+      ).toMatchObject({
+        displayTemplateKey: 'standard-article',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: { layout: 'system' },
+      });
+    });
+
+    it('keeps explicit active template selection for a site owner', async () => {
+      const { article } = await create();
+      const details = await service.details(workspace, actor, article.id);
+      expect(details.sites.find((entry) => entry.id === site)).toMatchObject({
+        canManageStructure: true,
+      });
+      await publication.publish(workspace, actor, article.id, {
+        ...publishDto(1),
+        templateKey: 'alternate',
+        templateVersion: '2',
+      });
+      expect(
+        await db.getRepository(ArticleEntity).findOneByOrFail({ siteId: site }),
+      ).toMatchObject({
+        displayTemplateKey: 'alternate',
+        displayTemplateVersion: '2',
+        displayTemplateConfig: { layout: 'alternate' },
+      });
+    });
+
+    it('requires a template selection from an actor who can manage structure', async () => {
+      const { article } = await create();
+      await expect(
+        publication.publish(workspace, actor, article.id, {
+          ...publishDto(1),
+          templateKey: undefined,
+          templateVersion: undefined,
+        }),
+      ).rejects.toThrow('Выберите шаблон статьи');
+      expect(await db.getRepository(ArticleEntity).count()).toBe(0);
     });
 
     it('moves an explicit publication without losing old URLs, versions or independent platform articles', async () => {

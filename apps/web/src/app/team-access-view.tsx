@@ -25,7 +25,6 @@ type UserItem = {
     workspaceId: string;
     workspaceName: string;
     role: "site_owner" | "content_manager";
-    canEditCode: boolean;
     requiresApproval: boolean;
   }>;
 };
@@ -135,7 +134,6 @@ export function TeamAccessView({
           siteAccesses: siteIds.map((siteId) => ({
             siteId,
             role: createRole,
-            canEditCode: data.get("canEditCode") === "on",
             requiresApproval:
               createRole === "content_manager" &&
               data.get("requiresApproval") === "on",
@@ -164,7 +162,6 @@ export function TeamAccessView({
         role === "wispo_admin"
           ? []
           : user.siteAccesses.map((access) => access.siteId),
-      canEditCode: user.siteAccesses.some((access) => access.canEditCode),
       requiresApproval: user.siteAccesses.some(
         (access) => access.requiresApproval,
       ),
@@ -187,7 +184,6 @@ export function TeamAccessView({
             : role === "site_owner"
               ? current.siteIds.slice(0, 1)
               : current.siteIds,
-        canEditCode: role === "wispo_admin" ? false : current.canEditCode,
         requiresApproval:
           role === "content_manager" ? current.requiresApproval : false,
         isActive: role === "wispo_admin" ? true : current.isActive,
@@ -234,7 +230,6 @@ export function TeamAccessView({
           fullName: editor.fullName,
           role: editor.role,
           siteIds: editor.siteIds,
-          canEditCode: editor.canEditCode,
           requiresApproval: editor.requiresApproval,
           isActive: editor.isActive,
         }),
@@ -317,10 +312,6 @@ export function TeamAccessView({
             ))}
             <small>{createRole === "site_owner" ? "Владельцу можно назначить ровно один сайт." : "Контент-менеджеру можно назначить несколько сайтов."}</small>
           </fieldset>
-          <label className="project-settings-toggle">
-            <input type="checkbox" name="canEditCode" />
-            <span>Разрешить редактирование кода</span>
-          </label>
           {createRole === "content_manager" ? (
             <label className="project-settings-toggle">
               <input type="checkbox" name="requiresApproval" />
@@ -366,9 +357,6 @@ export function TeamAccessView({
           const role = managedUserRole(user);
           const capabilities = capabilityLabels({
             administrator,
-            canEditCode: user.siteAccesses.some(
-              (access) => access.canEditCode,
-            ),
             requiresApproval: user.siteAccesses.some(
               (access) => access.requiresApproval,
             ),

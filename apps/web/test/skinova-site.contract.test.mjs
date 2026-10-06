@@ -6,9 +6,18 @@ const renderer = await readFile(
   new URL("../src/app/skinova-site.tsx", import.meta.url),
   "utf8",
 );
-const registry = await readFile(
+const compatibilityRegistry = await readFile(
   new URL("../src/app/skinova-template.ts", import.meta.url),
   "utf8",
+);
+const packageManifest = JSON.parse(
+  await readFile(
+    new URL(
+      "../template-packages/skinova/manifest.template.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
 );
 const publicHome = await readFile(
   new URL("../src/app/preview/[siteSlug]/page.tsx", import.meta.url),
@@ -17,6 +26,13 @@ const publicHome = await readFile(
 const publicArticle = await readFile(
   new URL(
     "../src/app/preview/[siteSlug]/articles/[articleSlug]/page.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const publicCategory = await readFile(
+  new URL(
+    "../src/app/preview/[siteSlug]/categories/[categorySlug]/page.tsx",
     import.meta.url,
   ),
   "utf8",
@@ -49,12 +65,39 @@ const articlePreviewService = contentService.slice(
 );
 
 test("Skinova uses versioned Media renderers instead of an iframe", () => {
-  assert.match(registry, /SKINOVA_HOME_TEMPLATE_KEY = "skinova-home"/);
-  assert.match(registry, /SKINOVA_ARTICLE_TEMPLATE_KEY = "skinova-article"/);
-  assert.match(registry, /SKINOVA_CATEGORY_TEMPLATE_KEY = "skinova-category"/);
-  assert.match(publicHome, /from "\.\.\/\.\.\/skinova-template"/);
-  assert.match(publicHome, /<SkinovaHome/);
+  const templates = new Map(
+    packageManifest.templates.map((template) => [template.kind, template]),
+  );
+  assert.equal(templates.get("homepage")?.key, "skinova-home");
+  assert.equal(templates.get("article")?.key, "skinova-article");
+  assert.equal(templates.get("category")?.key, "skinova-category");
+  assert.match(
+    compatibilityRegistry,
+    /from "\.\/template-package-contract"/,
+  );
+  for (const route of [publicHome, publicArticle, publicCategory]) {
+    assert.match(route, /resolveTemplateComponent/);
+    assert.doesNotMatch(route, /from .*skinova-template/);
+  }
+  assert.match(publicHome, /kind:\s*"homepage"/);
+  assert.match(publicArticle, /kind:\s*"article"/);
+  assert.match(publicCategory, /kind:\s*"category"/);
   assert.doesNotMatch(renderer, /<iframe|dangerouslySetInnerHTML|eval\(/);
+});
+
+test("system pages resolve their own template identity instead of header chrome", () => {
+  for (const route of [publicPage, publicNotFound]) {
+    assert.match(route, /resolveTemplateComponent/);
+    assert.match(route, /kind:\s*"system_page"/);
+    assert.doesNotMatch(
+      route,
+      /headerTemplateKey\s*===\s*SKINOVA_HEADER_TEMPLATE_KEY/,
+    );
+  }
+  assert.match(publicPage, /page\.systemTemplateKey/);
+  assert.match(publicPage, /page\.systemTemplateVersion/);
+  assert.match(publicNotFound, /data\.template\.key/);
+  assert.match(publicNotFound, /data\.template\.version/);
 });
 
 test("homepage and Media assignments override bundled fallback content", () => {
@@ -118,7 +161,7 @@ test("article preview receives the complete category tree from the API", () => {
   assert.doesNotMatch(publicArticle, /categoryRows|parentId: null/);
 });
 
-test("Skinova privacy and 404 pages use the complete shared chrome", () => {
+test("resolved Skinova system pages receive the complete shared chrome", () => {
   assert.match(renderer, /function SkinovaChrome/);
   assert.match(
     renderer,

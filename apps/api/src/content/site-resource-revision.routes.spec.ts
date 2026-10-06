@@ -5,14 +5,12 @@ import type { App } from 'supertest/types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PlatformRole } from '../database/entities';
 import { CmsRevisionsService } from './cms-revisions.service';
-import { CodeResourcesService } from './code-resources.service';
 import { SiteResourceRevisionsController } from './site-resource-revisions.controller';
 import { SiteResourceRevisionsService } from './site-resource-revisions.service';
 
 describe('remaining CMS resource revision routes', () => {
   const siteId = '11111111-1111-4111-8111-111111111111';
   const revisionId = '22222222-2222-4222-8222-222222222222';
-  const entityId = '33333333-3333-4333-8333-333333333333';
   let app: INestApplication;
   const resources = {
     get: jest.fn().mockResolvedValue({ draftRevisionId: revisionId }),
@@ -30,20 +28,12 @@ describe('remaining CMS resource revision routes', () => {
     restore: jest.fn().mockResolvedValue({ id: revisionId }),
     publish: jest.fn(),
   };
-  const code = {
-    list: jest.fn().mockResolvedValue([]),
-    create: jest.fn().mockResolvedValue({ id: entityId }),
-    update: jest.fn().mockResolvedValue({ id: entityId }),
-    published: jest.fn().mockResolvedValue({ html: '<main></main>' }),
-  };
-
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [SiteResourceRevisionsController],
       providers: [
         { provide: SiteResourceRevisionsService, useValue: resources },
         { provide: CmsRevisionsService, useValue: revisions },
-        { provide: CodeResourcesService, useValue: code },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -118,49 +108,16 @@ describe('remaining CMS resource revision routes', () => {
   });
 
   it.each(['template', 'chunk'] as const)(
-    'exposes HTML-only %s CRUD and code approval workflow',
+    'does not expose CMS code-resource routes for %s',
     async (kind) => {
       const base = `/api/sites/${siteId}/content/code-resources/${kind}`;
       await request(app.getHttpServer() as App)
         .get(base)
-        .expect(200);
+        .expect(404);
       await request(app.getHttpServer() as App)
         .post(base)
-        .send({
-          name: 'Block',
-          key: 'block',
-          html: '<section></section>',
-          parameters: [],
-        })
-        .expect(201);
-      await request(app.getHttpServer() as App)
-        .put(`${base}/${entityId}`)
-        .send({
-          name: 'Block',
-          key: 'block',
-          html: '<section>Next</section>',
-          parameters: [],
-          expectedDraftRevisionId: revisionId,
-        })
-        .expect(200);
-      await request(app.getHttpServer() as App)
-        .get(`${base}/${entityId}/revisions/current`)
-        .expect(200);
-      await request(app.getHttpServer() as App)
-        .get(`${base}/${entityId}/revisions`)
-        .expect(200);
-      await request(app.getHttpServer() as App)
-        .get(`${base}/${entityId}/revisions/${revisionId}/preview`)
-        .expect(200);
-      await request(app.getHttpServer() as App)
-        .post(`${base}/${entityId}/revisions/${revisionId}/submit`)
-        .expect(201);
-      await request(app.getHttpServer() as App)
-        .post(`${base}/${entityId}/revisions/${revisionId}/approve`)
-        .expect(201);
-      await request(app.getHttpServer() as App)
-        .post(`${base}/${entityId}/revisions/${revisionId}/publish`)
-        .expect(201);
+        .send({})
+        .expect(404);
     },
   );
 });

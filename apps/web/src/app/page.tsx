@@ -366,9 +366,7 @@ function Dashboard({
   const canEdit = capabilities.canEditContent;
   const canApprove = capabilities.canApprove;
   const canEditPublished = capabilities.canPublishDirectly;
-  const canViewCode = capabilities.canViewCode;
-  const canPublishCodeDirectly = capabilities.canPublishCodeDirectly;
-  const canEditCode = capabilities.canEditCode;
+  const canManageStructure = capabilities.canManageStructure;
   const canManageSettings = capabilities.canManageSettings;
   const contentMotionKey = [
     selectedWorkspaceId ?? "platform",
@@ -487,13 +485,26 @@ function Dashboard({
           workspaceItem.sites.some((siteItem) => siteItem.id === siteId),
         );
         if (targetWorkspace) {
+          const targetSite = targetWorkspace.sites.find(
+            (siteItem) => siteItem.id === siteId,
+          );
+          if (!targetSite) return;
+          const requestedView = view as View;
+          const effectiveView: View =
+            requestedView === "templates" &&
+            !siteCapabilities(isWispoAdmin, targetSite.access)
+              .canManageStructure
+              ? targetSite.siteType === "media"
+                ? "site"
+                : "homepage"
+              : requestedView;
           setSelectedWorkspaceId(targetWorkspace.id);
           setExpandedWorkspaceId(targetWorkspace.id);
           setSelectedSiteId(siteId);
-          setActiveView(view as View);
+          setActiveView(effectiveView);
           const restoredSettings = url.searchParams.get("settings");
           if (
-            view === "settings" &&
+            effectiveView === "settings" &&
             ["management", "domain", "dates", "product"].includes(
               restoredSettings ?? "",
             )
@@ -501,13 +512,17 @@ function Dashboard({
             setSiteSettingsSection(restoredSettings as SiteSettingsSection);
           }
           const settingsView = ["globals", "integration", "settings"].includes(
-            view,
+            effectiveView,
           );
           setSiteSectionExpanded(!settingsView);
           setSettingsSectionExpanded(settingsView);
           setContentCenterExpanded(false);
           setNavigationTarget(null);
           loadSiteStructure(siteId);
+          if (effectiveView !== requestedView) {
+            url.searchParams.set("view", effectiveView);
+            window.history.replaceState({}, "", url);
+          }
           return;
         }
       }
@@ -711,7 +726,7 @@ function Dashboard({
   const siteMenus: Record<string, SiteMenuItem[]> = {
     media: [
       { id: "site", icon: "template", label: "Сайт" },
-      { id: "templates", icon: "template", label: "Шаблоны и чанки" },
+      { id: "templates", icon: "template", label: "Шаблоны" },
       { id: "homepage", icon: "home", label: "Главная" },
       { id: "articles", icon: "blog", label: "Статьи" },
       ...mediaSystemPages,
@@ -760,7 +775,7 @@ function Dashboard({
   ).filter(
     (item) =>
       (item.id !== "banners" || hasBannerSlots) &&
-      (item.id !== "templates" || canViewCode) &&
+      (item.id !== "templates" || canManageStructure) &&
       (!["settings", "integration"].includes(item.id) || canManageSettings),
   );
   const siteTopTabs = (
@@ -2426,7 +2441,7 @@ function Dashboard({
               siteName={site.name}
               siteSlug={site.slug}
               canEdit={canEdit}
-              canEditCode={canEditCode}
+              canManageStructure={canManageStructure}
               canApprove={canApprove}
               canEditPublished={canEditPublished}
               onCountChange={setContentCount}
@@ -2454,6 +2469,7 @@ function Dashboard({
               siteName={site?.name}
               siteSlug={site?.slug}
               canEdit={canEdit}
+              canManageStructure={canManageStructure}
               canApprove={canApprove}
               canEditPublished={canEditPublished}
               onCountChange={setContentCount}
@@ -2481,6 +2497,7 @@ function Dashboard({
             siteId={site?.id}
             siteName={site?.name}
             canEdit={canEdit}
+            canManageStructure={canManageStructure}
             canApprove={canApprove}
             canPublishDirectly={canEditPublished}
             canManageLegalModels={isWispoAdmin}
@@ -2490,24 +2507,26 @@ function Dashboard({
           <NotFoundPageView
             siteId={site?.id}
             canEdit={canEdit}
-            canEditCode={canEditCode}
+            canManageStructure={canManageStructure}
             canApprove={canApprove}
             canPublishDirectly={canEditPublished}
           />
         ) : activeView === "site" && site?.siteType === "media" ? (
           <MediaSiteView
             siteName={site.name}
-            showTemplates={canViewCode}
+            showTemplates={canManageStructure}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "templates" &&
           site?.siteType === "media" &&
-          canViewCode ? (
+          canManageStructure ? (
           <MediaTemplatesView
+            key={site.id}
             siteId={site.id}
-            canEdit={canEditCode}
+            isWispoAdmin={isWispoAdmin}
+            canManageStructure={canManageStructure}
             canApprove={canApprove}
-            canPublishDirectly={canPublishCodeDirectly}
+            canPublishDirectly={canEditPublished}
             onOpen={(target) => navigateTo(target)}
           />
         ) : activeView === "homepage-template" && site?.siteType === "media" ? (

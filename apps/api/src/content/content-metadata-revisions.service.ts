@@ -148,7 +148,7 @@ export class ContentMetadataRevisionsService {
     await this.revisions.assertSitePermission(
       siteId,
       actor,
-      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_STRUCTURE,
     );
     const template = await this.templates.findOne({
       where: {
@@ -478,7 +478,7 @@ export class ContentMetadataRevisionsService {
     await this.revisions.assertSitePermission(
       siteId,
       actor,
-      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_STRUCTURE,
     );
     const site = await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');

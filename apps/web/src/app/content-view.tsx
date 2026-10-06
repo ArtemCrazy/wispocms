@@ -271,6 +271,7 @@ export function ContentView({
   siteName,
   siteSlug,
   canEdit = true,
+  canManageStructure = false,
   canApprove = true,
   canEditPublished = false,
   onCountChange,
@@ -284,6 +285,7 @@ export function ContentView({
   siteName?: string;
   siteSlug?: string;
   canEdit?: boolean;
+  canManageStructure?: boolean;
   canApprove?: boolean;
   canEditPublished?: boolean;
   onCountChange?: (count: number) => void;
@@ -1263,8 +1265,9 @@ export function ContentView({
         ),
       ),
       noIndex: data.get("noIndex") === "on",
-      displayTemplateKey,
-      displayTemplateVersion,
+      ...(canManageStructure
+        ? { displayTemplateKey, displayTemplateVersion }
+        : {}),
       structuredData: structuredDataSource
         ? JSON.parse(structuredDataSource)
         : null,
@@ -1848,8 +1851,9 @@ export function ContentView({
       ogDescription: String(data.get("ogDescription") ?? "").trim() || null,
       ogImageMediaId: String(data.get("ogImageMediaId") ?? "") || null,
       structuredData: categoryStructuredData,
-      displayTemplateKey,
-      displayTemplateVersion,
+      ...(canManageStructure
+        ? { displayTemplateKey, displayTemplateVersion }
+        : {}),
       ...(categoryId
         ? {
             expectedDraftRevisionId:
@@ -2849,28 +2853,30 @@ export function ContentView({
               ) : (
                 <p>Новая рубрика будет создана как черновик.</p>
               )}
-              <label>
-                <span>Шаблон рубрики</span>
-                <select
-                  name="displayTemplateSelection"
-                  defaultValue={
-                    categoryEditor === "new"
-                      ? "standard-category@1"
-                      : `${categoryEditor.displayTemplateKey}@${categoryEditor.displayTemplateVersion}`
-                  }
-                >
-                  {templates
-                    .filter((template) => template.kind === "category")
-                    .map((template) => (
-                      <option
-                        key={template.id}
-                        value={`${template.key}@${template.version}`}
-                      >
-                        {template.name} · v{template.version}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              {canManageStructure ? (
+                <label>
+                  <span>Шаблон рубрики</span>
+                  <select
+                    name="displayTemplateSelection"
+                    defaultValue={
+                      categoryEditor === "new"
+                        ? "standard-category@1"
+                        : `${categoryEditor.displayTemplateKey}@${categoryEditor.displayTemplateVersion}`
+                    }
+                  >
+                    {templates
+                      .filter((template) => template.kind === "category")
+                      .map((template) => (
+                        <option
+                          key={template.id}
+                          value={`${template.key}@${template.version}`}
+                        >
+                          {template.name} · v{template.version}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
               <div className="category-visual-fields">
                 <label>
                   <span>Иконка</span>
@@ -3378,31 +3384,33 @@ export function ContentView({
                 </select>
                 <small>Отдельное изображение для карточек и списков.</small>
               </label>
-              <label
-                className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
-              >
-                Шаблон статьи
-                <select
-                  name="displayTemplateSelection"
-                  disabled={!editorCanEdit}
-                  defaultValue={
-                    editor === "new"
-                      ? "standard-article@1"
-                      : `${editor.displayTemplateKey}@${editor.displayTemplateVersion}`
-                  }
+              {canManageStructure ? (
+                <label
+                  className={`article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}
                 >
-                  {templates
-                    .filter((template) => template.kind === "article")
-                    .map((template) => (
-                      <option
-                        key={template.id}
-                        value={`${template.key}@${template.version}`}
-                      >
-                        {template.name} · v{template.version}
-                      </option>
-                    ))}
-                </select>
-              </label>
+                  Шаблон статьи
+                  <select
+                    name="displayTemplateSelection"
+                    disabled={!editorCanEdit}
+                    defaultValue={
+                      editor === "new"
+                        ? "standard-article@1"
+                        : `${editor.displayTemplateKey}@${editor.displayTemplateVersion}`
+                    }
+                  >
+                    {templates
+                      .filter((template) => template.kind === "article")
+                      .map((template) => (
+                        <option
+                          key={template.id}
+                          value={`${template.key}@${template.version}`}
+                        >
+                          {template.name} · v{template.version}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ) : null}
               {editor !== "new" ? (
                 <section
                   className={`workflow-panel article-tab-panel ${editorTab === "parameters" ? "active" : ""}`}

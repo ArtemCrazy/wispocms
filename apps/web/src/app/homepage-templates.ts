@@ -1,10 +1,15 @@
+import { SKINOVA_HOME_TEMPLATE } from "./template-package-contract";
+
 export const ARMATUREX_HOME_TEMPLATE = {
   key: "armaturex-home-v1",
   version: "1",
   title: "Armaturex — корпоративная главная",
 } as const;
 
-export const HOMEPAGE_TEMPLATE_REGISTRY = [ARMATUREX_HOME_TEMPLATE] as const;
+export const HOMEPAGE_TEMPLATE_REGISTRY = [
+  ARMATUREX_HOME_TEMPLATE,
+  SKINOVA_HOME_TEMPLATE,
+] as const;
 
 export function getHomepageTemplate(
   key: string | null,

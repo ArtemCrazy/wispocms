@@ -58,21 +58,20 @@ describe('CreateUserDto', () => {
     expect(errors.map((error) => error.property)).toContain('siteAccesses');
   });
 
-  it('accepts explicit per-site role and permission flags', async () => {
-    const errors = await validate(
-      plainToInstance(CreateUserDto, {
-        ...base,
-        siteAccesses: [
-          {
-            siteId,
-            role: 'content_manager',
-            canEditCode: true,
-            requiresApproval: true,
-          },
-        ],
-      }),
-    );
+  it('accepts an explicit per-site role and approval flag', async () => {
+    const candidate = plainToInstance(CreateUserDto, {
+      ...base,
+      siteAccesses: [
+        {
+          siteId,
+          role: 'content_manager',
+          requiresApproval: true,
+        },
+      ],
+    });
+    const errors = await validate(candidate, { whitelist: true });
     expect(errors).toHaveLength(0);
+    expect(candidate.siteAccesses[0]).not.toHaveProperty('canEditCode');
   });
 
   it('rejects a legacy developer role inside a site assignment', async () => {
@@ -83,7 +82,6 @@ describe('CreateUserDto', () => {
           {
             siteId,
             role: 'site_developer',
-            canEditCode: true,
             requiresApproval: false,
           },
         ],
@@ -104,7 +102,6 @@ describe('UpdateManagedUserDto', () => {
         fullName: 'Анна Ковалёва',
         role: ManagedUserRole.CONTENT_MANAGER,
         siteIds: [siteId],
-        canEditCode: true,
         requiresApproval: true,
         isActive: true,
       }),
@@ -119,7 +116,6 @@ describe('UpdateManagedUserDto', () => {
         fullName: 'Анна Ковалёва',
         role: 'site_developer',
         siteIds: [siteId],
-        canEditCode: true,
         requiresApproval: false,
         isActive: true,
       }),

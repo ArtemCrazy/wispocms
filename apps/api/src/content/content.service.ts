@@ -13,6 +13,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { resolve4, resolve6, resolveCname } from 'node:dns/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
@@ -65,7 +66,10 @@ import {
   normalizeHostnameInput,
   normalizeRequestHost,
 } from '../platform/site-domain';
-import { buildPublicIntegrationManifest } from './public-integration-manifest';
+import {
+  buildPublicIntegrationManifest,
+  buildPublicTemplatePackageIdentity,
+} from './public-integration-manifest';
 import {
   bannerGeometryError,
   bannerSlotCompatibilityError,
@@ -316,6 +320,36 @@ export class ContentService {
     return user ? { id: user.id, fullName: user.fullName } : null;
   }
 
+  private async currentTemplatePackageIdentity(site: SiteEntity) {
+    const loadedIdentity = buildPublicTemplatePackageIdentity(site);
+    if (loadedIdentity) return loadedIdentity;
+    if (!site.templatePackageId || !site.currentTemplatePackageVersionId)
+      return null;
+    const identity = await this.sites
+      .createQueryBuilder('site')
+      .leftJoin('site.templatePackage', 'templatePackage')
+      .leftJoin('site.currentTemplatePackageVersion', 'currentVersion')
+      .select('templatePackage.packageId', 'packageId')
+      .addSelect('currentVersion.packageVersion', 'packageVersion')
+      .where('site.id = :siteId', { siteId: site.id })
+      .andWhere('templatePackage.id = :templatePackageId', {
+        templatePackageId: site.templatePackageId,
+      })
+      .andWhere('currentVersion.id = :currentVersionId', {
+        currentVersionId: site.currentTemplatePackageVersionId,
+      })
+      .andWhere('currentVersion.templatePackageId = :templatePackageId', {
+        templatePackageId: site.templatePackageId,
+      })
+      .getRawOne<{ packageId: string | null; packageVersion: string | null }>();
+    return identity?.packageId && identity.packageVersion
+      ? {
+          packageId: identity.packageId,
+          packageVersion: identity.packageVersion,
+        }
+      : null;
+  }
+
   private mailTransport() {
     const port = Number(process.env.SMTP_PORT ?? 25);
     const user = process.env.SMTP_USER?.trim();
@@ -358,6 +392,21 @@ export class ContentService {
         throw new ForbiddenException('Недостаточно прав для этого действия');
     }
     return site;
+  }
+
+  private async hasSitePermission(
+    siteId: string,
+    actor: Actor,
+    permission: SitePermission,
+  ) {
+    if (actor.platformRole === PlatformRole.WISPO_ADMIN) return true;
+    const access = await this.siteAccesses.findOne({
+      where: { userId: actor.userId, siteId },
+    });
+    return (
+      accessCoversSite(access, siteId) &&
+      hasSitePermission(actor.platformRole, access, permission)
+    );
   }
 
   private async requireSiteModule(
@@ -578,6 +627,7 @@ export class ContentService {
       pages.find((page) => page.kind === PageKind.HOMEPAGE),
       banners,
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolveVariables(
       {
         site: {
@@ -585,6 +635,7 @@ export class ContentService {
           slug: site.slug,
           domain: site.domain,
           siteType: site.siteType,
+          templatePackage,
           seoTitle: site.seoTitle,
           seoDescription: site.seoDescription,
           canonicalUrl: this.publicCanonicalBase(site),
@@ -625,7 +676,11 @@ export class ContentService {
   async getPublicIntegrationManifest(siteSlug: string) {
     const site = await this.sites.findOne({
       where: { slug: siteSlug.trim().toLowerCase(), isActive: true },
-      relations: { linkedCommercialSite: true },
+      relations: {
+        linkedCommercialSite: true,
+        templatePackage: true,
+        currentTemplatePackageVersion: true,
+      },
     });
     if (!site) throw new NotFoundException('Сайт не найден');
     return buildPublicIntegrationManifest(site);
@@ -987,10 +1042,12 @@ export class ContentService {
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1086,10 +1143,12 @@ export class ContentService {
         order: { title: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
         canonicalUrl: this.publicCanonicalBase(site),
@@ -1180,10 +1239,12 @@ export class ContentService {
       page ?? undefined,
       banners,
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1251,10 +1312,12 @@ export class ContentService {
       page ?? undefined,
       banners,
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1320,10 +1383,12 @@ export class ContentService {
         order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
@@ -1438,10 +1503,12 @@ export class ContentService {
       banners,
       this.pageBannerAssignmentsFromSnapshot(selectedSnapshot),
     );
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return this.resolvePublicVariables(site.id, {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         domain: site.domain,
         siteType: site.siteType,
         seoTitle: site.seoTitle,
@@ -2125,7 +2192,7 @@ export class ContentService {
       dto.footerTemplateVersion !== undefined ||
       dto.footerTemplateConfig !== undefined;
     if (changesHeaderTemplate || changesFooterTemplate)
-      await this.requireSite(siteId, actor, SitePermission.EDIT_CODE);
+      await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     if (
       site.siteType !== SiteType.MEDIA &&
       (changesHeaderTemplate || changesFooterTemplate)
@@ -3383,9 +3450,20 @@ export class ContentService {
     const body = dto.bodyDocument
       ? articleDocumentText(bodyDocument)
       : (dto.body ?? '');
-    const displayTemplateKey =
-      dto.displayTemplateKey?.trim() || 'standard-article';
-    const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
+    const canManageStructure = await this.hasSitePermission(
+      siteId,
+      actor,
+      SitePermission.MANAGE_STRUCTURE,
+    );
+    const displayTemplateKey = canManageStructure
+      ? dto.displayTemplateKey?.trim() || 'standard-article'
+      : 'standard-article';
+    const displayTemplateVersion = canManageStructure
+      ? dto.displayTemplateVersion?.trim() || '1'
+      : '1';
+    const displayTemplateConfig = canManageStructure
+      ? (dto.displayTemplateConfig ?? {})
+      : {};
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.ARTICLE,
@@ -3417,7 +3495,7 @@ export class ContentService {
           editorialState: EditorialState.DRAFT,
           displayTemplateKey,
           displayTemplateVersion,
-          displayTemplateConfig: dto.displayTemplateConfig ?? {},
+          displayTemplateConfig,
           deletedAt: null,
           deletedByUserId: null,
           categoryId: dto.categoryId ?? null,
@@ -3513,6 +3591,17 @@ export class ContentService {
       dto.displayTemplateKey?.trim() || article.displayTemplateKey;
     const displayTemplateVersion =
       dto.displayTemplateVersion?.trim() || article.displayTemplateVersion;
+    const displayTemplateConfig =
+      dto.displayTemplateConfig ?? article.displayTemplateConfig ?? {};
+    const changesDisplayTemplate =
+      displayTemplateKey !== article.displayTemplateKey ||
+      displayTemplateVersion !== article.displayTemplateVersion ||
+      !isDeepStrictEqual(
+        displayTemplateConfig,
+        article.displayTemplateConfig ?? {},
+      );
+    if (changesDisplayTemplate)
+      await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.ARTICLE,
@@ -3563,8 +3652,7 @@ export class ContentService {
           : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
-      displayTemplateConfig:
-        dto.displayTemplateConfig ?? article.displayTemplateConfig,
+      displayTemplateConfig,
       publishedAt:
         dto.publishedAt === undefined
           ? article.publishedAt
@@ -4100,9 +4188,20 @@ export class ContentService {
       imageMediaId,
       dto.ogImageMediaId ?? null,
     );
-    const displayTemplateKey =
-      dto.displayTemplateKey?.trim() || 'standard-category';
-    const displayTemplateVersion = dto.displayTemplateVersion?.trim() || '1';
+    const canManageStructure = await this.hasSitePermission(
+      siteId,
+      actor,
+      SitePermission.MANAGE_STRUCTURE,
+    );
+    const displayTemplateKey = canManageStructure
+      ? dto.displayTemplateKey?.trim() || 'standard-category'
+      : 'standard-category';
+    const displayTemplateVersion = canManageStructure
+      ? dto.displayTemplateVersion?.trim() || '1'
+      : '1';
+    const displayTemplateConfig = canManageStructure
+      ? (dto.displayTemplateConfig ?? {})
+      : {};
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.CATEGORY,
@@ -4144,7 +4243,7 @@ export class ContentService {
           structuredData: dto.structuredData ?? null,
           displayTemplateKey,
           displayTemplateVersion,
-          displayTemplateConfig: dto.displayTemplateConfig ?? {},
+          displayTemplateConfig,
           deletedAt: null,
           deletedByUserId: null,
           createdByUserId: actor.userId,
@@ -4227,6 +4326,17 @@ export class ContentService {
       dto.displayTemplateKey?.trim() || source.displayTemplateKey;
     const displayTemplateVersion =
       dto.displayTemplateVersion?.trim() || source.displayTemplateVersion;
+    const displayTemplateConfig =
+      dto.displayTemplateConfig ?? source.displayTemplateConfig ?? {};
+    const changesDisplayTemplate =
+      displayTemplateKey !== source.displayTemplateKey ||
+      displayTemplateVersion !== source.displayTemplateVersion ||
+      !isDeepStrictEqual(
+        displayTemplateConfig,
+        source.displayTemplateConfig ?? {},
+      );
+    if (changesDisplayTemplate)
+      await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     await this.lifecycle?.assertTemplate(
       siteId,
       ContentTemplateKind.CATEGORY,
@@ -4303,8 +4413,7 @@ export class ContentService {
           : dto.structuredData,
       displayTemplateKey,
       displayTemplateVersion,
-      displayTemplateConfig:
-        dto.displayTemplateConfig ?? source.displayTemplateConfig,
+      displayTemplateConfig,
     };
     const baseline =
       !current &&
@@ -4428,10 +4537,12 @@ export class ContentService {
         order: { title: 'ASC' },
       }),
     ]);
+    const templatePackage = await this.currentTemplatePackageIdentity(site);
     return {
       site: {
         name: site.name,
         slug: site.slug,
+        templatePackage,
         globalData: site.globalData,
         layoutSettings: site.layoutSettings,
         canonicalUrl: null,
@@ -5267,7 +5378,7 @@ export class ContentService {
     actor: Actor,
     dto: UpdateNotFoundTemplateDto,
   ) {
-    await this.requireSite(siteId, actor, SitePermission.EDIT_CODE);
+    await this.requireSite(siteId, actor, SitePermission.MANAGE_STRUCTURE);
     const page = await this.pages.findOne({ where: { siteId, slug: '404' } });
     if (!page) throw new NotFoundException('Страница 404 не найдена');
     const template = NOT_FOUND_TEMPLATES.find(

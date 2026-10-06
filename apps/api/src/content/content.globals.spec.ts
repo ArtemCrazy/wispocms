@@ -1,11 +1,11 @@
 import { ForbiddenException } from '@nestjs/common';
-import { PlatformRole, WorkspaceRole } from '../database/entities';
+import { PlatformRole, SiteRole } from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('ContentService site globals', () => {
   const actor = { userId: 'member-id', platformRole: PlatformRole.MEMBER };
 
-  function setup(role: WorkspaceRole | null) {
+  function setup(role: SiteRole | null) {
     const site = {
       id: 'site-id',
       workspaceId: 'workspace-id',
@@ -15,10 +15,16 @@ describe('ContentService site globals', () => {
       findOne: jest.fn().mockResolvedValue(site),
       save: jest.fn().mockImplementation((value) => Promise.resolve(value)),
     };
-    const memberships = {
-      findOne: jest
-        .fn()
-        .mockResolvedValue(role ? { role, siteIds: ['site-id'] } : null),
+    const siteAccesses = {
+      findOne: jest.fn().mockResolvedValue(
+        role
+          ? {
+              role,
+              siteId: 'site-id',
+              requiresApproval: role === SiteRole.CONTENT_MANAGER,
+            }
+          : null,
+      ),
     };
     const emptyRepository = {};
     const revisions = {
@@ -40,7 +46,7 @@ describe('ContentService site globals', () => {
     };
     const service = new ContentService(
       sites as never,
-      memberships as never,
+      siteAccesses as never,
       emptyRepository as never,
       emptyRepository as never,
       emptyRepository as never,
@@ -63,7 +69,7 @@ describe('ContentService site globals', () => {
   }
 
   it('allows a content manager to update shared site data', async () => {
-    const { service, site, sites } = setup(WorkspaceRole.SITE_CONTENT_MANAGER);
+    const { service, site, sites } = setup(SiteRole.CONTENT_MANAGER);
 
     await expect(
       service.updateSiteGlobals('site-id', actor, {
@@ -83,7 +89,7 @@ describe('ContentService site globals', () => {
   });
 
   it('allows the site owner to read shared site data', async () => {
-    const { service } = setup(WorkspaceRole.SITE_OWNER);
+    const { service } = setup(SiteRole.OWNER);
 
     await expect(service.getSiteGlobals('site-id', actor)).resolves.toEqual(
       expect.objectContaining({
@@ -95,7 +101,7 @@ describe('ContentService site globals', () => {
   });
 
   it('allows the site owner to edit shared site data', async () => {
-    const { service, sites } = setup(WorkspaceRole.SITE_OWNER);
+    const { service, sites } = setup(SiteRole.OWNER);
 
     await expect(
       service.updateSiteGlobals('site-id', actor, {

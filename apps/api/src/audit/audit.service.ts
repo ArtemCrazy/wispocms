@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, type EntityManager } from 'typeorm';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import {
   AuditLogEntity,
@@ -58,6 +58,24 @@ type MutationContext = {
   path: string;
   params: Record<string, string | undefined>;
   body: unknown;
+};
+
+export type TemplatePackageAuditReason =
+  'site_type_mismatch' | 'template_assignment_mismatch' | 'runtime_unavailable';
+
+export type SystemAuditEvent = {
+  event:
+    | 'template_package_registered'
+    | 'template_package_preflight'
+    | 'template_package_deployed';
+  entityId: string;
+  workspaceId?: string;
+  siteId?: string;
+  packageId: string;
+  packageVersion: string;
+  releaseDigest: string;
+  status: 'registered' | 'ready' | 'mismatch';
+  reasons: TemplatePackageAuditReason[];
 };
 
 @Injectable()
@@ -123,6 +141,36 @@ export class AuditService {
         action,
         description,
         changes: Object.keys(changes).length ? changes : null,
+      }),
+    );
+  }
+
+  async recordSystemEvent(event: SystemAuditEvent, manager?: EntityManager) {
+    const descriptions: Record<SystemAuditEvent['event'], string> = {
+      template_package_registered: 'Зарегистрирована версия frontend-пакета',
+      template_package_preflight: 'Проверена совместимость frontend-пакета',
+      template_package_deployed:
+        'Зафиксирована развёрнутая версия frontend-пакета',
+    };
+    const changes = sanitizeAuditChanges({
+      packageId: event.packageId,
+      packageVersion: event.packageVersion,
+      releaseDigest: event.releaseDigest,
+      status: event.status,
+      reasons: event.reasons,
+    });
+    const auditLogs = manager?.getRepository(AuditLogEntity) ?? this.auditLogs;
+    await auditLogs.save(
+      auditLogs.create({
+        actorUserId: null,
+        actorName: 'Release pipeline',
+        workspaceId: event.workspaceId ?? null,
+        siteId: event.siteId ?? null,
+        entityType: 'template_package_version',
+        entityId: event.entityId,
+        action: event.event,
+        description: descriptions[event.event],
+        changes,
       }),
     );
   }

@@ -47,9 +47,7 @@ export type CmsResourceType =
   | 'site_article_list'
   | 'site_layout_bindings'
   | 'media_alt'
-  | 'site_variable'
-  | 'template'
-  | 'chunk';
+  | 'site_variable';
 
 export type RevisionActor = { userId: string; platformRole: PlatformRole };
 
@@ -64,21 +62,37 @@ export class CmsRevisionsService {
   ) {}
 
   private permission(resourceType: CmsResourceType) {
-    return resourceType === 'template' ||
-      resourceType === 'chunk' ||
-      resourceType === 'site_layout_bindings' ||
+    return resourceType === 'site_layout_bindings' ||
       resourceType === 'site_article_list'
-      ? SitePermission.EDIT_CODE
+      ? SitePermission.MANAGE_STRUCTURE
       : SitePermission.EDIT_CONTENT;
   }
 
-  private readPermission(resourceType: CmsResourceType) {
-    return resourceType === 'template' ||
-      resourceType === 'chunk' ||
-      resourceType === 'site_layout_bindings' ||
-      resourceType === 'site_article_list'
-      ? SitePermission.VIEW_CODE
-      : SitePermission.READ;
+  private templateAssignmentFields(resourceType: CmsResourceType) {
+    if (resourceType === 'article' || resourceType === 'category')
+      return [
+        'displayTemplateKey',
+        'displayTemplateVersion',
+        'displayTemplateConfig',
+      ] as const;
+    if (resourceType === 'site_privacy') return ['displayTemplate'] as const;
+    if (resourceType === 'site_not_found')
+      return ['templateKey', 'templateVersion'] as const;
+    return [] as const;
+  }
+
+  private preserveTemplateAssignment(
+    resourceType: CmsResourceType,
+    restoredSnapshot: Record<string, unknown>,
+    currentSnapshot: Record<string, unknown>,
+  ) {
+    const snapshot = structuredClone(restoredSnapshot);
+    for (const field of this.templateAssignmentFields(resourceType)) {
+      if (Object.hasOwn(currentSnapshot, field))
+        snapshot[field] = structuredClone(currentSnapshot[field]);
+      else delete snapshot[field];
+    }
+    return snapshot;
   }
 
   private async requireSite(
@@ -92,7 +106,6 @@ export class CmsRevisionsService {
     const access = await this.siteAccesses.findOne({
       select: {
         role: true,
-        canEditCode: true,
         requiresApproval: true,
       },
       where: { userId: actor.userId, siteId },
@@ -425,7 +438,16 @@ export class CmsRevisionsService {
     expectedDraftRevisionId: string | null,
     actor: RevisionActor,
   ) {
-    await this.requireSite(siteId, actor, this.permission(resourceType));
+    const access = await this.requireSite(
+      siteId,
+      actor,
+      this.permission(resourceType),
+    );
+    const canManageStructure = hasSitePermission(
+      actor.platformRole,
+      access,
+      SitePermission.MANAGE_STRUCTURE,
+    );
     return this.dataSource.transaction(async (db) => {
       const resource = await this.lockedResource(
         db,
@@ -437,13 +459,30 @@ export class CmsRevisionsService {
         where: { id: sourceRevisionId, resourceId: resource.id },
       });
       if (!source) throw new NotFoundException('Версия не найдена');
+      let snapshot = source.snapshot;
+      if (!canManageStructure) {
+        const currentRevisionId =
+          resource.draftRevisionId ??
+          resource.publishedRevisionId ??
+          resource.approvedRevisionId;
+        const current = currentRevisionId
+          ? await db.findOne(CmsRevisionEntity, {
+              where: { id: currentRevisionId, resourceId: resource.id },
+            })
+          : null;
+        snapshot = this.preserveTemplateAssignment(
+          resourceType,
+          source.snapshot,
+          current?.snapshot ?? {},
+        );
+      }
       return this.saveDraftInTransaction(
         db,
         {
           siteId,
           resourceType,
           entityId,
-          snapshot: source.snapshot,
+          snapshot,
           expectedDraftRevisionId,
           actor,
         },
@@ -547,11 +586,9 @@ export class CmsRevisionsService {
     const access = await this.requireSite(
       siteId,
       actor,
-      resourceType === 'template' ||
-        resourceType === 'chunk' ||
-        resourceType === 'site_layout_bindings' ||
+      resourceType === 'site_layout_bindings' ||
         resourceType === 'site_article_list'
-        ? SitePermission.PUBLISH_CODE
+        ? SitePermission.MANAGE_STRUCTURE
         : SitePermission.PUBLISH_CONTENT,
     );
     await this.dataSource.transaction(async (db) => {
@@ -585,7 +622,7 @@ export class CmsRevisionsService {
     entityId: string,
     actor: RevisionActor,
   ): Promise<Record<string, unknown> | null> {
-    await this.requireSite(siteId, actor, this.readPermission(resourceType));
+    await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
         where: { siteId, resourceType, entityId },
@@ -616,7 +653,7 @@ export class CmsRevisionsService {
     publishedRevisionId: string | null;
     reviewState: RevisionPointers['reviewState'];
   } | null> {
-    await this.requireSite(siteId, actor, this.readPermission(resourceType));
+    await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
         where: { siteId, resourceType, entityId },
@@ -656,7 +693,7 @@ export class CmsRevisionsService {
     versionNumber: number;
     snapshot: Record<string, unknown>;
   }> {
-    await this.requireSite(siteId, actor, this.readPermission(resourceType));
+    await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
         where: { siteId, resourceType, entityId },
@@ -680,7 +717,7 @@ export class CmsRevisionsService {
     entityId: string,
     actor: RevisionActor,
   ): Promise<CmsRevisionEntity[]> {
-    await this.requireSite(siteId, actor, this.readPermission(resourceType));
+    await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
         where: { siteId, resourceType, entityId },

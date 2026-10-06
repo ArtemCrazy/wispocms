@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { PlatformRole } from '../database/entities';
 import { SitePermission } from './content.permissions';
 import { SiteResourceRevisionsService } from './site-resource-revisions.service';
@@ -134,7 +134,7 @@ describe('SiteResourceRevisionsService', () => {
     expect(revisions.saveDraft).not.toHaveBeenCalled();
   });
 
-  it('requires code-edit permission when the 404 template changes', async () => {
+  it('requires structure-management permission when the 404 template changes', async () => {
     const { service, revisions } = setup({
       draft: {
         id: 'draft-current',
@@ -162,8 +162,114 @@ describe('SiteResourceRevisionsService', () => {
     expect(revisions.assertSitePermission).toHaveBeenCalledWith(
       'site-id',
       actor,
-      SitePermission.EDIT_CODE,
+      SitePermission.MANAGE_STRUCTURE,
     );
+  });
+
+  it.each([
+    [
+      'key',
+      {
+        key: 'compact-policy',
+        version: '1',
+        config: { width: 'wide' },
+      },
+    ],
+    [
+      'version',
+      {
+        key: 'system-policy',
+        version: '2',
+        config: { width: 'wide' },
+      },
+    ],
+    [
+      'config',
+      {
+        key: 'system-policy',
+        version: '1',
+        config: { width: 'compact' },
+      },
+    ],
+  ] as const)(
+    'requires structure-management permission when the privacy template %s changes',
+    async (_field, displayTemplate) => {
+      const { service, revisions } = setup({
+        draft: {
+          id: 'draft-current',
+          versionNumber: 2,
+          snapshot: {
+            document: 'Current policy',
+            displayTemplate: {
+              key: 'system-policy',
+              version: '1',
+              config: { width: 'wide' },
+            },
+          },
+        },
+        approvedRevisionId: null,
+        publishedRevisionId: 'baseline-id',
+        reviewState: 'draft',
+      });
+      revisions.assertSitePermission.mockRejectedValue(
+        new ForbiddenException('Недостаточно прав для этого сайта'),
+      );
+
+      await expect(
+        service.save('site-id', 'site_privacy', actor, {
+          snapshot: { document: 'Updated policy', displayTemplate },
+          expectedDraftRevisionId: 'draft-current',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(revisions.assertSitePermission).toHaveBeenCalledWith(
+        'site-id',
+        actor,
+        SitePermission.MANAGE_STRUCTURE,
+      );
+      expect(revisions.saveDraft).not.toHaveBeenCalled();
+    },
+  );
+
+  it('allows privacy content changes with structurally equal template data', async () => {
+    const { service, revisions } = setup({
+      draft: {
+        id: 'draft-current',
+        versionNumber: 2,
+        snapshot: {
+          document: 'Current policy',
+          displayTemplate: {
+            key: 'system-policy',
+            version: '1',
+            config: {
+              typography: { scale: 1, family: 'Inter' },
+              sections: ['intro', 'details'],
+            },
+          },
+        },
+      },
+      approvedRevisionId: null,
+      publishedRevisionId: 'baseline-id',
+      reviewState: 'draft',
+    });
+
+    await service.save('site-id', 'site_privacy', actor, {
+      snapshot: {
+        document: 'Updated policy',
+        displayTemplate: {
+          key: 'system-policy',
+          version: '1',
+          config: {
+            sections: ['intro', 'details'],
+            typography: { family: 'Inter', scale: 1 },
+          },
+        },
+      },
+      expectedDraftRevisionId: 'draft-current',
+    });
+
+    expect(revisions.assertSitePermission).not.toHaveBeenCalled();
+    expect(revisions.saveDraft).toHaveBeenCalledTimes(1);
   });
 
   it('imports the public privacy baseline before a legacy draft command mutates state', async () => {
@@ -195,6 +301,152 @@ describe('SiteResourceRevisionsService', () => {
       'site-id',
       'site_seo',
       { seoTitle: 'Published next' },
+    );
+  });
+
+  it('does not activate a saved privacy snapshot that changes the template without structure permission', async () => {
+    const { service, revisions, adapters } = setup();
+    adapters.publishedSnapshot.mockResolvedValue({
+      document: 'Published policy',
+      displayTemplate: {
+        key: 'system-policy',
+        version: '1',
+        config: { width: 'wide' },
+      },
+    });
+    revisions.publish.mockImplementation(
+      async (
+        _siteId: string,
+        _resourceType: string,
+        _entityId: string,
+        _revisionId: string,
+        _actor: unknown,
+        activate: (
+          manager: unknown,
+          snapshot: Record<string, unknown>,
+        ) => Promise<void>,
+      ) =>
+        activate(
+          { transaction: true },
+          {
+            document: 'Approved policy',
+            displayTemplate: {
+              key: 'compact-policy',
+              version: '1',
+              config: { width: 'compact' },
+            },
+          },
+        ),
+    );
+    revisions.assertSitePermission.mockRejectedValue(
+      new ForbiddenException('Недостаточно прав для этого сайта'),
+    );
+
+    await expect(
+      service.publish('site-id', 'site_privacy', 'approved-id', actor),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(revisions.assertSitePermission).toHaveBeenCalledWith(
+      'site-id',
+      actor,
+      SitePermission.MANAGE_STRUCTURE,
+    );
+    expect(adapters.activate).not.toHaveBeenCalled();
+  });
+
+  it('does not activate a saved 404 snapshot that changes the template without structure permission', async () => {
+    const { service, revisions, adapters } = setup();
+    adapters.publishedSnapshot.mockResolvedValue({
+      status: 'published',
+      templateKey: 'signal',
+      templateVersion: '1',
+    });
+    revisions.publish.mockImplementation(
+      async (
+        _siteId: string,
+        _resourceType: string,
+        _entityId: string,
+        _revisionId: string,
+        _actor: unknown,
+        activate: (
+          manager: unknown,
+          snapshot: Record<string, unknown>,
+        ) => Promise<void>,
+      ) =>
+        activate(
+          { transaction: true },
+          {
+            status: 'published',
+            templateKey: 'editorial',
+            templateVersion: '1',
+          },
+        ),
+    );
+    revisions.assertSitePermission.mockRejectedValue(
+      new ForbiddenException('Недостаточно прав для этого сайта'),
+    );
+
+    await expect(
+      service.publish('site-id', 'site_not_found', 'approved-id', actor),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(revisions.assertSitePermission).toHaveBeenCalledWith(
+      'site-id',
+      actor,
+      SitePermission.MANAGE_STRUCTURE,
+    );
+    expect(adapters.activate).not.toHaveBeenCalled();
+  });
+
+  it('publishes privacy content with structurally equal template data without structure permission', async () => {
+    const { service, revisions, adapters } = setup();
+    adapters.publishedSnapshot.mockResolvedValue({
+      document: 'Published policy',
+      displayTemplate: {
+        key: 'system-policy',
+        version: '1',
+        config: {
+          typography: { scale: 1, family: 'Inter' },
+          sections: ['intro', 'details'],
+        },
+      },
+    });
+    revisions.publish.mockImplementation(
+      async (
+        _siteId: string,
+        _resourceType: string,
+        _entityId: string,
+        _revisionId: string,
+        _actor: unknown,
+        activate: (
+          manager: unknown,
+          snapshot: Record<string, unknown>,
+        ) => Promise<void>,
+      ) =>
+        activate(
+          { transaction: true },
+          {
+            document: 'Approved policy',
+            displayTemplate: {
+              key: 'system-policy',
+              version: '1',
+              config: {
+                sections: ['intro', 'details'],
+                typography: { family: 'Inter', scale: 1 },
+              },
+            },
+          },
+        ),
+    );
+
+    await service.publish('site-id', 'site_privacy', 'approved-id', actor);
+
+    expect(revisions.assertSitePermission).not.toHaveBeenCalled();
+    expect(adapters.activate).toHaveBeenCalledWith(
+      { transaction: true },
+      'site-id',
+      'site_privacy',
+      expect.objectContaining({ document: 'Approved policy' }),
     );
   });
 

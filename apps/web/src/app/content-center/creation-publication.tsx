@@ -3,13 +3,49 @@ import { useState } from "react";
 import type { ArticleDetails, Overview } from "./creation-state";
 import styles from "./content-center-view.module.css";
 
+export function CreationPublicationTemplateField({
+  canManageStructure,
+  templates,
+  value,
+  disabled,
+  onChange,
+}: {
+  canManageStructure: boolean;
+  templates: { key: string; version: string; name: string }[];
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  if (!canManageStructure) return null;
+  return (
+    <label className={styles.field}>
+      Шаблон статьи
+      <select
+        required
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {templates.map((template) => (
+          <option
+            key={JSON.stringify([template.key, template.version])}
+            value={JSON.stringify([template.key, template.version])}
+          >
+            {template.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export type PublicationInput = {
   revision: number;
   siteId: string;
   categoryId: string;
   slug: string;
-  templateKey: string;
-  templateVersion: string;
+  templateKey?: string;
+  templateVersion?: string;
   confirmMove: boolean;
 };
 
@@ -21,6 +57,7 @@ export function publicationFormState(
   const article = details.article;
   const moving = input.siteId !== article.site_id;
   const site = details.sites.find((s) => s.id === input.siteId);
+  const canManageStructure = site?.canManageStructure === true;
   const categories = details.categories.filter(
     (c) => c.site_id === input.siteId,
   );
@@ -45,10 +82,11 @@ export function publicationFormState(
       "На площадке нет опубликованных разделов. Сначала опубликуйте раздел в управлении сайтом.";
   else if (!categories.some((c) => c.id === input.categoryId))
     blocked = "Выберите опубликованный раздел площадки.";
-  else if (!templates.length)
+  else if (canManageStructure && !templates.length)
     blocked =
       "На площадке нет активного шаблона статьи. Настройте его в управлении сайтом.";
   else if (
+    canManageStructure &&
     !templates.some(
       (t) => t.key === input.templateKey && t.version === input.templateVersion,
     )
@@ -67,7 +105,7 @@ export function publicationFormState(
     blocked = "Этот адрес зарезервирован. Укажите другой.";
   else if (moving && article.status === "published" && !input.confirmMove)
     blocked = "Подтвердите перенос и снятие прежней публикации.";
-  return { moving, site, categories, templates, blocked };
+  return { moving, site, categories, templates, blocked, canManageStructure };
 }
 
 export function CreationPublicationForm({
@@ -92,6 +130,8 @@ export function CreationPublicationForm({
   const [slug, setSlug] = useState(`article-${article.id.slice(0, 8)}`);
   const [confirmMove, setConfirmMove] = useState(false);
   const templates = details.templates.filter((t) => t.site_id === siteId);
+  const canManageStructure =
+    details.sites.find((s) => s.id === siteId)?.canManageStructure === true;
   const selectedTemplate =
     templates.find((t) => JSON.stringify([t.key, t.version]) === template) ??
     (!template ? templates[0] : undefined);
@@ -101,8 +141,12 @@ export function CreationPublicationForm({
     categoryId,
     slug,
     confirmMove,
-    templateKey: selectedTemplate?.key ?? "",
-    templateVersion: selectedTemplate?.version ?? "",
+    ...(canManageStructure
+      ? {
+          templateKey: selectedTemplate?.key ?? "",
+          templateVersion: selectedTemplate?.version ?? "",
+        }
+      : {}),
   };
   const state = publicationFormState(details, data, input);
   return (
@@ -195,31 +239,17 @@ export function CreationPublicationForm({
             ))}
           </select>
         </label>
-        <label className={styles.field}>
-          Шаблон статьи
-          <select
-            required
-            value={
-              selectedTemplate
-                ? JSON.stringify([
-                    selectedTemplate.key,
-                    selectedTemplate.version,
-                  ])
-                : ""
-            }
-            onChange={(event) => setTemplate(event.target.value)}
-          >
-            {!selectedTemplate && <option value="">Выберите шаблон</option>}
-            {templates.map((t) => (
-              <option
-                key={JSON.stringify([t.key, t.version])}
-                value={JSON.stringify([t.key, t.version])}
-              >
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CreationPublicationTemplateField
+          canManageStructure={canManageStructure}
+          templates={templates}
+          value={
+            selectedTemplate
+              ? JSON.stringify([selectedTemplate.key, selectedTemplate.version])
+              : ""
+          }
+          disabled={busy}
+          onChange={setTemplate}
+        />
         {article.cms_article_id && !state.moving ? (
           <p className={styles.muted}>Существующий URL сохранится.</p>
         ) : (

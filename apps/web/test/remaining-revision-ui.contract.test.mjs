@@ -15,7 +15,6 @@ const files = Object.fromEntries(
       "media-view.tsx",
       "content-view.tsx",
       "site-settings-revision-panel.tsx",
-      "code-resources-editor.tsx",
       "page.tsx",
     ].map(async (name) => [
       name,
@@ -40,16 +39,15 @@ test("all remaining public settings use the shared staged resource endpoints", (
     assert.match(files[name], /SiteSettingsRevisionPanel/);
 });
 
-test("the shared workflow accepts an explicit API base for settings and code", () => {
+test("the shared workflow accepts an explicit API base for settings", () => {
   assert.match(files["site-settings-revision-panel.tsx"], /basePath\?: string/);
   assert.match(files["site-settings-revision-panel.tsx"], /basePath \?\?/);
 });
 
-test("template screen exposes HTML-only template and chunk editors", () => {
-  assert.match(files["media-templates-view.tsx"], /CodeResourcesEditor/);
-  assert.match(files["code-resources-editor.tsx"], /code-resources\/\$\{kind\}/);
-  assert.match(files["code-resources-editor.tsx"], /HTML-код/);
-  assert.doesNotMatch(files["code-resources-editor.tsx"], /CSS-код|JavaScript-код/);
+test("template screen only assigns predefined site templates", () => {
+  assert.doesNotMatch(files["media-templates-view.tsx"], /CodeResourcesEditor/);
+  assert.doesNotMatch(files["media-templates-view.tsx"], /code-resources/);
+  assert.doesNotMatch(files["page.tsx"], /canEditCode|canViewCode/);
   assert.match(files["page.tsx"], /canApprove=\{canApprove\}/);
 });
 
@@ -58,19 +56,56 @@ test("404 preview renders the selected draft template instead of the live page",
   assert.doesNotMatch(files["not-found-page-view.tsx"], /<iframe/);
 });
 
-test("layout bindings and article-list settings expose code approval panels with CAS", () => {
+test("layout bindings and article-list settings use structural access with CAS", () => {
   assert.match(files["media-templates-view.tsx"], /metadata\/layout-bindings\/\$\{siteId\}/);
   assert.match(files["media-templates-view.tsx"], /expectedDraftRevisionId/);
   assert.match(files["media-articles-view.tsx"], /metadata\/article-list\/\$\{siteId\}/);
   assert.match(files["media-articles-view.tsx"], /expectedDraftRevisionId/);
-  assert.match(files["media-articles-view.tsx"], /canEditCode: boolean/);
+  assert.match(files["media-articles-view.tsx"], /canManageStructure: boolean/);
   assert.match(
     files["media-articles-view.tsx"],
-    /label="Шаблон списка статей"[\s\S]*canEdit=\{canEditCode\}/,
+    /label="Шаблон списка статей"[\s\S]*canEdit=\{canManageStructure\}/,
   );
   assert.match(
     files["page.tsx"],
-    /<MediaArticlesView[\s\S]*canEditCode=\{canEditCode\}/,
+    /<MediaArticlesView[\s\S]*canManageStructure=\{canManageStructure\}/,
+  );
+});
+
+test("article, category and privacy template controls require structural access", () => {
+  assert.match(files["content-view.tsx"], /canManageStructure\?: boolean/);
+  assert.match(
+    files["content-view.tsx"],
+    /\{canManageStructure\s*\?\s*\([\s\S]{0,500}Шаблон рубрики/,
+  );
+  assert.match(
+    files["content-view.tsx"],
+    /\{canManageStructure\s*\?\s*\([\s\S]{0,500}Шаблон статьи/,
+  );
+  assert.equal(
+    (
+      files["content-view.tsx"].match(
+        /\.\.\.\(canManageStructure\s*\?\s*\{\s*displayTemplateKey,/g,
+      ) ?? []
+    ).length,
+    2,
+  );
+  assert.match(
+    files["media-articles-view.tsx"],
+    /<ContentView[\s\S]*canManageStructure=\{canManageStructure\}/,
+  );
+  assert.match(
+    files["page.tsx"],
+    /<ContentView[\s\S]*canManageStructure=\{canManageStructure\}/,
+  );
+  assert.match(
+    files["page.tsx"],
+    /<PrivacyPolicyView[\s\S]*canManageStructure=\{canManageStructure\}/,
+  );
+  assert.match(files["privacy-policy-view.tsx"], /canManageStructure\?: boolean/);
+  assert.match(
+    files["privacy-policy-view.tsx"],
+    /privacyTabs\.filter\(\s*\(\[id\]\) => canManageStructure \|\| id !== "template",?\s*\)/,
   );
 });
 

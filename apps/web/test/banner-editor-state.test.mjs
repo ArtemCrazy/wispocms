@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { tsImport } from "tsx/esm/api";
 import {
   bannerCompatibilityError,
   bannerLinkSelectValue,
 } from "../src/app/banner-slot.ts";
 import { LatestValueQueue } from "../src/app/latest-value-queue.ts";
-import {
+const {
   SKINOVA_ARTICLE_BANNER_RENDERER,
   assignedSkinovaPreviewContexts,
   chooseSkinovaPreviewContext,
   skinovaBannerPreviewContexts,
-} from "../src/app/skinova-banner-preview-context.ts";
+} = await tsImport(
+  "../src/app/skinova-banner-preview-context.ts",
+  import.meta.url,
+);
 
 test("autosave serializes requests and keeps only the latest queued draft", async () => {
   const calls = [];
@@ -92,6 +96,19 @@ test("Skinova preview contexts follow assignments without becoming banner conten
     ],
   );
   assert.equal(contexts[0].mobileHint, null);
+  assert.equal(
+    skinovaBannerPreviewContexts([
+      ...slots,
+      {
+        id: "article_sidebar",
+        name: "Баннер статьи",
+        renderer: SKINOVA_ARTICLE_BANNER_RENDERER,
+        supports: { desktopImage: true, mobileImage: false },
+      },
+    ]).filter((context) => context.renderer === SKINOVA_ARTICLE_BANNER_RENDERER)
+      .length,
+    1,
+  );
 
   const assigned = assignedSkinovaPreviewContexts(
     { id: "banner-id", placement: null },
@@ -122,7 +139,7 @@ test("Skinova preview contexts follow assignments without becoming banner conten
 });
 
 test("banner library uses the shared Skinova renderers and omits the technical guide", async () => {
-  const [library, publicRenderers, previewPage] = await Promise.all([
+  const [library, publicRenderers, previewPage, previewFrame, previewContext] = await Promise.all([
     readFile(
       new URL("../src/app/media-banner-library-view.tsx", import.meta.url),
       "utf8",
@@ -130,6 +147,14 @@ test("banner library uses the shared Skinova renderers and omits the technical g
     readFile(new URL("../src/app/skinova-site.tsx", import.meta.url), "utf8"),
     readFile(
       new URL("../src/app/banner-preview/page.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/app/skinova-banner-preview-frame.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../src/app/skinova-banner-preview-context.ts", import.meta.url),
       "utf8",
     ),
   ]);
@@ -143,6 +168,16 @@ test("banner library uses the shared Skinova renderers and omits the technical g
     "SkinovaArticleBanner",
   ]) {
     assert.match(publicRenderers, new RegExp(`export function ${renderer}`));
-    assert.match(previewPage, new RegExp(renderer));
+    assert.doesNotMatch(
+      previewPage,
+      new RegExp(`import[\\s\\S]*${renderer}[\\s\\S]*from "\\.\\.\/skinova-site"`),
+    );
   }
+  assert.match(previewPage, /resolveSlotComponent/);
+  assert.match(previewFrame, /resolveSlotComponent/);
+  assert.match(previewContext, /resolveSlotRuntime/);
+  assert.doesNotMatch(
+    previewPage,
+    /payload\.renderer\s*===\s*"skinova-(?:promo-strip|consultation|article-sidebar)"/,
+  );
 });

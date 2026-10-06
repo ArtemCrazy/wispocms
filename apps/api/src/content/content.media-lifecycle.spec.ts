@@ -1,17 +1,23 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/require-await */
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   ArticleStatus,
   PlatformRole,
   PublicationState,
+  SiteRole,
   SiteType,
 } from '../database/entities';
 import { ContentService } from './content.service';
 
 describe('ContentService media article lifecycle', () => {
   const actor = { userId: 'admin-id', platformRole: PlatformRole.WISPO_ADMIN };
+  const member = { userId: 'member-id', platformRole: PlatformRole.MEMBER };
 
-  function setup() {
+  function setup(role: SiteRole | null = null) {
     const site = {
       id: 'site-id',
       workspaceId: 'workspace-id',
@@ -68,7 +74,18 @@ describe('ContentService media article lifecycle', () => {
     const redirects = { findOne: jest.fn() };
     const service = new ContentService(
       sites as never,
-      {} as never,
+      {
+        findOne: jest.fn().mockResolvedValue(
+          role
+            ? {
+                userId: member.userId,
+                siteId: 'site-id',
+                role,
+                requiresApproval: false,
+              }
+            : null,
+        ),
+      } as never,
       categories as never,
       authors as never,
       articles as never,
@@ -564,6 +581,227 @@ describe('ContentService media article lifecycle', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(manager.delete).not.toHaveBeenCalled();
     expect(manager.update).not.toHaveBeenCalled();
+  });
+
+  it('forces the system article template when a content manager creates an article', async () => {
+    const { service } = setup(SiteRole.CONTENT_MANAGER);
+
+    await expect(
+      service.createArticle('site-id', member, {
+        title: 'Story',
+        slug: 'story',
+        displayTemplateKey: 'privileged-template',
+        displayTemplateVersion: '9',
+        displayTemplateConfig: { layout: 'custom' },
+      }),
+    ).resolves.toMatchObject({
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: {},
+    });
+  });
+
+  it('keeps an administrator choice of an active article template on create', async () => {
+    const { service } = setup();
+    const assertTemplate = jest.fn().mockResolvedValue(undefined);
+    Object.assign(service, {
+      lifecycle: {
+        assertTemplate,
+        recordArticleChange: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(
+      service.createArticle('site-id', actor, {
+        title: 'Story',
+        slug: 'story',
+        displayTemplateKey: 'feature-article',
+        displayTemplateVersion: '3',
+        displayTemplateConfig: { hero: true },
+      }),
+    ).resolves.toMatchObject({
+      displayTemplateKey: 'feature-article',
+      displayTemplateVersion: '3',
+      displayTemplateConfig: { hero: true },
+    });
+    expect(assertTemplate).toHaveBeenCalledWith(
+      'site-id',
+      expect.anything(),
+      'feature-article',
+      '3',
+    );
+  });
+
+  it('denies an article template change by a content manager', async () => {
+    const { service, articles } = setup(SiteRole.CONTENT_MANAGER);
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: {},
+      deletedAt: null,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: { id: 'draft-id', snapshot: { ...article } },
+      }),
+      saveDraft: jest.fn().mockResolvedValue({ id: 'next-draft-id' }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        assertTemplate: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(
+      service.updateArticle('site-id', 'article-id', member, {
+        title: 'Live updated',
+        slug: 'live',
+        displayTemplateKey: 'feature-article',
+        displayTemplateVersion: '3',
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(revisions.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('denies an article template config change by a content manager', async () => {
+    const { service, articles } = setup(SiteRole.CONTENT_MANAGER);
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: { compact: false },
+      deletedAt: null,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: { id: 'draft-id', snapshot: { ...article } },
+      }),
+      saveDraft: jest.fn().mockResolvedValue({ id: 'next-draft-id' }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        assertTemplate: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(
+      service.updateArticle('site-id', 'article-id', member, {
+        title: 'Live',
+        slug: 'live',
+        displayTemplateConfig: { compact: true },
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(revisions.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('allows a content manager to save article content when template config is structurally unchanged', async () => {
+    const { service, articles } = setup(SiteRole.CONTENT_MANAGER);
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: {
+        compact: true,
+        palette: { primary: 'violet', secondary: 'white' },
+      },
+      deletedAt: null,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: { id: 'draft-id', snapshot: { ...article } },
+      }),
+      saveDraft: jest.fn().mockResolvedValue({ id: 'next-draft-id' }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        assertTemplate: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(
+      service.updateArticle('site-id', 'article-id', member, {
+        title: 'Live updated',
+        slug: 'live',
+        displayTemplateConfig: {
+          palette: { secondary: 'white', primary: 'violet' },
+          compact: true,
+        },
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).resolves.toMatchObject({ title: 'Live updated' });
+    expect(revisions.saveDraft).toHaveBeenCalled();
+  });
+
+  it('allows a site owner to change the article template', async () => {
+    const { service, articles } = setup(SiteRole.OWNER);
+    const article = {
+      id: 'article-id',
+      siteId: 'site-id',
+      title: 'Live',
+      slug: 'live',
+      revision: 3,
+      publicationState: PublicationState.PUBLISHED,
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: {},
+      deletedAt: null,
+    };
+    articles.findOne.mockResolvedValue(article);
+    const revisions = {
+      current: jest.fn().mockResolvedValue({
+        draft: { id: 'draft-id', snapshot: { ...article } },
+      }),
+      saveDraft: jest.fn().mockResolvedValue({ id: 'next-draft-id' }),
+    };
+    Object.assign(service, {
+      revisions,
+      lifecycle: {
+        articleSnapshot: (value: typeof article) => ({ ...value }),
+        assertTemplate: jest.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(
+      service.updateArticle('site-id', 'article-id', member, {
+        title: 'Live',
+        slug: 'live',
+        displayTemplateKey: 'feature-article',
+        displayTemplateVersion: '3',
+        displayTemplateConfig: { hero: true },
+        expectedDraftRevisionId: 'draft-id',
+      }),
+    ).resolves.toMatchObject({
+      displayTemplateKey: 'feature-article',
+      displayTemplateVersion: '3',
+      displayTemplateConfig: { hero: true },
+    });
   });
 
   it('allows reversing onto its own redirect without leaving a loop', async () => {

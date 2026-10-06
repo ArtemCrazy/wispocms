@@ -108,7 +108,7 @@ describe('PlatformService site access assignments', () => {
     };
   }
 
-  it('creates one content manager with different flags on multiple sites', async () => {
+  it('creates one content manager with different approval rules on multiple sites', async () => {
     const { service, users, savedUsers, savedMemberships, savedAccesses } =
       setup();
     await service.createUser({
@@ -119,13 +119,11 @@ describe('PlatformService site access assignments', () => {
         {
           siteId: siteA,
           role: SiteRole.CONTENT_MANAGER,
-          canEditCode: true,
           requiresApproval: true,
         },
         {
           siteId: siteB,
           role: SiteRole.CONTENT_MANAGER,
-          canEditCode: false,
           requiresApproval: false,
         },
       ],
@@ -141,13 +139,11 @@ describe('PlatformService site access assignments', () => {
       expect.objectContaining({
         siteId: siteA,
         role: SiteRole.CONTENT_MANAGER,
-        canEditCode: true,
         requiresApproval: true,
       }),
       expect.objectContaining({
         siteId: siteB,
         role: SiteRole.CONTENT_MANAGER,
-        canEditCode: false,
         requiresApproval: false,
       }),
     ]);
@@ -176,7 +172,6 @@ describe('PlatformService site access assignments', () => {
         {
           siteId: siteA,
           role: SiteRole.OWNER,
-          canEditCode: true,
           requiresApproval: true,
         },
       ],
@@ -188,7 +183,6 @@ describe('PlatformService site access assignments', () => {
     });
     expect(savedAccesses[0]).toMatchObject({
       role: SiteRole.OWNER,
-      canEditCode: true,
       requiresApproval: false,
     });
   });
@@ -209,7 +203,7 @@ describe('PlatformService site access assignments', () => {
     expect(savedUsers).toHaveLength(0);
   });
 
-  it('replaces all per-site flags only through the platform service', async () => {
+  it('replaces all per-site assignments only through the platform service', async () => {
     const { service, users, transactionManager, savedAccesses } = setup();
     users.findOneBy.mockResolvedValue({
       id: 'manager-id',
@@ -222,7 +216,6 @@ describe('PlatformService site access assignments', () => {
       {
         siteId: siteA,
         role: SiteRole.CONTENT_MANAGER,
-        canEditCode: true,
         requiresApproval: false,
       },
     ]);
@@ -238,7 +231,6 @@ describe('PlatformService site access assignments', () => {
       expect.objectContaining({
         userId: 'manager-id',
         siteId: siteA,
-        canEditCode: true,
         requiresApproval: false,
       }),
     ]);
@@ -260,7 +252,6 @@ describe('PlatformService site access assignments', () => {
           {
             siteId: siteA,
             role: SiteRole.CONTENT_MANAGER,
-            canEditCode: false,
             requiresApproval: true,
             site: {
               id: siteA,
@@ -283,7 +274,6 @@ describe('PlatformService site access assignments', () => {
             workspaceId: 'workspace-a',
             workspaceName: 'Wispo',
             role: SiteRole.CONTENT_MANAGER,
-            canEditCode: false,
             requiresApproval: true,
           },
         ],
@@ -308,7 +298,6 @@ describe('PlatformService site access assignments', () => {
         fullName: ' New administrator ',
         role: ManagedUserRole.WISPO_ADMIN,
         siteIds: [],
-        canEditCode: false,
         requiresApproval: false,
         isActive: true,
       }),
@@ -351,7 +340,6 @@ describe('PlatformService site access assignments', () => {
       fullName: 'Site owner',
       role: ManagedUserRole.SITE_OWNER,
       siteIds: [siteA],
-      canEditCode: true,
       requiresApproval: true,
       isActive: true,
     });
@@ -365,7 +353,6 @@ describe('PlatformService site access assignments', () => {
       expect.objectContaining({
         siteId: siteA,
         role: SiteRole.OWNER,
-        canEditCode: true,
         requiresApproval: false,
       }),
     ]);
@@ -387,7 +374,6 @@ describe('PlatformService site access assignments', () => {
         fullName: 'Administrator',
         role: ManagedUserRole.CONTENT_MANAGER,
         siteIds: [siteA],
-        canEditCode: false,
         requiresApproval: false,
         isActive: true,
       }),

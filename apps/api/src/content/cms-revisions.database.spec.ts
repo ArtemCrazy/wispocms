@@ -13,10 +13,10 @@ import {
   ContentStatusScheduleEntity,
   PlatformRole,
   PublicationState,
+  SiteAccessEntity,
   SiteContentTemplateEntity,
   SiteEntity,
   UserEntity,
-  WorkspaceMembershipEntity,
 } from '../database/entities';
 import { createDataSourceOptions } from '../database/data-source';
 import { CmsRevisionsService } from './cms-revisions.service';
@@ -57,7 +57,7 @@ databaseSuite('CMS revisions in local PostgreSQL', () => {
       const service = new CmsRevisionsService(
         transaction as never,
         source.getRepository(SiteEntity),
-        source.getRepository(WorkspaceMembershipEntity),
+        source.getRepository(SiteAccessEntity),
       );
       const actor = {
         userId: randomUUID(),
@@ -66,24 +66,36 @@ databaseSuite('CMS revisions in local PostgreSQL', () => {
       const entityId = randomUUID();
       const draft = await service.saveDraft({
         siteId: site.id,
-        resourceType: 'chunk',
+        resourceType: 'site_variable',
         entityId,
-        snapshot: { html: '<section>First</section>' },
+        snapshot: { identifier: 'phone', value: '+7 900 000-00-00' },
         expectedDraftRevisionId: null,
         actor,
       });
       expect(
-        await service.published(site.id, 'chunk', entityId, actor),
+        await service.published(site.id, 'site_variable', entityId, actor),
       ).toBeNull();
-      await service.submit(site.id, 'chunk', entityId, draft.id, actor);
-      await service.approve(site.id, 'chunk', entityId, draft.id, actor);
-      await service.publish(site.id, 'chunk', entityId, draft.id, actor);
+      await service.submit(site.id, 'site_variable', entityId, draft.id, actor);
+      await service.approve(
+        site.id,
+        'site_variable',
+        entityId,
+        draft.id,
+        actor,
+      );
+      await service.publish(
+        site.id,
+        'site_variable',
+        entityId,
+        draft.id,
+        actor,
+      );
       expect(
-        await service.published(site.id, 'chunk', entityId, actor),
-      ).toEqual({ html: '<section>First</section>' });
+        await service.published(site.id, 'site_variable', entityId, actor),
+      ).toEqual({ identifier: 'phone', value: '+7 900 000-00-00' });
       const resource = await runner.manager.findOneByOrFail(
         CmsRevisionResourceEntity,
-        { siteId: site.id, resourceType: 'chunk', entityId },
+        { siteId: site.id, resourceType: 'site_variable', entityId },
       );
       expect(
         await runner.manager.countBy(CmsRevisionEventEntity, {
@@ -94,7 +106,7 @@ databaseSuite('CMS revisions in local PostgreSQL', () => {
         runner.manager.update(
           CmsRevisionEntity,
           { id: draft.id },
-          { snapshot: { html: '<section>Altered</section>' } },
+          { snapshot: { identifier: 'phone', value: 'altered' } },
         ),
       ).rejects.toThrow();
     } finally {
@@ -120,7 +132,7 @@ databaseSuite('CMS revisions in local PostgreSQL', () => {
       const service = new CmsRevisionsService(
         transaction as never,
         source.getRepository(SiteEntity),
-        source.getRepository(WorkspaceMembershipEntity),
+        source.getRepository(SiteAccessEntity),
       );
       const actor = {
         userId: randomUUID(),
@@ -192,12 +204,12 @@ databaseSuite('CMS revisions in local PostgreSQL', () => {
       const revisions = new CmsRevisionsService(
         transaction as never,
         source.getRepository(SiteEntity),
-        source.getRepository(WorkspaceMembershipEntity),
+        source.getRepository(SiteAccessEntity),
       );
       const lifecycle = new ContentLifecycleService(
         transaction as never,
         source.getRepository(SiteEntity),
-        source.getRepository(WorkspaceMembershipEntity),
+        source.getRepository(SiteAccessEntity),
         source.getRepository(ArticleEntity),
         source.getRepository(CategoryEntity),
         source.getRepository(ArticleRelatedItemEntity),

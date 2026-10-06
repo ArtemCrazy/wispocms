@@ -20,7 +20,10 @@ import {
 import { articleDocumentText } from '../content/article-document';
 import { ContentLifecycleService } from '../content/content-lifecycle.service';
 import { CmsRevisionsService } from '../content/cms-revisions.service';
-import { SitePermission } from '../content/content.permissions';
+import {
+  hasSitePermission,
+  SitePermission,
+} from '../content/content.permissions';
 import { CreationService } from './creation.service';
 import type { CreationActor } from './creation.service';
 import type { PublishCreatedArticleDto } from './creation.dto';
@@ -67,11 +70,21 @@ export class CreationPublicationService {
     dto: PublishCreatedArticleDto,
   ) {
     return this.service.transaction(w, a, async (m, name) => {
-      await this.revisions.assertSitePermission(
+      const targetAccess = await this.revisions.assertSitePermission(
         dto.siteId,
         a,
         SitePermission.PUBLISH_CONTENT,
       );
+      const canManageStructure = hasSitePermission(
+        a.platformRole,
+        targetAccess,
+        SitePermission.MANAGE_STRUCTURE,
+      );
+      if (
+        canManageStructure &&
+        (!dto.templateKey?.trim() || !dto.templateVersion?.trim())
+      )
+        throw new BadRequestException('Выберите шаблон статьи');
       const item = await this.service.article(w, id, m);
       this.service.revision(item, dto.revision);
       const moving = dto.siteId !== item.site_id;
@@ -111,16 +124,6 @@ export class CreationPublicationService {
         throw new BadRequestException(
           'Выберите опубликованный раздел площадки',
         );
-      const template = await m.findOne(SiteContentTemplateEntity, {
-        where: {
-          siteId: site.id,
-          kind: ContentTemplateKind.ARTICLE,
-          key: dto.templateKey,
-          version: dto.templateVersion,
-          isActive: true,
-        },
-      });
-      if (!template) throw new BadRequestException('Шаблон статьи недоступен');
       const version = await this.service.version(item, item.current_number, m);
       await this.service.validateMedia(m, w, version.snapshot);
       const [destination] = await m.query<
@@ -162,6 +165,40 @@ export class CreationPublicationService {
         throw new ConflictException(
           'Связанная статья изменена в CMS сайта. Публикация остановлена, чтобы не перезаписать чужую работу.',
         );
+      const template = canManageStructure
+        ? await m.findOne(SiteContentTemplateEntity, {
+            where: {
+              siteId: site.id,
+              kind: ContentTemplateKind.ARTICLE,
+              key: dto.templateKey,
+              version: dto.templateVersion,
+              isActive: true,
+            },
+          })
+        : cms
+          ? {
+              key: cms.displayTemplateKey,
+              version: cms.displayTemplateVersion,
+              config: cms.displayTemplateConfig,
+            }
+          : ((await m.findOne(SiteContentTemplateEntity, {
+              where: {
+                siteId: site.id,
+                kind: ContentTemplateKind.ARTICLE,
+                key: 'standard-article',
+                isActive: true,
+              },
+              order: { version: 'ASC' },
+            })) ??
+            (await m.findOne(SiteContentTemplateEntity, {
+              where: {
+                siteId: site.id,
+                kind: ContentTemplateKind.ARTICLE,
+                isActive: true,
+              },
+              order: { createdAt: 'ASC', key: 'ASC', version: 'ASC' },
+            })));
+      if (!template) throw new BadRequestException('Шаблон статьи недоступен');
       const before = cms ? Object.assign(new ArticleEntity(), cms) : null;
       // Same site publication keeps its established URL, regardless of an edited form slug.
       const slug = cms?.slug ?? dto.slug;

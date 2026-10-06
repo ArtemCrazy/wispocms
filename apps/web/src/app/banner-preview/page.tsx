@@ -2,17 +2,13 @@
 
 /* eslint-disable @next/next/no-page-custom-font, @next/next/no-css-tags */
 import { useEffect, useState } from "react";
+import type { SkinovaBanner } from "../skinova-site";
 import {
-  SkinovaArticleBanner,
-  type SkinovaBanner,
-  SkinovaConsultationBanner,
-  SkinovaPromoBanner,
-} from "../skinova-site";
-import {
-  SKINOVA_ARTICLE_BANNER_RENDERER,
   SKINOVA_BANNER_PREVIEW_MESSAGE,
   type SkinovaBannerPreviewPayload,
 } from "../skinova-banner-preview-context";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "../template-package-contract";
+import { resolveSlotComponent } from "../template-runtime-registry";
 
 export default function BannerPreviewPage() {
   const [payload, setPayload] = useState<SkinovaBannerPreviewPayload | null>(
@@ -55,15 +51,72 @@ export default function BannerPreviewPage() {
   const mobileImage = payload.banner.mobileMediaId
     ? `${mediaBaseUrl}/${payload.banner.mobileMediaId}/file`
     : desktopImage;
+  const slotRuntime = resolveSlotComponent({
+    packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+    packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+    rendererKey: payload.renderer,
+  });
   const visibleValues = [
     payload.banner.title,
     payload.banner.subtitle,
     payload.banner.buttonText,
-    ...(payload.renderer === "skinova-promo-strip"
+    ...(slotRuntime?.implementationKey === "skinova-promo-strip"
       ? []
       : [payload.banner.mediaId]),
   ];
   const isEmpty = !visibleValues.some((value) => value?.trim());
+  if (!slotRuntime)
+    return (
+      <main className="skinova-site skinova-banner-render-surface">
+        <div className="skinova-preview-empty">
+          <strong>Шаблон недоступен</strong>
+          <span>Этот вариант баннера отсутствует в текущей сборке сайта.</span>
+        </div>
+      </main>
+    );
+
+  let preview = null;
+  switch (slotRuntime.implementationKey) {
+    case "skinova-promo-strip": {
+      const BannerRenderer = slotRuntime.renderer;
+      preview = (
+        <BannerRenderer
+          banner={banner}
+          siteSlug="skinova"
+          onOpenFallback={() => undefined}
+          onClose={() => undefined}
+        />
+      );
+      break;
+    }
+    case "skinova-consultation": {
+      const BannerRenderer = slotRuntime.renderer;
+      preview = (
+        <BannerRenderer
+          banner={banner}
+          desktopImage={desktopImage}
+          mobileImage={mobileImage}
+          siteSlug="skinova"
+          onOpenFallback={() => undefined}
+        />
+      );
+      break;
+    }
+    case "skinova-article-sidebar": {
+      const BannerRenderer = slotRuntime.renderer;
+      preview = (
+        <BannerRenderer
+          banner={banner}
+          mediaBaseUrl={mediaBaseUrl}
+          mediaFileSuffix="/file"
+          onOpenFallback={() => undefined}
+          useDefaultAsset={false}
+          useDefaultContent={false}
+        />
+      );
+      break;
+    }
+  }
 
   return (
     <main
@@ -80,31 +133,7 @@ export default function BannerPreviewPage() {
         rel="stylesheet"
       />
       <link rel="stylesheet" href="/skinova/styles.css" />
-      {payload.renderer === "skinova-promo-strip" ? (
-        <SkinovaPromoBanner
-          banner={banner}
-          siteSlug="skinova"
-          onOpenFallback={() => undefined}
-          onClose={() => undefined}
-        />
-      ) : payload.renderer === "skinova-consultation" ? (
-        <SkinovaConsultationBanner
-          banner={banner}
-          desktopImage={desktopImage}
-          mobileImage={mobileImage}
-          siteSlug="skinova"
-          onOpenFallback={() => undefined}
-        />
-      ) : payload.renderer === SKINOVA_ARTICLE_BANNER_RENDERER ? (
-        <SkinovaArticleBanner
-          banner={banner}
-          mediaBaseUrl={mediaBaseUrl}
-          mediaFileSuffix="/file"
-          onOpenFallback={() => undefined}
-          useDefaultAsset={false}
-          useDefaultContent={false}
-        />
-      ) : null}
+      {preview}
       {isEmpty ? (
         <div className="skinova-preview-empty">
           <strong>Заполните баннер</strong>

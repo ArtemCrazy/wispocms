@@ -73,12 +73,11 @@ describe('AuthService site access session', () => {
     };
   }
 
-  it('puts the owner permission flags on the assigned site', async () => {
+  it('puts the owner role and approval policy on the assigned site', async () => {
     const { service } = setup(PlatformRole.EMPLOYEE, [
       {
         siteId: 'site-a',
         role: SiteRole.OWNER,
-        canEditCode: false,
         requiresApproval: false,
         site: { ...sites[0], workspace },
       },
@@ -91,7 +90,6 @@ describe('AuthService site access session', () => {
         id: 'site-a',
         access: {
           role: SiteRole.OWNER,
-          canEditCode: false,
           requiresApproval: false,
         },
       }),
@@ -100,19 +98,17 @@ describe('AuthService site access session', () => {
     expect(session.workspaces[0].canUseContentCenter).toBe(false);
   });
 
-  it('keeps different manager flags on two sites in one workspace', async () => {
+  it('keeps different approval policies on two sites in one workspace', async () => {
     const { service } = setup(PlatformRole.EMPLOYEE, [
       {
         siteId: 'site-a',
         role: SiteRole.CONTENT_MANAGER,
-        canEditCode: true,
         requiresApproval: true,
         site: { ...sites[0], workspace },
       },
       {
         siteId: 'site-b',
         role: SiteRole.CONTENT_MANAGER,
-        canEditCode: false,
         requiresApproval: false,
         site: { ...sites[1], workspace },
       },
@@ -126,7 +122,6 @@ describe('AuthService site access session', () => {
         'site-a',
         {
           role: SiteRole.CONTENT_MANAGER,
-          canEditCode: true,
           requiresApproval: true,
         },
       ],
@@ -134,7 +129,6 @@ describe('AuthService site access session', () => {
         'site-b',
         {
           role: SiteRole.CONTENT_MANAGER,
-          canEditCode: false,
           requiresApproval: false,
         },
       ],

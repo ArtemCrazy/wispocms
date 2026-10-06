@@ -28,7 +28,6 @@ assert.equal(
 assert.deepEqual(
   capabilityLabels({
     administrator: true,
-    canEditCode: false,
     requiresApproval: false,
   }),
   ["Полный доступ"],
@@ -36,15 +35,13 @@ assert.deepEqual(
 assert.deepEqual(
   capabilityLabels({
     administrator: false,
-    canEditCode: true,
     requiresApproval: true,
   }),
-  ["Доступ к коду", "Согласование"],
+  ["Согласование"],
 );
 assert.deepEqual(
   capabilityLabels({
     administrator: false,
-    canEditCode: false,
     requiresApproval: false,
   }),
   [],

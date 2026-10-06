@@ -17,15 +17,12 @@ import {
 } from "../../../../public-server-data";
 import { resolvePublicBannerHref } from "../../../../public-banner-link";
 import {
-  SkinovaArticlePage,
   type SkinovaArticle,
   type SkinovaBanner,
   type SkinovaCategory,
 } from "../../../../skinova-site";
-import {
-  SKINOVA_ARTICLE_TEMPLATE_KEY,
-  SKINOVA_TEMPLATE_VERSION,
-} from "../../../../skinova-template";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "../../../../template-package-contract";
+import { resolveTemplateComponent } from "../../../../template-runtime-registry";
 
 type Article = {
   id: string;
@@ -209,10 +206,15 @@ export default async function PublicArticlePage({
     .map((paragraph) => paragraph.trim())
     .filter(Boolean);
 
-  if (
-    article.displayTemplateKey === SKINOVA_ARTICLE_TEMPLATE_KEY &&
-    article.displayTemplateVersion === SKINOVA_TEMPLATE_VERSION
-  ) {
+  const articleRuntime = resolveTemplateComponent({
+    packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+    packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+    kind: "article",
+    key: article.displayTemplateKey ?? "",
+    templateVersion: article.displayTemplateVersion ?? "",
+  });
+  if (articleRuntime?.implementationKey === "skinova-article") {
+    const ArticleRenderer = articleRuntime.renderer;
     return (
       <>
         {cmsPreview ? (
@@ -222,7 +224,7 @@ export default async function PublicArticlePage({
             <Link href="/">Вернуться в CMS</Link>
           </div>
         ) : null}
-        <SkinovaArticlePage
+        <ArticleRenderer
           siteSlug={siteSlug}
           article={article as SkinovaArticle}
           related={related as SkinovaArticle[]}

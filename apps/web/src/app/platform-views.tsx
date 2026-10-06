@@ -32,7 +32,6 @@ type UserItem = {
     workspaceId: string;
     workspaceName: string;
     role: "site_owner" | "content_manager";
-    canEditCode: boolean;
     requiresApproval: boolean;
   }>;
 };

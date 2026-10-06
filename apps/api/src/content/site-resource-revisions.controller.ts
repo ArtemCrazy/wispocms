@@ -10,30 +10,12 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { Type } from 'class-transformer';
-import {
-  IsArray,
-  IsDefined,
-  IsIn,
-  IsObject,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Matches,
-  MaxLength,
-  MinLength,
-  ValidateNested,
-  ValidateIf,
-} from 'class-validator';
+import { IsDefined, IsObject, IsUUID, ValidateIf } from 'class-validator';
 import {
   JwtAuthGuard,
   type AuthenticatedRequest,
 } from '../auth/jwt-auth.guard';
 import { CmsRevisionsService } from './cms-revisions.service';
-import {
-  CodeResourcesService,
-  type CodeResourceKind,
-} from './code-resources.service';
 import {
   RequestArticleRevisionChangesDto,
   RestoreArticleRevisionDto,
@@ -53,54 +35,12 @@ class SaveSiteResourceDraftDto {
   expectedDraftRevisionId!: string | null;
 }
 
-class CodeResourceParameterDto {
-  @IsString()
-  @Matches(/^[a-z][a-z0-9_]*$/)
-  @MaxLength(100)
-  key!: string;
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(160)
-  label!: string;
-
-  @IsIn(['text', 'image', 'icon', 'html'])
-  type!: 'text' | 'image' | 'icon' | 'html';
-}
-
-class SaveCodeResourceDto {
-  @IsString()
-  @MinLength(1)
-  @MaxLength(160)
-  name!: string;
-
-  @IsString()
-  @Matches(/^[a-z][a-z0-9_-]*$/)
-  @MaxLength(100)
-  key!: string;
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(200000)
-  html!: string;
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CodeResourceParameterDto)
-  parameters!: CodeResourceParameterDto[];
-
-  @IsOptional()
-  @IsUUID()
-  expectedDraftRevisionId?: string | null;
-}
-
 @Controller('sites/:siteId/content')
 @UseGuards(JwtAuthGuard)
 export class SiteResourceRevisionsController {
   constructor(
     private readonly resources: SiteResourceRevisionsService,
     private readonly revisions: CmsRevisionsService,
-    private readonly code: CodeResourcesService,
   ) {}
 
   private resource(value: string): SiteRevisionResourceType {
@@ -114,12 +54,6 @@ export class SiteResourceRevisionsController {
     const result = map[value];
     if (!result) throw new BadRequestException('Неизвестный ресурс сайта');
     return result;
-  }
-
-  private kind(value: string): CodeResourceKind {
-    if (value !== 'template' && value !== 'chunk')
-      throw new BadRequestException('Неизвестный тип HTML-ресурса');
-    return value;
   }
 
   @Get('versioned/:resource')
@@ -273,163 +207,5 @@ export class SiteResourceRevisionsController {
       dto.expectedDraftRevisionId ?? null,
       request.auth!,
     );
-  }
-
-  @Get('code-resources/:kind')
-  codeResources(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.code.list(siteId, this.kind(kind), request.auth!);
-  }
-
-  @Post('code-resources/:kind')
-  createCodeResource(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Req() request: AuthenticatedRequest,
-    @Body() dto: SaveCodeResourceDto,
-  ) {
-    return this.code.create(siteId, this.kind(kind), request.auth!, dto);
-  }
-
-  @Put('code-resources/:kind/:entityId')
-  updateCodeResource(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Param('entityId', ParseUUIDPipe) entityId: string,
-    @Req() request: AuthenticatedRequest,
-    @Body() dto: SaveCodeResourceDto,
-  ) {
-    return this.code.update(
-      siteId,
-      this.kind(kind),
-      entityId,
-      request.auth!,
-      dto,
-    );
-  }
-
-  @Get('code-resources/:kind/:entityId/published')
-  publishedCodeResource(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Param('entityId', ParseUUIDPipe) entityId: string,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.code.published(
-      siteId,
-      this.kind(kind),
-      entityId,
-      request.auth!,
-    );
-  }
-
-  @Get('code-resources/:kind/:entityId/revisions/current')
-  currentCodeResource(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Param('entityId', ParseUUIDPipe) entityId: string,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.revisions.current(
-      siteId,
-      this.kind(kind),
-      entityId,
-      request.auth!,
-    );
-  }
-
-  @Get('code-resources/:kind/:entityId/revisions')
-  codeResourceHistory(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Param('entityId', ParseUUIDPipe) entityId: string,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.revisions.listVersions(
-      siteId,
-      this.kind(kind),
-      entityId,
-      request.auth!,
-    );
-  }
-
-  @Get('code-resources/:kind/:entityId/revisions/:revisionId/preview')
-  codeResourcePreview(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kind: string,
-    @Param('entityId', ParseUUIDPipe) entityId: string,
-    @Param('revisionId', ParseUUIDPipe) revisionId: string,
-    @Req() request: AuthenticatedRequest,
-  ) {
-    return this.revisions.getVersion(
-      siteId,
-      this.kind(kind),
-      entityId,
-      revisionId,
-      request.auth!,
-    );
-  }
-
-  @Post('code-resources/:kind/:entityId/revisions/:revisionId/:action')
-  async codeWorkflow(
-    @Param('siteId', ParseUUIDPipe) siteId: string,
-    @Param('kind') kindValue: string,
-    @Param('entityId', ParseUUIDPipe) entityId: string,
-    @Param('revisionId', ParseUUIDPipe) revisionId: string,
-    @Param('action') action: string,
-    @Req() request: AuthenticatedRequest,
-    @Body()
-    body: Partial<RequestArticleRevisionChangesDto & RestoreArticleRevisionDto>,
-  ) {
-    const kind = this.kind(kindValue);
-    if (action === 'submit')
-      await this.revisions.submit(
-        siteId,
-        kind,
-        entityId,
-        revisionId,
-        request.auth!,
-      );
-    else if (action === 'approve')
-      await this.revisions.approve(
-        siteId,
-        kind,
-        entityId,
-        revisionId,
-        request.auth!,
-      );
-    else if (action === 'request-changes') {
-      if (!body.reason?.trim())
-        throw new BadRequestException('Укажите причину');
-      await this.revisions.requestChanges(
-        siteId,
-        kind,
-        entityId,
-        revisionId,
-        request.auth!,
-        body.reason,
-      );
-    } else if (action === 'publish')
-      await this.revisions.publish(
-        siteId,
-        kind,
-        entityId,
-        revisionId,
-        request.auth!,
-      );
-    else if (action === 'restore')
-      return this.revisions.restore(
-        siteId,
-        kind,
-        entityId,
-        revisionId,
-        body.expectedDraftRevisionId ?? null,
-        request.auth!,
-      );
-    else throw new BadRequestException('Неизвестное действие');
-    return { revisionId };
   }
 }

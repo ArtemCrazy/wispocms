@@ -24,6 +24,8 @@ import {
 } from "./creation-shared";
 import styles from "./content-center-view.module.css";
 
+export { CreationPublicationTemplateField } from "./creation-publication";
+
 export function CreationDiff({ changes }: { changes: Proposal[] }) {
   return (
     <div className={styles.creationDiffList}>

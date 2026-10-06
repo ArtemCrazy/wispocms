@@ -1,4 +1,5 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { isDeepStrictEqual } from 'node:util';
 import type { EntityManager } from 'typeorm';
 import { SitePermission } from './content.permissions';
 import {
@@ -42,6 +43,37 @@ export interface SiteResourceAdapterRegistry {
     resourceType: SiteRevisionResourceType,
     snapshot: Record<string, unknown>,
   ): Promise<void>;
+}
+
+function privacyTemplateStructure(snapshot: Record<string, unknown>) {
+  const value = snapshot.displayTemplate;
+  const template =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    key: template.key,
+    version: template.version,
+    config: template.config ?? {},
+  };
+}
+
+function siteResourceStructureChanged(
+  resourceType: SiteRevisionResourceType,
+  snapshot: Record<string, unknown>,
+  source: Record<string, unknown>,
+) {
+  if (resourceType === 'site_not_found')
+    return (
+      snapshot.templateKey !== source.templateKey ||
+      snapshot.templateVersion !== source.templateVersion
+    );
+  if (resourceType === 'site_privacy')
+    return !isDeepStrictEqual(
+      privacyTemplateStructure(snapshot),
+      privacyTemplateStructure(source),
+    );
+  return false;
 }
 
 @Injectable()
@@ -122,15 +154,11 @@ export class SiteResourceRevisionsService {
       resourceType,
       input.snapshot,
     );
-    if (
-      resourceType === 'site_not_found' &&
-      (snapshot.templateKey !== source.templateKey ||
-        snapshot.templateVersion !== source.templateVersion)
-    )
+    if (siteResourceStructureChanged(resourceType, snapshot, source))
       await this.revisions.assertSitePermission(
         siteId,
         actor,
-        SitePermission.EDIT_CODE,
+        SitePermission.MANAGE_STRUCTURE,
       );
     const baseline = !current
       ? await this.revisions.importPublishedBaseline({
@@ -207,14 +235,32 @@ export class SiteResourceRevisionsService {
     revisionId: string,
     actor: RevisionActor,
   ) {
+    const publishedSnapshot =
+      resourceType === 'site_privacy' || resourceType === 'site_not_found'
+        ? await this.adapters.publishedSnapshot(siteId, resourceType)
+        : null;
     await this.revisions.publish(
       siteId,
       resourceType,
       siteId,
       revisionId,
       actor,
-      (manager, snapshot) =>
-        this.adapters.activate(manager, siteId, resourceType, snapshot),
+      async (manager, snapshot) => {
+        if (
+          publishedSnapshot &&
+          siteResourceStructureChanged(
+            resourceType,
+            snapshot,
+            publishedSnapshot,
+          )
+        )
+          await this.revisions.assertSitePermission(
+            siteId,
+            actor,
+            SitePermission.MANAGE_STRUCTURE,
+          );
+        await this.adapters.activate(manager, siteId, resourceType, snapshot);
+      },
     );
     return { siteId, revisionId };
   }

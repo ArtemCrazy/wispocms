@@ -66,10 +66,10 @@ test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(shell, /id: "site"/);
   assert.match(shell, /<MediaSiteView/);
   assert.match(mediaSite, /title: "Шаблоны"/);
-  assert.match(mediaSite, /title: "Библиотека баннеров"/);
-  assert.match(mediaSite, /title: "Библиотека переменных"/);
-  assert.match(mediaSite, /\["privacy-policy", "ПК"/);
-  assert.match(shell, /slug: "privacy-policy"[\s\S]*?label: "ПК"/);
+  assert.match(mediaSite, /title: "Баннеры"/);
+  assert.match(mediaSite, /title: "Переменные"/);
+  assert.match(mediaSite, /\["privacy-policy", "Политика"/);
+  assert.match(shell, /slug: "privacy-policy"[\s\S]*?label: "Политика"/);
   assert.match(shell, /id: "header", icon: "header", label: "Шапка"/);
   assert.match(shell, /id: "footer", icon: "footer", label: "Подвал"/);
   assert.match(
@@ -90,7 +90,13 @@ test("Media Site is a root with template, banner, and variable cards", () => {
   assert.match(templates, /headerTemplateKey/);
   assert.match(templates, /footerTemplateKey/);
   assert.doesNotMatch(templates, /current: "Общий шаблон сайта"/);
-  for (const label of ["Главная", "Статьи", "Шапка и подвал", "404", "ПК"])
+  for (const label of [
+    "Главная",
+    "Статьи",
+    "Шапка и подвал",
+    "404",
+    "Политика",
+  ])
     assert.match(mediaSite, new RegExp(label));
 });
 

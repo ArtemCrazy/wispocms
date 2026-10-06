@@ -15,14 +15,11 @@ import {
   queryValue,
 } from "../../../../public-server-data";
 import {
-  SkinovaCategoryPage,
   type SkinovaArticle,
   type SkinovaCategory,
 } from "../../../../skinova-site";
-import {
-  SKINOVA_CATEGORY_TEMPLATE_KEY,
-  SKINOVA_TEMPLATE_VERSION,
-} from "../../../../skinova-template";
+import { SKINOVA_TEMPLATE_PACKAGE_MANIFEST } from "../../../../template-package-contract";
+import { resolveTemplateComponent } from "../../../../template-runtime-registry";
 
 type CategoryData = {
   site: {
@@ -155,10 +152,15 @@ export default async function PublicCategoryPage({
       `/preview/${encodeURIComponent(siteSlug)}/categories/${encodeURIComponent(result.data.redirectTo)}`,
     );
   const { site, category, articles, children, pages } = result.data;
-  if (
-    category.displayTemplateKey === SKINOVA_CATEGORY_TEMPLATE_KEY &&
-    category.displayTemplateVersion === SKINOVA_TEMPLATE_VERSION
-  ) {
+  const categoryRuntime = resolveTemplateComponent({
+    packageId: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageId,
+    packageVersion: SKINOVA_TEMPLATE_PACKAGE_MANIFEST.packageVersion,
+    kind: "category",
+    key: category.displayTemplateKey ?? "",
+    templateVersion: category.displayTemplateVersion ?? "",
+  });
+  if (categoryRuntime?.implementationKey === "skinova-category") {
+    const CategoryRenderer = categoryRuntime.renderer;
     return (
       <>
         {cmsPreview ? (
@@ -168,7 +170,7 @@ export default async function PublicCategoryPage({
             <Link href="/">Вернуться в CMS</Link>
           </div>
         ) : null}
-        <SkinovaCategoryPage
+        <CategoryRenderer
           siteSlug={siteSlug}
           category={
             category as SkinovaCategory & {

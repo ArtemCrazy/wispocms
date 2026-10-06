@@ -10,7 +10,7 @@ describe('database migrations', () => {
     const names = migrations.map(
       (Migration) => new Migration().name || Migration.name,
     );
-    expect(names).toHaveLength(48);
+    expect(names).toHaveLength(51);
     expect(new Set(names).size).toBe(names.length);
     expect(names).toEqual(
       expect.arrayContaining([
@@ -19,6 +19,9 @@ describe('database migrations', () => {
         'SiteScopedRoles1790017200000',
         'RemainingMetadataRevisionTypes1790210000000',
         'AdminPasswordEmailConfirmation1791613200000',
+        'RemoveCmsCodeEditing1791703200000',
+        'TemplatePackageRegistry1791789600000',
+        'AssignSkinovaSystemTemplate1791793200000',
       ]),
     );
     // These independent migrations were already applied in separate environments.

@@ -44,7 +44,7 @@ export function MediaArticlesView({
   siteName,
   siteSlug,
   canEdit,
-  canEditCode,
+  canManageStructure,
   canApprove,
   canEditPublished,
   onCountChange,
@@ -58,7 +58,7 @@ export function MediaArticlesView({
   siteName: string;
   siteSlug: string;
   canEdit: boolean;
-  canEditCode: boolean;
+  canManageStructure: boolean;
   canApprove: boolean;
   canEditPublished: boolean;
   onCountChange?: (count: number) => void;
@@ -120,7 +120,7 @@ export function MediaArticlesView({
   }
 
   async function saveTemplate(template: Template) {
-    if (!canEditCode) return;
+    if (!canManageStructure) return;
     try {
       const saved = await request<ArticleSettings>(
         `/api/sites/${siteId}/content/articles/settings`,
@@ -156,6 +156,7 @@ export function MediaArticlesView({
           siteName={siteName}
           siteSlug={siteSlug}
           canEdit={canEdit}
+          canManageStructure={canManageStructure}
           canApprove={canApprove}
           canEditPublished={canEditPublished}
           onCountChange={onCountChange}
@@ -190,7 +191,7 @@ export function MediaArticlesView({
             Шаблон
             <select
               value={`${settings?.listTemplateKey ?? "editorial-feed"}@${settings?.listTemplateVersion ?? "1"}`}
-              disabled={!canEditCode}
+              disabled={!canManageStructure}
               onChange={(event) => {
                 const template = listTemplates.find(
                   (item) =>
@@ -218,9 +219,9 @@ export function MediaArticlesView({
         siteId={siteId}
         basePath={`metadata/article-list/${siteId}`}
         label="Шаблон списка статей"
-        canEdit={canEditCode}
+        canEdit={canManageStructure}
         canApprove={canApprove}
-        canPublishDirectly={canEditCode && canEditPublished}
+        canPublishDirectly={canManageStructure && canEditPublished}
         dirty={false}
         refreshToken={settings?.draftRevisionId ?? null}
         onChanged={loadSettings}

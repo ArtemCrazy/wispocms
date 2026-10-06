@@ -29,18 +29,13 @@ export function formatSiteSummary(
 
 export function capabilityLabels({
   administrator,
-  canEditCode,
   requiresApproval,
 }: {
   administrator: boolean;
-  canEditCode: boolean;
   requiresApproval: boolean;
 }) {
   if (administrator) return ["Полный доступ"];
-  return [
-    ...(canEditCode ? ["Доступ к коду"] : []),
-    ...(requiresApproval ? ["Согласование"] : []),
-  ];
+  return requiresApproval ? ["Согласование"] : [];
 }
 
 export function managedUserRole(user: RoleSource): ManagedUserRole {

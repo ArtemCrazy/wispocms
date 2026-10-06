@@ -6,9 +6,7 @@ assert.deepEqual(siteCapabilities(true, null), {
   canEditContent: true,
   canApprove: true,
   canPublishDirectly: true,
-  canViewCode: true,
-  canPublishCodeDirectly: true,
-  canEditCode: true,
+  canManageStructure: true,
   canManageSettings: true,
   canManageUsers: true,
 });
@@ -16,7 +14,6 @@ assert.deepEqual(siteCapabilities(true, null), {
 assert.deepEqual(
   siteCapabilities(false, {
     role: "site_owner",
-    canEditCode: false,
     requiresApproval: false,
   }),
   {
@@ -24,9 +21,7 @@ assert.deepEqual(
     canEditContent: true,
     canApprove: true,
     canPublishDirectly: true,
-    canViewCode: true,
-    canPublishCodeDirectly: false,
-    canEditCode: false,
+    canManageStructure: true,
     canManageSettings: true,
     canManageUsers: false,
   },
@@ -35,7 +30,6 @@ assert.deepEqual(
 assert.deepEqual(
   siteCapabilities(false, {
     role: "content_manager",
-    canEditCode: true,
     requiresApproval: true,
   }),
   {
@@ -43,9 +37,7 @@ assert.deepEqual(
     canEditContent: true,
     canApprove: false,
     canPublishDirectly: false,
-    canViewCode: true,
-    canPublishCodeDirectly: false,
-    canEditCode: true,
+    canManageStructure: false,
     canManageSettings: false,
     canManageUsers: false,
   },
@@ -54,11 +46,9 @@ assert.deepEqual(
 assert.equal(
   siteCapabilities(false, {
     role: "content_manager",
-    canEditCode: false,
     requiresApproval: false,
   }).canPublishDirectly,
   true,
 );
-
 assert.equal(siteCapabilities(false, null).canRead, false);
-assert.equal(siteCapabilities(false, null).canViewCode, false);
+assert.equal(siteCapabilities(false, null).canManageStructure, false);

@@ -3,13 +3,13 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PlatformRole, WorkspaceRole } from '../database/entities';
+import { PlatformRole, SiteRole } from '../database/entities';
 import { privacyFingerprint } from './privacy-generator';
 import { PrivacyService } from './privacy.service';
 
 function setup(
   overrides: {
-    membership?: unknown;
+    siteAccess?: unknown;
     globals?: Record<string, unknown>;
     state?: Record<string, unknown>;
   } = {},
@@ -74,8 +74,8 @@ function setup(
       .fn()
       .mockImplementation((value: unknown) => Promise.resolve(value)),
   };
-  const memberships = {
-    findOne: jest.fn().mockResolvedValue(overrides.membership ?? null),
+  const siteAccesses = {
+    findOne: jest.fn().mockResolvedValue(overrides.siteAccess ?? null),
   };
   const pages = { findOne: jest.fn() };
   const legalModels = {
@@ -97,7 +97,7 @@ function setup(
   return {
     service: new PrivacyService(
       sites as never,
-      memberships as never,
+      siteAccesses as never,
       pages as never,
       legalModels as never,
       policyStates as never,
@@ -156,7 +156,7 @@ describe('PrivacyService', () => {
     expect(result.company.legalName).toBe('ООО «Черновик»');
   });
 
-  it('denies an employee without membership in the site workspace', async () => {
+  it('denies an employee without an explicit site assignment', async () => {
     const { service } = setup();
     await expect(
       service.get('site-1', {
@@ -168,9 +168,10 @@ describe('PrivacyService', () => {
 
   it('allows a content manager with an explicit assignment to this site', async () => {
     const { service } = setup({
-      membership: {
-        role: WorkspaceRole.SITE_CONTENT_MANAGER,
-        siteIds: ['site-1'],
+      siteAccess: {
+        role: SiteRole.CONTENT_MANAGER,
+        siteId: 'site-1',
+        requiresApproval: false,
       },
     });
     await expect(
@@ -181,11 +182,59 @@ describe('PrivacyService', () => {
     ).resolves.toMatchObject({ siteId: 'site-1' });
   });
 
+  it('denies a privacy template change by a content manager', async () => {
+    const { service, policyStates } = setup({
+      siteAccess: {
+        role: SiteRole.CONTENT_MANAGER,
+        siteId: 'site-1',
+        requiresApproval: false,
+      },
+    });
+
+    await expect(
+      service.updateTemplate(
+        'site-1',
+        { userId: 'employee', platformRole: PlatformRole.EMPLOYEE },
+        { key: 'system-policy', version: '1', config: {} },
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(policyStates.save).not.toHaveBeenCalled();
+  });
+
+  it('allows a site owner to change the privacy template', async () => {
+    const { service } = setup({
+      siteAccess: {
+        role: SiteRole.OWNER,
+        siteId: 'site-1',
+        requiresApproval: false,
+      },
+    });
+
+    await expect(
+      service.updateTemplate(
+        'site-1',
+        { userId: 'owner', platformRole: PlatformRole.MEMBER },
+        {
+          key: 'system-policy',
+          version: '1',
+          config: { showSectionNumbers: true, accentTone: 'neutral' },
+        },
+      ),
+    ).resolves.toMatchObject({
+      displayTemplate: {
+        key: 'system-policy',
+        version: '1',
+        config: { showSectionNumbers: true, accentTone: 'neutral' },
+      },
+    });
+  });
+
   it('denies privacy data on a neighboring site in the same workspace', async () => {
     const { service } = setup({
-      membership: {
-        role: WorkspaceRole.SITE_CONTENT_MANAGER,
-        siteIds: ['site-2'],
+      siteAccess: {
+        role: SiteRole.CONTENT_MANAGER,
+        siteId: 'site-2',
+        requiresApproval: false,
       },
     });
     await expect(
