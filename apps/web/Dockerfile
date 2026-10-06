@@ -14,7 +14,7 @@ ENV API_PROXY_URL=$API_PROXY_URL
 ENV WISPO_ASSET_VERSION=$WISPO_ASSET_VERSION
 
 COPY apps/web apps/web
-RUN pnpm --dir apps/web build
+RUN pnpm --filter web build
 
 FROM node:24-alpine AS runner
 
