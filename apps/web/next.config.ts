@@ -9,7 +9,10 @@ const nextConfig: NextConfig = {
   assetPrefix: assetVersion ? `/_wispo-assets/${assetVersion}` : undefined,
   outputFileTracingRoot: monorepoRoot,
   outputFileTracingIncludes: {
-    "/*": ["node_modules/@swc/helpers/**/*"],
+    "/*": [
+      "node_modules/@swc/helpers/**/*",
+      "../../node_modules/.pnpm/@swc+helpers@*/node_modules/@swc/helpers/**/*",
+    ],
   },
   turbopack: { root: monorepoRoot },
   async rewrites() {
