@@ -375,6 +375,11 @@ export function CreationArticle({
   const running =
     data.run?.status === "queued" || data.run?.status === "processing";
   const articleSite = details.sites.find((s) => s.id === article.site_id);
+  const canUnpublishCurrentSite =
+    articleSite?.canPublishDirectly ?? details.canPublishDirectly;
+  const canPublishToAnySite =
+    details.sites.some((site) => site.canPublishDirectly) &&
+    (article.status !== "published" || canUnpublishCurrentSite);
   const publicationHref = publicationDetails({
     url: article.publication_url,
   }).href;
@@ -508,7 +513,7 @@ export function CreationArticle({
               {article.rationale}
             </p>
             <div className={styles.actions}>
-              {details.canPublishDirectly ? (
+              {canPublishToAnySite ? (
                 <>
                   <button
                     className={styles.primary}
@@ -520,11 +525,15 @@ export function CreationArticle({
                   >
                     Отправить в публикацию
                   </button>
-                  {article.status === "published" && (
-                    <button disabled={busy} onClick={() => setUnpublish(true)}>
-                      Снять с публикации
-                    </button>
-                  )}
+                  {article.status === "published" &&
+                    canUnpublishCurrentSite && (
+                      <button
+                        disabled={busy}
+                        onClick={() => setUnpublish(true)}
+                      >
+                        Снять с публикации
+                      </button>
+                    )}
                 </>
               ) : (
                 <p className={styles.muted}>

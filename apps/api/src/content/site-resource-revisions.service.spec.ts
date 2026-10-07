@@ -304,111 +304,14 @@ describe('SiteResourceRevisionsService', () => {
     );
   });
 
-  it('does not activate a saved privacy snapshot that changes the template without structure permission', async () => {
+  it('uses the locked revision registry as the authority for privacy publication', async () => {
     const { service, revisions, adapters } = setup();
     adapters.publishedSnapshot.mockResolvedValue({
-      document: 'Published policy',
+      document: 'Stale adapter snapshot',
       displayTemplate: {
-        key: 'system-policy',
+        key: 'stale-policy',
         version: '1',
-        config: { width: 'wide' },
-      },
-    });
-    revisions.publish.mockImplementation(
-      async (
-        _siteId: string,
-        _resourceType: string,
-        _entityId: string,
-        _revisionId: string,
-        _actor: unknown,
-        activate: (
-          manager: unknown,
-          snapshot: Record<string, unknown>,
-        ) => Promise<void>,
-      ) =>
-        activate(
-          { transaction: true },
-          {
-            document: 'Approved policy',
-            displayTemplate: {
-              key: 'compact-policy',
-              version: '1',
-              config: { width: 'compact' },
-            },
-          },
-        ),
-    );
-    revisions.assertSitePermission.mockRejectedValue(
-      new ForbiddenException('Недостаточно прав для этого сайта'),
-    );
-
-    await expect(
-      service.publish('site-id', 'site_privacy', 'approved-id', actor),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
-    expect(revisions.assertSitePermission).toHaveBeenCalledWith(
-      'site-id',
-      actor,
-      SitePermission.MANAGE_STRUCTURE,
-    );
-    expect(adapters.activate).not.toHaveBeenCalled();
-  });
-
-  it('does not activate a saved 404 snapshot that changes the template without structure permission', async () => {
-    const { service, revisions, adapters } = setup();
-    adapters.publishedSnapshot.mockResolvedValue({
-      status: 'published',
-      templateKey: 'signal',
-      templateVersion: '1',
-    });
-    revisions.publish.mockImplementation(
-      async (
-        _siteId: string,
-        _resourceType: string,
-        _entityId: string,
-        _revisionId: string,
-        _actor: unknown,
-        activate: (
-          manager: unknown,
-          snapshot: Record<string, unknown>,
-        ) => Promise<void>,
-      ) =>
-        activate(
-          { transaction: true },
-          {
-            status: 'published',
-            templateKey: 'editorial',
-            templateVersion: '1',
-          },
-        ),
-    );
-    revisions.assertSitePermission.mockRejectedValue(
-      new ForbiddenException('Недостаточно прав для этого сайта'),
-    );
-
-    await expect(
-      service.publish('site-id', 'site_not_found', 'approved-id', actor),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-
-    expect(revisions.assertSitePermission).toHaveBeenCalledWith(
-      'site-id',
-      actor,
-      SitePermission.MANAGE_STRUCTURE,
-    );
-    expect(adapters.activate).not.toHaveBeenCalled();
-  });
-
-  it('publishes privacy content with structurally equal template data without structure permission', async () => {
-    const { service, revisions, adapters } = setup();
-    adapters.publishedSnapshot.mockResolvedValue({
-      document: 'Published policy',
-      displayTemplate: {
-        key: 'system-policy',
-        version: '1',
-        config: {
-          typography: { scale: 1, family: 'Inter' },
-          sections: ['intro', 'details'],
-        },
+        config: { width: 'stale' },
       },
     });
     revisions.publish.mockImplementation(
@@ -430,18 +333,19 @@ describe('SiteResourceRevisionsService', () => {
             displayTemplate: {
               key: 'system-policy',
               version: '1',
-              config: {
-                sections: ['intro', 'details'],
-                typography: { family: 'Inter', scale: 1 },
-              },
+              config: { width: 'wide' },
             },
           },
         ),
     );
+    revisions.assertSitePermission.mockRejectedValue(
+      new ForbiddenException('Stale adapter comparison must not decide'),
+    );
 
-    await service.publish('site-id', 'site_privacy', 'approved-id', actor);
+    await expect(
+      service.publish('site-id', 'site_privacy', 'approved-id', actor),
+    ).resolves.toEqual({ siteId: 'site-id', revisionId: 'approved-id' });
 
-    expect(revisions.assertSitePermission).not.toHaveBeenCalled();
     expect(adapters.activate).toHaveBeenCalledWith(
       { transaction: true },
       'site-id',
@@ -449,7 +353,6 @@ describe('SiteResourceRevisionsService', () => {
       expect.objectContaining({ document: 'Approved policy' }),
     );
   });
-
   it('returns an exact immutable version for preview', async () => {
     const { service } = setup();
 

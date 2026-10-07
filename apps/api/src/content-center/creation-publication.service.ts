@@ -88,6 +88,12 @@ export class CreationPublicationService {
       const item = await this.service.article(w, id, m);
       this.service.revision(item, dto.revision);
       const moving = dto.siteId !== item.site_id;
+      if (moving && item.status === 'published')
+        await this.revisions.assertSitePermission(
+          item.site_id,
+          a,
+          SitePermission.PUBLISH_CONTENT,
+        );
       if (moving) {
         const settings = await this.service.settings(w, m);
         if (!settings.platforms.some((p) => p.siteId === dto.siteId))
