@@ -32,7 +32,9 @@ export function chunkRuntimeIdentity(value: ChunkRuntimeIdentity) {
   ]);
 }
 
-export function createChunkRuntimeCatalog<Implementation>(
+export function createChunkRuntimeCatalog<
+  Implementation extends NonNullable<unknown>,
+>(
   manifest: ChunkRuntimeManifest,
   bindings: Readonly<Record<string, Implementation>>,
 ) {
@@ -52,7 +54,11 @@ export function createChunkRuntimeCatalog<Implementation>(
       throw new Error(`${rendererKey} has no trusted chunk runtime binding`);
     }
 
-    const implementation = bindingDescriptor.value as Implementation;
+    const implementation = bindingDescriptor.value as
+      Implementation | null | undefined;
+    if (implementation === null || implementation === undefined) {
+      throw new Error(`${rendererKey} has no trusted chunk runtime binding`);
+    }
     const identity = chunkRuntimeIdentity({
       packageId,
       packageVersion,

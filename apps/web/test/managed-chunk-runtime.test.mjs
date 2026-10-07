@@ -53,6 +53,18 @@ test("fails build catalog when renderer lacks an own trusted binding", () => {
   );
 });
 
+test("rejects own bindings with a nullish implementation", () => {
+  for (const implementation of [undefined, null]) {
+    assert.throws(
+      () =>
+        createChunkRuntimeCatalog(manifest, {
+          "fixture-banner-renderer": implementation,
+        }),
+      /fixture-banner-renderer.*runtime binding/i,
+    );
+  }
+});
+
 test("rejects accessor bindings without invoking them", () => {
   let getterCalls = 0;
   const bindings = {};
