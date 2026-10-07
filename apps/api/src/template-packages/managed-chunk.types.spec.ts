@@ -65,12 +65,7 @@ describe('managed chunk manifest v2 contract', () => {
       'layout',
     ]);
     expect(CMS_IFRAME_PROVIDER_IDS).toEqual(['youtube']);
-    expect(MANAGED_LINK_PROTOCOLS).toEqual([
-      'https',
-      'http',
-      'mailto',
-      'tel',
-    ]);
+    expect(MANAGED_LINK_PROTOCOLS).toEqual(['https', 'http', 'mailto', 'tel']);
     expect(MANAGED_LINK_TARGETS).toEqual(['_self', '_blank']);
     expect(textareaField.widget).toBe('textarea');
     expect(repeaterField.constraints).toEqual({ minItems: 1, maxItems: 3 });

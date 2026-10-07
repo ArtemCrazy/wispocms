@@ -51,9 +51,7 @@
           "widget": "html",
           "constraints": {
             "maxLength": 20000,
-            "iframeProviders": [
-              "youtube"
-            ]
+            "iframeProviders": ["youtube"]
           }
         }
       ]
@@ -66,9 +64,7 @@
       "version": "1",
       "title": "Fixture Home",
       "dataScope": "cms-entity",
-      "runtimeContext": [
-        "siteSlug"
-      ],
+      "runtimeContext": ["siteSlug"],
       "dataSchemaVersion": "1",
       "dataSchema": {
         "$schema": "http://json-schema.org/draft-07/schema#",
