@@ -30,10 +30,28 @@
   rollback boundary до включения generic-only полей. Это только описание
   будущих миграций: схема, данные, формат сохраняемых значений и окружение в
   текущей работе фактически не менялись.
-- Изменённые файлы этапа: эта существующая запись журнала и design-spec выше.
-  Документационный коммит спецификации: `c5fc0e3`. Push, merge, сборка, тесты,
-  деплой и фактическая выкладка не выполнялись; письменная спецификация ожидает
-  отдельной проверки владельцем.
+- Письменная спецификация подтверждена владельцем 07.10.2026. Для первой фазы
+  создан TDD implementation plan
+  `docs/superpowers/plans/2026-10-07-managed-chunks-manifest-v2.md`; его
+  реализация ещё не начиналась. Phase 1 ограничена изолированным контрактным
+  SDK: без DB schema, register/DTO/service wiring, реального Skinova v2,
+  изменений баннеров и поведения release CLI/preflight.
+- По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
+  `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
+  этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
+  Pure compatibility seam проверяет contracts/digests, доверенный build-side
+  renderer inventory, slots/allowed definitions/maxItems и переданный inventory
+  published/draft placements, включая безопасные уникальные positions. Для
+  отсутствующих provider/protocol/target catalogs digest использует стабильный
+  `platform-default` sentinel; присланный несовпадающий digest планируется как
+  `ConflictException`/HTTP 409. Это по-прежнему документация: DB-backed lookup,
+  runtime attestation и production preflight wiring отложены.
+- Изменённые файлы текущего документационного этапа: эта существующая запись
+  журнала, design-spec и implementation plan выше. Документационные коммиты
+  спецификации: `c5fc0e3`, `efb19d2`; plan пока не закоммичен. Код, схема БД,
+  данные и формат сохраняемых значений не менялись; миграции/backfill/ручные
+  правки данных, сборка, тесты, Docker, общая БД, VDS, Registry, push, merge,
+  деплой и фактическая выкладка не выполнялись.
 ### 2026-10-06 · Слияние обновления Романа: граница кода и frontend-пакеты
 
 - Статус: **слито и выложено на VDS заказчика**. Артём / Codex: merge `0d20f84` объединяет `b75a1be` и `efa36d4` из `origin/codex/access-control-v2` с `30ff0b6`; финальный код `8d817b0`. Наши доработки контент-центра, безопасной публикации и оформления статьи сохранены. Форма публикации учитывает `canManageStructure`: менеджер контента не выбирает шаблон; владелец/администратор выбирает готовый вариант. Ключи шаблонов с двоеточием не повреждаются.
