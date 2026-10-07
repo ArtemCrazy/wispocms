@@ -139,6 +139,9 @@
   12/12, release CLI 21/21, API production build и web TypeScript — PASS;
   `git diff --cached --check` чист. `main`, VDS, Registry и общая БД не
   изменялись; интеграционные тесты на общей БД не запускались.
+- Merge-коммит `a3a93ab` с родителями feature `4ee7cb1` и main `2f7fab1`
+  отправлен в `origin/codex/managed-chunks-sdk-v1`. Pull Request, merge в
+  `main`, deployment и изменения VDS не выполнялись.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
