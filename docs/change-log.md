@@ -123,6 +123,12 @@
   runtime attestation, production registration/release wiring, real Skinova v2,
   backfill/dual-write, TinyMCE/sanitizer/media/payload validation, UI, workflow
   согласования и public/preview rendering остаются следующими фазами.
+- После финального `fetch` актуальный `origin/main` продвинулся с `8de3465` до
+  `2f7fab1`: feature-ветка находится на 20 коммитов впереди и 8 позади.
+  Изменённые source-файлы не пересекаются; безопасная `merge-tree`-симуляция
+  показала единственный content conflict в `docs/change-log.md`, поскольку обе
+  ветки дополняли общий журнал. Rebase/merge и разрешение конфликта не
+  выполнялись; при интеграции нужно сохранить записи обеих веток.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
