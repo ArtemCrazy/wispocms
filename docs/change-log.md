@@ -109,6 +109,20 @@
   Коммиты Task 5: `78edd75`, `e72bf30`. Production wiring, существующий runtime
   catalog, реальная Skinova, БД, схема/данные/формат, миграции, VDS, push, merge
   и выкладка не затрагивались.
+- Task 6 и Phase 1 завершены локально. Финальная проверка: граница v1/v2 —
+  1 suite / 2 tests; focused API managed-chunk — 5 suites / 41 test; web runtime
+  — 12/12; неизменённый release CLI — 21/21. API production build, web
+  TypeScript, точечные ESLint/Prettier и `git diff --check` прошли.
+- Scope-аудит подтвердил отсутствие diff в БД/миграциях, production
+  TemplatePackage types/validator/DTO/service, реальном Skinova manifest и
+  release CLI; placeholders, секреты и generated-файлы не найдены. Статус
+  design-spec приведён в соответствие с фактом подтверждения и проверки.
+- Схема БД, данные, формат сохраняемых значений, миграции, production v1,
+  баннеры и CLI preflight не менялись. Общая БД, Docker, VDS, Registry, push,
+  merge и выкладка не использовались. DB-backed published/draft compatibility,
+  runtime attestation, production registration/release wiring, real Skinova v2,
+  backfill/dual-write, TinyMCE/sanitizer/media/payload validation, UI, workflow
+  согласования и public/preview rendering остаются следующими фазами.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
