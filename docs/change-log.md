@@ -36,6 +36,12 @@
   реализация ещё не начиналась. Phase 1 ограничена изолированным контрактным
   SDK: без DB schema, register/DTO/service wiring, реального Skinova v2,
   изменений баннеров и поведения release CLI/preflight.
+- Phase 2: письменная persistence-спецификация
+  `docs/superpowers/specs/2026-10-07-managed-chunks-persistence-design.md`
+  подтверждена владельцем 07.10.2026; отдельный TDD-план создан в
+  `docs/superpowers/plans/2026-10-07-managed-chunks-persistence-phase2.md` и
+  ожидает подтверждения. До него код, схема/данные БД, миграции и формат
+  сохраняемых значений не меняются; общая БД, VDS и Registry не затрагиваются.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
