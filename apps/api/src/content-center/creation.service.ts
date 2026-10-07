@@ -404,6 +404,11 @@ export class CreationService {
       correction: correction[0] ?? null,
       sites: sites.map((site) => ({
         ...site,
+        canPublishDirectly: hasSitePermission(
+          a.platformRole,
+          accessBySite.get(site.id) ?? null,
+          SitePermission.PUBLISH_CONTENT,
+        ),
         canManageStructure: hasSitePermission(
           a.platformRole,
           accessBySite.get(site.id) ?? null,

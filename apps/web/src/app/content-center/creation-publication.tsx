@@ -57,6 +57,7 @@ export function publicationFormState(
   const article = details.article;
   const moving = input.siteId !== article.site_id;
   const site = details.sites.find((s) => s.id === input.siteId);
+  const sourceSite = details.sites.find((s) => s.id === article.site_id);
   const canManageStructure = site?.canManageStructure === true;
   const categories = details.categories.filter(
     (c) => c.site_id === input.siteId,
@@ -69,9 +70,26 @@ export function publicationFormState(
       a.site_id === input.siteId,
   );
   let blocked = "";
-  if (!details.canPublishDirectly)
+  if (!site)
+    return {
+      moving,
+      site,
+      categories,
+      templates,
+      canManageStructure,
+      blocked:
+        "\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0443\u044e \u043f\u043b\u043e\u0449\u0430\u0434\u043a\u0443.",
+    };
+
+  if (!site.canPublishDirectly)
     blocked = "Публикацию подтверждает владелец сайта или администратор Wispo.";
-  else if (!site) blocked = "Выберите доступную площадку.";
+  else if (
+    moving &&
+    article.status === "published" &&
+    sourceSite?.canPublishDirectly !== true
+  )
+    blocked =
+      "Перенос опубликованной статьи требует права публикации на исходной площадке.";
   else if (occupied)
     blocked =
       "На этой площадке уже есть другая статья кластера. Она не будет перезаписана.";

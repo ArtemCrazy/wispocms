@@ -101,6 +101,7 @@ export type ArticleDetails = {
     name: string;
     slug: string;
     canManageStructure: boolean;
+    canPublishDirectly: boolean;
   }[];
   categories: { id: string; name: string; site_id: string }[];
   templates: { key: string; version: string; name: string; site_id: string }[];

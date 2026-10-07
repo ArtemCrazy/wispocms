@@ -53,6 +53,33 @@ describe('CMS revision storage', () => {
       else collection.push({ ...value });
       return value;
     };
+    const siteAccessFor = (userId: string) => {
+      if (userId === owner.userId)
+        return {
+          role: SiteRole.OWNER,
+          siteId: 'site-1',
+          requiresApproval: false,
+        };
+      if (userId === ownerReviewer.userId)
+        return {
+          role: SiteRole.OWNER,
+          siteId: 'site-1',
+          requiresApproval: false,
+        };
+      if (userId === manager.userId)
+        return {
+          role: SiteRole.CONTENT_MANAGER,
+          siteId: 'site-1',
+          requiresApproval: true,
+        };
+      if (userId === independentManager.userId)
+        return {
+          role: SiteRole.CONTENT_MANAGER,
+          siteId: 'site-1',
+          requiresApproval: false,
+        };
+      return null;
+    };
     const db = {
       findOne: jest.fn(
         (
@@ -61,6 +88,10 @@ describe('CMS revision storage', () => {
         ) => {
           const name = entity.name;
           const where = options.where;
+          if (name === 'SiteEntity')
+            return { id: 'site-1', workspaceId: 'workspace-1' };
+          if (name === 'SiteAccessEntity')
+            return siteAccessFor(String(where.userId));
           const rows = name.includes('Resource') ? resources : revisions;
           return (
             rows.find((row) =>
@@ -90,34 +121,9 @@ describe('CMS revision storage', () => {
         .mockResolvedValue({ id: 'site-1', workspaceId: 'workspace-1' }),
     };
     const siteAccesses = {
-      findOne: jest.fn((options: { where: { userId: string } }) => {
-        const userId = options.where.userId;
-        if (userId === owner.userId)
-          return {
-            role: SiteRole.OWNER,
-            siteId: 'site-1',
-            requiresApproval: false,
-          };
-        if (userId === ownerReviewer.userId)
-          return {
-            role: SiteRole.OWNER,
-            siteId: 'site-1',
-            requiresApproval: false,
-          };
-        if (userId === manager.userId)
-          return {
-            role: SiteRole.CONTENT_MANAGER,
-            siteId: 'site-1',
-            requiresApproval: true,
-          };
-        if (userId === independentManager.userId)
-          return {
-            role: SiteRole.CONTENT_MANAGER,
-            siteId: 'site-1',
-            requiresApproval: false,
-          };
-        return null;
-      }),
+      findOne: jest.fn((options: { where: { userId: string } }) =>
+        siteAccessFor(options.where.userId),
+      ),
     };
     const service = new CmsRevisionsService(
       dataSource as never,
@@ -252,6 +258,289 @@ describe('CMS revision storage', () => {
     ).resolves.toEqual({ title: 'Direct publication' });
   });
 
+  it('blocks a content manager from publishing an owner-created template change', async () => {
+    const { service } = setup();
+    const baseline = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-structural',
+      snapshot: {
+        title: 'Live article',
+        displayTemplateKey: 'standard-article',
+        displayTemplateVersion: '1',
+        displayTemplateConfig: {},
+      },
+      expectedDraftRevisionId: null,
+      actor: owner,
+    });
+    await service.publish(
+      'site-1',
+      'article',
+      'article-structural',
+      baseline.id,
+      owner,
+    );
+    const structural = await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-structural',
+      snapshot: {
+        title: 'Updated article',
+        displayTemplateKey: 'feature-article',
+        displayTemplateVersion: '2',
+        displayTemplateConfig: { hero: true },
+      },
+      expectedDraftRevisionId: baseline.id,
+      actor: owner,
+    });
+
+    await expect(
+      service.publish(
+        'site-1',
+        'article',
+        'article-structural',
+        structural.id,
+        independentManager,
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.published(
+        'site-1',
+        'article',
+        'article-structural',
+        independentManager,
+      ),
+    ).resolves.toEqual({
+      title: 'Live article',
+      displayTemplateKey: 'standard-article',
+      displayTemplateVersion: '1',
+      displayTemplateConfig: {},
+    });
+  });
+  it('applies the structural publication guard to every template-bearing resource', async () => {
+    const { service } = setup();
+    const cases = [
+      {
+        resourceType: 'category' as const,
+        entityId: 'category-structural',
+        baseline: {
+          title: 'Live category',
+          displayTemplateKey: 'standard-category',
+          displayTemplateVersion: '1',
+          displayTemplateConfig: {},
+        },
+        structural: {
+          title: 'Updated category',
+          displayTemplateKey: 'feature-category',
+          displayTemplateVersion: '2',
+          displayTemplateConfig: { hero: true },
+        },
+      },
+      {
+        resourceType: 'site_privacy' as const,
+        entityId: 'site-1',
+        baseline: {
+          document: 'Live policy',
+          displayTemplate: {
+            key: 'system-policy',
+            version: '1',
+            config: {},
+          },
+        },
+        structural: {
+          document: 'Updated policy',
+          displayTemplate: {
+            key: 'compact-policy',
+            version: '2',
+            config: { width: 'compact' },
+          },
+        },
+      },
+      {
+        resourceType: 'site_not_found' as const,
+        entityId: 'site-1',
+        baseline: {
+          status: 'published',
+          templateKey: 'signal',
+          templateVersion: '1',
+        },
+        structural: {
+          status: 'published',
+          templateKey: 'editorial',
+          templateVersion: '2',
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const baseline = await service.saveDraft({
+        siteId: 'site-1',
+        resourceType: testCase.resourceType,
+        entityId: testCase.entityId,
+        snapshot: testCase.baseline,
+        expectedDraftRevisionId: null,
+        actor: owner,
+      });
+      await service.publish(
+        'site-1',
+        testCase.resourceType,
+        testCase.entityId,
+        baseline.id,
+        owner,
+      );
+      const structural = await service.saveDraft({
+        siteId: 'site-1',
+        resourceType: testCase.resourceType,
+        entityId: testCase.entityId,
+        snapshot: testCase.structural,
+        expectedDraftRevisionId: baseline.id,
+        actor: owner,
+      });
+
+      await expect(
+        service.publish(
+          'site-1',
+          testCase.resourceType,
+          testCase.entityId,
+          structural.id,
+          independentManager,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.published(
+          'site-1',
+          testCase.resourceType,
+          testCase.entityId,
+          independentManager,
+        ),
+      ).resolves.toEqual(testCase.baseline);
+    }
+  });
+  it('allows direct manager publication when the template assignment is unchanged', async () => {
+    const { service, db } = setup();
+    const cases = [
+      {
+        resourceType: 'article' as const,
+        entityId: 'article-content-only',
+        baseline: {
+          title: 'Live article',
+          displayTemplateKey: 'standard-article',
+          displayTemplateVersion: '1',
+          displayTemplateConfig: { layout: 'default' },
+        },
+        next: {
+          title: 'Updated article',
+          displayTemplateKey: 'standard-article',
+          displayTemplateVersion: '1',
+          displayTemplateConfig: { layout: 'default' },
+        },
+      },
+      {
+        resourceType: 'category' as const,
+        entityId: 'category-content-only',
+        baseline: {
+          title: 'Live category',
+          displayTemplateKey: 'standard-category',
+          displayTemplateVersion: '1',
+          displayTemplateConfig: { layout: 'default' },
+        },
+        next: {
+          title: 'Updated category',
+          displayTemplateKey: 'standard-category',
+          displayTemplateVersion: '1',
+          displayTemplateConfig: { layout: 'default' },
+        },
+      },
+      {
+        resourceType: 'site_privacy' as const,
+        entityId: 'site-1',
+        baseline: {
+          document: 'Live policy',
+          displayTemplate: {
+            key: 'system-policy',
+            version: '1',
+            config: { sections: ['intro'], width: 'wide' },
+          },
+        },
+        next: {
+          document: 'Updated policy',
+          displayTemplate: {
+            key: 'system-policy',
+            version: '1',
+            config: { width: 'wide', sections: ['intro'] },
+          },
+        },
+      },
+      {
+        resourceType: 'site_not_found' as const,
+        entityId: 'site-1',
+        baseline: {
+          title: 'Live 404',
+          templateKey: 'signal',
+          templateVersion: '1',
+        },
+        next: {
+          title: 'Updated 404',
+          templateKey: 'signal',
+          templateVersion: '1',
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const baseline = await service.saveDraft({
+        siteId: 'site-1',
+        resourceType: testCase.resourceType,
+        entityId: testCase.entityId,
+        snapshot: testCase.baseline,
+        expectedDraftRevisionId: null,
+        actor: owner,
+      });
+      await service.publish(
+        'site-1',
+        testCase.resourceType,
+        testCase.entityId,
+        baseline.id,
+        owner,
+      );
+      const contentOnly = await service.saveDraft({
+        siteId: 'site-1',
+        resourceType: testCase.resourceType,
+        entityId: testCase.entityId,
+        snapshot: testCase.next,
+        expectedDraftRevisionId: baseline.id,
+        actor: independentManager,
+      });
+
+      await service.publish(
+        'site-1',
+        testCase.resourceType,
+        testCase.entityId,
+        contentOnly.id,
+        independentManager,
+      );
+      await expect(
+        service.published(
+          'site-1',
+          testCase.resourceType,
+          testCase.entityId,
+          independentManager,
+        ),
+      ).resolves.toEqual(testCase.next);
+    }
+
+    const transactionalSiteRead = db.findOne.mock.calls.find(
+      ([entity]) => entity.name === 'SiteEntity',
+    );
+    const transactionalAccessRead = db.findOne.mock.calls.find(
+      ([entity]) => entity.name === 'SiteAccessEntity',
+    );
+    expect(transactionalSiteRead?.[1]).toEqual({ where: { id: 'site-1' } });
+    expect(transactionalAccessRead?.[1]).toMatchObject({
+      where: { siteId: 'site-1' },
+      lock: { mode: 'pessimistic_read' },
+    });
+  });
   it('does not switch the public pointer when applying a release fails', async () => {
     const { service } = setup();
     const old = await service.saveDraft({
