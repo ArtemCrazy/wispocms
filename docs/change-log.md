@@ -83,6 +83,19 @@
   рабочая Skinova и release CLI остались на manifest v1. Схема БД, данные,
   формат сохраняемых значений, миграции, общая БД, VDS, push, merge и выкладка
   не затрагивались.
+- Task 4 Phase 1 завершён локально: добавлен pure compatibility primitive для
+  contracts, доверенного renderer inventory, template slots и переданных
+  published/draft placements. Он проверяет definitions/digests, доступность
+  renderer, allowed definitions, capacity и безопасные уникальные positions;
+  layouts published/draft учитываются независимо. Причины сортируются
+  детерминированно без зависимости от locale, не содержат content payloads;
+  входные данные не мутируются, tuple identities не имеют delimiter collisions.
+- TDD Task 4: RED — отсутствовал compatibility-модуль; GREEN — 5 suite /
+  41 test для Tasks 1–4. Отдельно прошли API production build, ESLint,
+  Prettier и `git diff --check`; spec review — compliant, security/code-quality
+  review — approved. Коммит Task 4: `0f8a9e1`. Production wiring, БД, схема,
+  данные, формат сохраняемых значений, миграции, Skinova manifest, release CLI,
+  VDS, push, merge и выкладка не затрагивались.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
