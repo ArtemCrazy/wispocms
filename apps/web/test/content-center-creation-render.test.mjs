@@ -203,7 +203,7 @@ test("article exposes per-proposal decisions, unpublished current-version notice
     },
     changes: [],
   };
-  const render = (canPublishDirectly, articleOverride = {}) => renderToStaticMarkup(
+  const render = (canPublishDirectly, articleOverride = {}, sitesOverride) => renderToStaticMarkup(
     React.createElement(load("creation-article").CreationArticle, {
       base: "/api/test",
       parentBase: "/api/test",
@@ -212,7 +212,7 @@ test("article exposes per-proposal decisions, unpublished current-version notice
         article: { ...article, ...articleOverride },
         version,
         versions: [],
-        sites: [{ id: "other", name: "Wrong platform", slug: "wrong" }, { id: "site", name: "Media", slug: "test" }],
+        sites: sitesOverride ?? [{ id: "other", name: "Wrong platform", slug: "wrong", canManageStructure: false, canPublishDirectly: false }, { id: "site", name: "Media", slug: "test", canManageStructure: true, canPublishDirectly }],
         categories: [],
         templates: [],
         correction: {
@@ -241,6 +241,41 @@ test("article exposes per-proposal decisions, unpublished current-version notice
   assert.ok(!restricted.includes("Отправить в публикацию"));
   assert.ok(!restricted.includes("Снять с публикации"));
   assert.ok(restricted.includes("подтверждает владелец сайта"));
+  const crossSite = render(false, {}, [
+    {
+      id: "other",
+      name: "Wrong platform",
+      slug: "wrong",
+      canManageStructure: false,
+      canPublishDirectly: true,
+    },
+    {
+      id: "site",
+      name: "Media",
+      slug: "test",
+      canManageStructure: true,
+      canPublishDirectly: false,
+    },
+  ]);
+  assert.doesNotMatch(crossSite, /Отправить в публикацию/);
+  assert.doesNotMatch(crossSite, /Снять с публикации/);
+  const crossSiteDraft = render(false, { status: "created" }, [
+    {
+      id: "other",
+      name: "Wrong platform",
+      slug: "wrong",
+      canManageStructure: false,
+      canPublishDirectly: true,
+    },
+    {
+      id: "site",
+      name: "Media",
+      slug: "test",
+      canManageStructure: true,
+      canPublishDirectly: false,
+    },
+  ]);
+  assert.match(crossSiteDraft, /Отправить в публикацию/);
   for (const label of [
     "Есть изменения, не опубликованные на сайте",
     "Принять",
@@ -312,13 +347,34 @@ test("proposal panel counts decisions, keeps before/after text and dispatches an
 
 test("publication validates platform, category, template and explicit move without overwriting another article", () => {
   const { publicationFormState, CreationPublicationForm } = load("creation-publication");
-  const details = { canPublishDirectly: true, article: { id: "a", cluster_id: "c", site_id: "s", revision: 3, current_number: 2, published_number: 1, status: "published", cms_article_id: "cms", category_id: "cat" }, correction: null, sites: [{ id: "s", name: "Сайт" }, { id: "s2", name: "Вторая площадка" }], categories: [{ id: "cat", site_id: "s", name: "Раздел" }, { id: "cat2", site_id: "s2", name: "Другой раздел" }], templates: [{ site_id: "s", key: "editorial:v2", version: "1", name: "Статья" }, { site_id: "s2", key: "editorial:v2", version: "1", name: "Статья" }] };
+  const details = { canPublishDirectly: true, article: { id: "a", cluster_id: "c", site_id: "s", revision: 3, current_number: 2, published_number: 1, status: "published", cms_article_id: "cms", category_id: "cat" }, correction: null, sites: [{ id: "s", name: "Сайт", canManageStructure: true, canPublishDirectly: true }, { id: "s2", name: "Вторая площадка", canManageStructure: true, canPublishDirectly: true }], categories: [{ id: "cat", site_id: "s", name: "Раздел" }, { id: "cat2", site_id: "s2", name: "Другой раздел" }], templates: [{ site_id: "s", key: "editorial:v2", version: "1", name: "Статья" }, { site_id: "s2", key: "editorial:v2", version: "1", name: "Статья" }] };
   const data = { articles: [] };
-  details.sites.forEach(site => { site.canManageStructure = true; });
+
   const input = { revision: 3, siteId: "s", categoryId: "cat", slug: "new-article", templateKey: "editorial:v2", templateVersion: "1", confirmMove: false };
   const state = (changed = {}, modifiedDetails = {}, modifiedData = {}) => publicationFormState({ ...details, ...modifiedDetails }, { ...data, ...modifiedData }, { ...input, ...changed });
   assert.equal(state().blocked, "");
-  assert.match(state({}, { canPublishDirectly: false }).blocked, /владелец/);
+  assert.match(
+    state(
+      {},
+      {
+        sites: details.sites.map((site) =>
+          site.id === "s" ? { ...site, canPublishDirectly: false } : site,
+        ),
+      },
+    ).blocked,
+    /владелец/,
+  );
+  assert.match(
+    state(
+      { siteId: "s2", categoryId: "cat2", confirmMove: true },
+      {
+        sites: details.sites.map((site) =>
+          site.id === "s" ? { ...site, canPublishDirectly: false } : site,
+        ),
+      },
+    ).blocked,
+    /исходной площадке/,
+  );
   assert.match(state({ siteId: "missing" }).blocked, /доступную площадку/);
   assert.match(state({ categoryId: "cat2" }).blocked, /раздел площадки/);
   assert.match(state({}, { categories: [] }).blocked, /нет опубликованных разделов/);
@@ -374,6 +430,35 @@ test("publication template control is hidden without structure permission and em
   assert.ok(owner.includes("Шаблон статьи"));
   assert.equal(state.publicationBlockedByTemplates(false, []), false);
   assert.equal(state.publicationBlockedByTemplates(true, []), true);
+});
+test("publication form follows the selected site's structure permission", () => {
+  const { CreationPublicationForm, publicationFormState } = load("creation-publication");
+  const article = { id: "a", cluster_id: "c", site_id: "s", revision: 3, current_number: 2, published_number: null, status: "draft", cms_article_id: null, category_id: "cat" };
+  const data = { articles: [] };
+  const input = { revision: 3, siteId: "s", categoryId: "cat", slug: "article-a", templateKey: "", templateVersion: "", confirmMove: false };
+  const base = { canPublishDirectly: true, article, correction: null, categories: [{ id: "cat", site_id: "s", name: "Раздел" }], templates: [] };
+  const restrictedDetails = { ...base, sites: [{ id: "s", name: "Сайт", canManageStructure: false, canPublishDirectly: true }] };
+  const ownerDetails = { ...base, sites: [{ id: "s", name: "Сайт", canManageStructure: true, canPublishDirectly: true }] };
+  const props = { data, busy: false, error: "", onCancel() {}, onPublish() {} };
+  const restricted = renderToStaticMarkup(
+    React.createElement(CreationPublicationForm, {
+      ...props,
+      details: restrictedDetails,
+    }),
+  );
+  assert.doesNotMatch(restricted, /Шаблон статьи/);
+  assert.equal(publicationFormState(restrictedDetails, data, input).blocked, "");
+  assert.match(publicationFormState(ownerDetails, data, input).blocked, /нет активного шаблона/);
+  const owner = renderToStaticMarkup(
+    React.createElement(CreationPublicationForm, {
+      ...props,
+      details: {
+        ...ownerDetails,
+        templates: [{ site_id: "s", key: "editorial", version: "1", name: "Статья" }],
+      },
+    }),
+  );
+  assert.match(owner, /Шаблон статьи/);
 });
 test("run history does not expand; history has all three specified tabs and filters", () => {
   const html = renderToStaticMarkup(

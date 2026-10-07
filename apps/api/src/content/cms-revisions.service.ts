@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
@@ -81,6 +82,52 @@ export class CmsRevisionsService {
     return [] as const;
   }
 
+  private templateAssignment(
+    resourceType: CmsResourceType,
+    snapshot: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    if (resourceType === 'article' || resourceType === 'category')
+      return {
+        key: snapshot.displayTemplateKey,
+        version: snapshot.displayTemplateVersion,
+        config: snapshot.displayTemplateConfig ?? {},
+      };
+    if (resourceType === 'site_privacy') {
+      const value = snapshot.displayTemplate;
+      const template =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : {};
+      return {
+        key: template.key,
+        version: template.version,
+        config: template.config ?? {},
+      };
+    }
+    if (resourceType === 'site_not_found')
+      return {
+        key: snapshot.templateKey,
+        version: snapshot.templateVersion,
+      };
+    return null;
+  }
+
+  private changesTemplateAssignment(
+    resourceType: CmsResourceType,
+    next: Record<string, unknown>,
+    published: Record<string, unknown>,
+  ) {
+    const nextAssignment = this.templateAssignment(resourceType, next);
+    const publishedAssignment = this.templateAssignment(
+      resourceType,
+      published,
+    );
+    return (
+      nextAssignment !== null &&
+      publishedAssignment !== null &&
+      !isDeepStrictEqual(nextAssignment, publishedAssignment)
+    );
+  }
   private preserveTemplateAssignment(
     resourceType: CmsResourceType,
     restoredSnapshot: Record<string, unknown>,
@@ -99,17 +146,26 @@ export class CmsRevisionsService {
     siteId: string,
     actor: RevisionActor,
     permission: SitePermission,
+    manager?: EntityManager,
   ): Promise<SiteAccessGrant | null> {
-    const site = await this.sites.findOne({ where: { id: siteId } });
+    const site = manager
+      ? await manager.findOne(SiteEntity, { where: { id: siteId } })
+      : await this.sites.findOne({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Сайт не найден');
     if (actor.platformRole === PlatformRole.WISPO_ADMIN) return null;
-    const access = await this.siteAccesses.findOne({
+    const options = {
       select: {
         role: true,
         requiresApproval: true,
       },
       where: { userId: actor.userId, siteId },
-    });
+    } as const;
+    const access = manager
+      ? await manager.findOne(SiteAccessEntity, {
+          ...options,
+          lock: { mode: 'pessimistic_read' },
+        })
+      : await this.siteAccesses.findOne(options);
     if (!access || !hasSitePermission(actor.platformRole, access, permission))
       throw new ForbiddenException('Недостаточно прав для этого сайта');
     return access;
@@ -583,15 +639,16 @@ export class CmsRevisionsService {
       snapshot: Record<string, unknown>,
     ) => Promise<void>,
   ): Promise<void> {
-    const access = await this.requireSite(
-      siteId,
-      actor,
-      resourceType === 'site_layout_bindings' ||
-        resourceType === 'site_article_list'
-        ? SitePermission.MANAGE_STRUCTURE
-        : SitePermission.PUBLISH_CONTENT,
-    );
     await this.dataSource.transaction(async (db) => {
+      const access = await this.requireSite(
+        siteId,
+        actor,
+        resourceType === 'site_layout_bindings' ||
+          resourceType === 'site_article_list'
+          ? SitePermission.MANAGE_STRUCTURE
+          : SitePermission.PUBLISH_CONTENT,
+        db,
+      );
       const resource = await this.lockedResource(
         db,
         siteId,
@@ -609,6 +666,30 @@ export class CmsRevisionsService {
         where: { id: revisionId, resourceId: resource.id },
       });
       if (!revision) throw new NotFoundException('Версия не найдена');
+      const published = resource.publishedRevisionId
+        ? await db.findOne(CmsRevisionEntity, {
+            where: {
+              id: resource.publishedRevisionId,
+              resourceId: resource.id,
+            },
+          })
+        : null;
+      if (
+        published &&
+        this.changesTemplateAssignment(
+          resourceType,
+          revision.snapshot,
+          published.snapshot,
+        ) &&
+        !hasSitePermission(
+          actor.platformRole,
+          access,
+          SitePermission.MANAGE_STRUCTURE,
+        )
+      )
+        throw new ForbiddenException(
+          'Недостаточно прав для публикации структурных изменений',
+        );
       if (activate) await activate(db, revision.snapshot);
       Object.assign(resource, next);
       await db.save(resource);

@@ -27,6 +27,7 @@ import { CreationAiService } from './creation-ai.service';
 import type { CreationProvider } from './creation-ai.service';
 import { CreationPublicationService } from './creation-publication.service';
 import { CmsRevisionsService } from '../content/cms-revisions.service';
+import { SitePermission } from '../content/content.permissions';
 import type { ClusterDto } from './creation.dto';
 import type {
   CreatedArticle,
@@ -56,6 +57,7 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       service: CreationService,
       runs: CreationRunsService,
       publication: CreationPublicationService;
+    let publicationRevisions: CmsRevisionsService;
     const produce = jest.fn<
       ReturnType<CreationProvider['produce']>,
       Parameters<CreationProvider['produce']>
@@ -166,14 +168,15 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
         db.getRepository(SiteContentTemplateEntity),
         db.getRepository(ArticleSectionSettingsEntity),
       );
+      publicationRevisions = new CmsRevisionsService(
+        db,
+        db.getRepository(SiteEntity),
+        db.getRepository(SiteAccessEntity),
+      );
       publication = new CreationPublicationService(
         service,
         lifecycle,
-        new CmsRevisionsService(
-          db,
-          db.getRepository(SiteEntity),
-          db.getRepository(SiteAccessEntity),
-        ),
+        publicationRevisions,
       );
     });
     afterAll(async () => {
@@ -325,6 +328,84 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       );
     });
 
+    it('reports direct publication capability per available site', async () => {
+      const { article } = await create();
+      await service.saveSettings(workspace, actor, {
+        revision: 1,
+        rules: 'Rules',
+        platforms: [
+          { siteId: site, rules: '' },
+          { siteId: site2, rules: '' },
+        ],
+      });
+      await db.query(
+        'UPDATE site_accesses SET requires_approval=(site_id=$2) WHERE user_id=$1',
+        [managerActor.userId, site],
+      );
+      try {
+        const details = await service.details(
+          workspace,
+          managerActor,
+          article.id,
+        );
+        expect(details.canPublishDirectly).toBe(false);
+        expect(details.sites).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: site, canPublishDirectly: false }),
+            expect.objectContaining({ id: site2, canPublishDirectly: true }),
+          ]),
+        );
+      } finally {
+        await db.query(
+          'UPDATE site_accesses SET requires_approval=false WHERE user_id=$1',
+          [managerActor.userId],
+        );
+      }
+    });
+    it('publishes concurrent site-updating resources without a site-row lock deadlock', async () => {
+      const admin = {
+        userId: randomUUID(),
+        platformRole: PlatformRole.WISPO_ADMIN,
+      };
+      const entityIds = [randomUUID(), randomUUID()];
+      const drafts = await Promise.all(
+        entityIds.map((entityId, index) =>
+          publicationRevisions.saveDraft({
+            siteId: site,
+            resourceType: 'site_variable',
+            entityId,
+            snapshot: { identifier: `concurrent-${index}`, value: index },
+            expectedDraftRevisionId: null,
+            actor: admin,
+          }),
+        ),
+      );
+      let arrived = 0;
+      let release!: () => void;
+      const bothCallbacksReady = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      await Promise.all(
+        drafts.map((draft, index) =>
+          publicationRevisions.publish(
+            site,
+            'site_variable',
+            entityIds[index],
+            draft.id,
+            admin,
+            async (manager) => {
+              arrived += 1;
+              if (arrived === drafts.length) release();
+              await bothCallbacksReady;
+              await manager.query('UPDATE sites SET name=name WHERE id=$1', [
+                site,
+              ]);
+            },
+          ),
+        ),
+      );
+    });
     it('ignores a content manager template override on initial publication', async () => {
       const { article } = await create();
       await publication.publish(workspace, managerActor, article.id, {
@@ -397,6 +478,73 @@ const url = process.env.CONTENT_CENTER_TEST_DATABASE_URL;
       });
     });
 
+    it('requires publication permission on the source before moving a published article', async () => {
+      const { article } = await create();
+      await service.saveSettings(workspace, actor, {
+        revision: 1,
+        rules: 'Rules',
+        platforms: [
+          { siteId: site, rules: '' },
+          { siteId: site2, rules: '' },
+        ],
+      });
+      await publication.publish(
+        workspace,
+        managerActor,
+        article.id,
+        publishDto(1),
+      );
+      const current = await service.article(workspace, article.id);
+      await db.query(
+        'UPDATE site_accesses SET requires_approval=true WHERE user_id=$1 AND site_id=$2',
+        [managerActor.userId, site],
+      );
+      const accessRows = await db.query<
+        Array<{ siteId: string; requiresApproval: boolean }>
+      >(
+        'SELECT site_id AS "siteId",requires_approval AS "requiresApproval" FROM site_accesses WHERE user_id=$1',
+        [managerActor.userId],
+      );
+      expect(accessRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ siteId: site, requiresApproval: true }),
+          expect.objectContaining({ siteId: site2, requiresApproval: false }),
+        ]),
+      );
+      const permissionSpy = jest.spyOn(
+        publicationRevisions,
+        'assertSitePermission',
+      );
+      try {
+        await expect(
+          publication.publish(workspace, managerActor, article.id, {
+            ...publishDto(current.revision),
+            siteId: site2,
+            categoryId: category2,
+            slug: 'permission-checked-move',
+            confirmMove: true,
+          }),
+        ).rejects.toThrow('прав');
+        expect(permissionSpy).toHaveBeenCalledWith(
+          site,
+          managerActor,
+          SitePermission.PUBLISH_CONTENT,
+        );
+        expect(await service.article(workspace, article.id)).toMatchObject({
+          site_id: site,
+          status: 'published',
+        });
+        expect(
+          await db.getRepository(ArticleEntity).countBy({ siteId: site2 }),
+        ).toBe(0);
+      } finally {
+        permissionSpy.mockRestore();
+        await db.query(
+          'UPDATE site_accesses SET requires_approval=false WHERE user_id=$1 AND site_id=$2',
+          [managerActor.userId, site],
+        );
+      }
+    });
     it('keeps explicit active template selection for a site owner', async () => {
       const { article } = await create();
       const details = await service.details(workspace, actor, article.id);

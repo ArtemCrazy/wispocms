@@ -235,10 +235,6 @@ export class SiteResourceRevisionsService {
     revisionId: string,
     actor: RevisionActor,
   ) {
-    const publishedSnapshot =
-      resourceType === 'site_privacy' || resourceType === 'site_not_found'
-        ? await this.adapters.publishedSnapshot(siteId, resourceType)
-        : null;
     await this.revisions.publish(
       siteId,
       resourceType,
@@ -246,19 +242,6 @@ export class SiteResourceRevisionsService {
       revisionId,
       actor,
       async (manager, snapshot) => {
-        if (
-          publishedSnapshot &&
-          siteResourceStructureChanged(
-            resourceType,
-            snapshot,
-            publishedSnapshot,
-          )
-        )
-          await this.revisions.assertSitePermission(
-            siteId,
-            actor,
-            SitePermission.MANAGE_STRUCTURE,
-          );
         await this.adapters.activate(manager, siteId, resourceType, snapshot);
       },
     );
