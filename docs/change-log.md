@@ -69,6 +69,20 @@
   Коммит Task 2: `09a41105`. Схема БД, данные, формат уже сохраняемых значений,
   миграции, Skinova manifest, production wiring и общая БД не менялись. Push,
   merge и выкладка не выполнялись.
+- Task 3 Phase 1 завершён локально: добавлены fail-closed path-aware validator
+  manifest v2 и characterization-тест границы релиза. Validator до semantic
+  validation создаёт безопасную копию только из собственных data-descriptors,
+  отклоняет proxy/accessor/symbol, нестандартные prototypes, циклы, разреженные
+  массивы и превышение входных лимитов; затем проверяет закрытые ключи,
+  каталоги, ссылки, дубли и complexity budgets. Derived schema/digest считаются
+  сервером; корректный по форме, но несовпадающий digest возвращает HTTP 409.
+- TDD Task 3: RED — оба suite не находили модуль validator; GREEN — 4 suite /
+  29 tests для Tasks 1–3. Отдельно прошли API production build, ESLint,
+  Prettier и `git diff --check`; spec review — compliant, security/code-quality
+  review — approved. Коммит Task 3: `678d059`. Production validator/DTO,
+  рабочая Skinova и release CLI остались на manifest v1. Схема БД, данные,
+  формат сохраняемых значений, миграции, общая БД, VDS, push, merge и выкладка
+  не затрагивались.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
