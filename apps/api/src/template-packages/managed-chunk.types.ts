@@ -50,15 +50,7 @@ export type ManagedChunkFieldBase = {
 };
 
 export type ManagedChunkTextField = ManagedChunkFieldBase & {
-  widget: 'text';
-  constraints?: {
-    minLength?: number;
-    maxLength?: number;
-  };
-};
-
-export type ManagedChunkTextareaField = ManagedChunkFieldBase & {
-  widget: 'textarea';
+  widget: 'text' | 'textarea';
   constraints?: {
     minLength?: number;
     maxLength?: number;
@@ -127,13 +119,14 @@ export type ManagedChunkGroupField = ManagedChunkFieldBase & {
 export type ManagedChunkRepeaterField = ManagedChunkFieldBase & {
   widget: 'repeater';
   fields: ManagedChunkField[];
-  minItems?: number;
-  maxItems?: number;
+  constraints?: {
+    minItems?: number;
+    maxItems?: number;
+  };
 };
 
 export type ManagedChunkField =
   | ManagedChunkTextField
-  | ManagedChunkTextareaField
   | ManagedChunkHtmlField
   | ManagedChunkNumberField
   | ManagedChunkBooleanField
@@ -166,7 +159,7 @@ export type ManagedChunkReference = {
   schemaVersion: string;
 };
 
-export type TemplatePackageSlotV2 = {
+export type ManagedChunkSlot = {
   key: string;
   title: string;
   placement: string;
@@ -178,7 +171,7 @@ export type TemplatePackageTemplateV2 = Omit<
   TemplatePackageTemplate,
   'slots'
 > & {
-  slots?: TemplatePackageSlotV2[];
+  slots?: ManagedChunkSlot[];
 };
 
 export type TemplatePackageManifestV2 = Omit<
