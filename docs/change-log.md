@@ -46,7 +46,15 @@
   `platform-default` sentinel; присланный несовпадающий digest планируется как
   `ConflictException`/HTTP 409. Это по-прежнему документация: DB-backed lookup,
   runtime attestation и production preflight wiring отложены.
-- Изменённые файлы текущего документационного этапа: эта существующая запись
+- Task 1 Phase 1 завершён локально: добавлены только
+  `managed-chunk.types.ts`, его Jest-spec и синтетический v2 fixture. Production
+  alias/validator/DTO/service, реальный Skinova manifest, баннеры и БД не
+  менялись. TDD RED подтверждён отсутствующим модулем, затем отдельными
+  compile-time ошибками exact type contract; GREEN — Jest 1 suite / 2 tests,
+  точечный TypeScript compile, ESLint, Prettier и `git diff --check` прошли.
+  Spec review — compliant; code-quality review — approved после форматирования.
+  Коммиты Task 1: `05c0564`, `0779851`, `e3c2d58`. Push, merge и выкладка не
+  выполнялись.- Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
   данные и формат сохраняемых значений не менялись; миграции/backfill/ручные
