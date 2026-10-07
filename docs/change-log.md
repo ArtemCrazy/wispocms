@@ -55,6 +55,20 @@
   Spec review — compliant; code-quality review — approved после форматирования.
   Коммиты Task 1: `05c0564`, `0779851`, `e3c2d58`. Push, merge и выкладка не
   выполнялись.
+- Task 2 Phase 1 завершён локально: добавлены только
+  `managed-chunk-schema.ts` и его Jest-spec. Реализованы закрытая JSON Schema
+  draft-07 для всех разрешённых widgets и стабильный SHA-256 digest
+  семантического контракта; подписи, порядок полей и другие presentation-данные
+  digest не меняют. Отсутствующие каталоги протоколов, targets и iframe-provider
+  фиксируются sentinel `platform-default`, явно переданные каталоги — как
+  `explicit`.
+- TDD Task 2: первый RED — отсутствие модуля; второй RED — отсутствие функций
+  canonicalization/digest. GREEN — Jest 1 suite / 6 tests; отдельно прошли
+  production build API, точечные TypeScript-check, ESLint, Prettier и
+  `git diff --check`. Spec review — compliant; code-quality review — approved.
+  Коммит Task 2: `09a41105`. Схема БД, данные, формат уже сохраняемых значений,
+  миграции, Skinova manifest, production wiring и общая БД не менялись. Push,
+  merge и выкладка не выполнялись.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
