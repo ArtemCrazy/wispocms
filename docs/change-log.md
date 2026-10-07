@@ -96,6 +96,19 @@
   review — approved. Коммит Task 4: `0f8a9e1`. Production wiring, БД, схема,
   данные, формат сохраняемых значений, миграции, Skinova manifest, release CLI,
   VDS, push, merge и выкладка не затрагивались.
+- Task 5 Phase 1 завершён локально: добавлен trusted frontend runtime catalog,
+  который связывает rendererKey только с собственной data-property явно
+  переданного build-side bindings-объекта и разрешает frozen реализацию по
+  точной package/version/definition/schema identity. Коллизионные identities,
+  дубли, отсутствующие, inherited, accessor и nullish bindings отклоняются;
+  getter не исполняется. Dynamic imports, пути из manifest и network отсутствуют.
+- TDD Task 5: RED — отсутствовал runtime catalog module; GREEN — новый suite
+  7/7, вместе с существующим template runtime — 12/12. Web TypeScript, ESLint,
+  Prettier и `git diff --check` прошли; spec review — compliant, React/Next
+  security/code-quality review — approved после fail-closed nullish fix.
+  Коммиты Task 5: `78edd75`, `e72bf30`. Production wiring, существующий runtime
+  catalog, реальная Skinova, БД, схема/данные/формат, миграции, VDS, push, merge
+  и выкладка не затрагивались.
 - Изменённые файлы текущего документационного этапа: эта существующая запись
   журнала, design-spec и implementation plan выше. Документационные коммиты
   спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
