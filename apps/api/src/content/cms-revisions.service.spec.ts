@@ -253,6 +253,49 @@ describe('CMS revision storage', () => {
     );
   });
 
+  it('locks managed write access before any site target lookup', async () => {
+    const { service, db, sites, siteAccesses } = setup();
+
+    await service.authorizeManagedWriteUsingManager(db as never, {
+      siteId: 'site-1',
+      resourceType: 'chunk_layout',
+      actor: manager,
+    });
+
+    expect(sites.findOne).not.toHaveBeenCalled();
+    expect(siteAccesses.findOne).not.toHaveBeenCalled();
+    expect(db.findOne.mock.calls).toEqual([
+      [
+        SiteAccessEntity,
+        expect.objectContaining({
+          where: { userId: manager.userId, siteId: 'site-1' },
+          lock: { mode: 'pessimistic_read' },
+        }),
+      ],
+    ]);
+  });
+
+  it('denies a managed write before any site target lookup', async () => {
+    const { service, db } = setup();
+
+    await expect(
+      service.authorizeManagedWriteUsingManager(db as never, {
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        actor: outsider,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(db.findOne.mock.calls).toEqual([
+      [
+        SiteAccessEntity,
+        expect.objectContaining({
+          where: { userId: outsider.userId, siteId: 'site-1' },
+          lock: { mode: 'pessimistic_read' },
+        }),
+      ],
+    ]);
+  });
   it('runs the mandatory managed revision hook after revision persistence and before pointer/event persistence', async () => {
     const { service, db, operations, sites, siteAccesses } = setup();
     const hook = jest.fn(

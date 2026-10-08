@@ -357,12 +357,7 @@ function createInstanceHarness(options?: {
                   entity: 'site',
                   lock: query.lock ?? null,
                 });
-                const siteLookupNumber = lookupOperations.filter(
-                  (operation) => operation.entity === 'site',
-                ).length;
-                const siteVisible =
-                  !options?.siteDisappearsAfterAuthorization ||
-                  siteLookupNumber === 1;
+                const siteVisible = !options?.siteDisappearsAfterAuthorization;
                 return Promise.resolve(
                   query.where.id === SITE_ID && siteVisible
                     ? {
@@ -1182,7 +1177,6 @@ describe('ManagedChunkPersistenceRepository', () => {
       expect(harness.state.events).toHaveLength(1);
       expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(harness.lookupOperations).toEqual([
-        { entity: 'site', lock: null },
         { entity: 'access', lock: { mode: 'pessimistic_read' } },
         { entity: 'resource', lock: { mode: 'pessimistic_write' } },
         { entity: 'site', lock: { mode: 'pessimistic_read' } },
@@ -1240,6 +1234,9 @@ describe('ManagedChunkPersistenceRepository', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
 
       expect(harness.contractLookups).toEqual([]);
+      expect(harness.lookupOperations).toEqual([
+        { entity: 'access', lock: { mode: 'pessimistic_read' } },
+      ]);
       expect(harness.state).toEqual({
         resources: [],
         revisions: [],
@@ -1441,7 +1438,12 @@ describe('ManagedChunkPersistenceRepository', () => {
       ]);
       expect(harness.state.events).toHaveLength(1);
       expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
-      expect(harness.lookupOperations.slice(0, 3)).toEqual([
+      expect(harness.lookupOperations.slice(0, 4)).toEqual([
+        {
+          entity: 'access',
+          where: { userId: ACTOR.userId, siteId: SITE_ID },
+          lock: { mode: 'pessimistic_read' },
+        },
         {
           entity: 'site',
           where: { id: SITE_ID },
@@ -1562,6 +1564,16 @@ describe('ManagedChunkPersistenceRepository', () => {
         ],
       ],
       [
+        'PostgreSQL int32 overflow positions',
+        [
+          {
+            slotKey: 'hero',
+            position: 2_147_483_648,
+            instanceId: HERO_INSTANCE_ID,
+          },
+        ],
+      ],
+      [
         'unsafe integer positions',
         [
           {
@@ -1586,6 +1598,24 @@ describe('ManagedChunkPersistenceRepository', () => {
         placements: [],
         events: [],
       });
+    });
+
+    it('accepts the PostgreSQL int32 maximum position', async () => {
+      const harness = createLayoutHarness();
+
+      await savePageLayout(harness.repository, {
+        placements: [
+          {
+            slotKey: 'hero',
+            position: 2_147_483_647,
+            instanceId: HERO_INSTANCE_ID,
+          },
+        ],
+      });
+
+      expect(harness.state.placements).toEqual([
+        expect.objectContaining({ position: 2_147_483_647 }),
+      ]);
     });
 
     it.each([
@@ -1727,6 +1757,13 @@ describe('ManagedChunkPersistenceRepository', () => {
         ForbiddenException,
       );
 
+      expect(harness.lookupOperations).toEqual([
+        {
+          entity: 'access',
+          where: { userId: ACTOR.userId, siteId: SITE_ID },
+          lock: { mode: 'pessimistic_read' },
+        },
+      ]);
       expect(harness.state).toEqual({
         resources: [],
         revisions: [],

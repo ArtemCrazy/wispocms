@@ -208,6 +208,38 @@ export class CmsRevisionsService {
     return this.requireSite(siteId, actor, permission);
   }
 
+  async authorizeManagedWriteUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      actor: RevisionActor;
+    },
+  ): Promise<void> {
+    this.assertManagedResourceType(input.resourceType);
+    if (input.actor.platformRole === PlatformRole.WISPO_ADMIN) return;
+    // Match access reassignment order: never hold a site/target lock while
+    // waiting for the actor's access row.
+    const access = await db.findOne(SiteAccessEntity, {
+      select: {
+        role: true,
+        requiresApproval: true,
+      },
+      where: { userId: input.actor.userId, siteId: input.siteId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (
+      !access ||
+      !hasSitePermission(
+        input.actor.platformRole,
+        access,
+        this.permission(input.resourceType),
+      )
+    ) {
+      throw new ForbiddenException('Недостаточно прав для этого сайта');
+    }
+  }
+
   private async lockedResource(
     db: EntityManager,
     siteId: string,
@@ -376,12 +408,11 @@ export class CmsRevisionsService {
         'Управляемый ресурс требует revision-created hook',
       );
     }
-    await this.requireSite(
-      input.siteId,
-      input.actor,
-      this.permission(input.resourceType),
-      db,
-    );
+    await this.authorizeManagedWriteUsingManager(db, {
+      siteId: input.siteId,
+      resourceType: input.resourceType,
+      actor: input.actor,
+    });
     return this.saveDraftInTransaction(
       db,
       input,

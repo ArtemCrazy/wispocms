@@ -125,9 +125,13 @@ export class ManagedChunkPersistenceRepository {
         position: placement.position,
         instanceId: String(placement.instanceId),
       };
-      if (!Number.isSafeInteger(cloned.position) || cloned.position < 0) {
+      if (
+        !Number.isInteger(cloned.position) ||
+        cloned.position < 0 ||
+        cloned.position > 2_147_483_647
+      ) {
         throw new BadRequestException(
-          'Позиция чанка должна быть безопасным неотрицательным целым числом',
+          'Позиция чанка должна быть целым числом от 0 до 2147483647',
         );
       }
       const positionKey = JSON.stringify([cloned.slotKey, cloned.position]);
@@ -141,6 +145,11 @@ export class ManagedChunkPersistenceRepository {
     });
 
     return this.dataSource.transaction(async (db) => {
+      await this.revisions.authorizeManagedWriteUsingManager(db, {
+        siteId,
+        resourceType: 'chunk_layout',
+        actor,
+      });
       const site = await db.findOne(SiteEntity, {
         where: { id: siteId },
         lock: { mode: 'pessimistic_write' },

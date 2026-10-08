@@ -528,12 +528,28 @@ definitions в противоположном caller order (`[A, B]` и `[B, A]`
 
 Layout same-target creation acceptance использует два независимых соединения
 для каждой target-формы (`page` и `site_surface`). Обе операции одновременно
-вызывают `saveLayoutDraft` для одного target при ещё отсутствующей layout
-identity. Проверка подтверждает блокировку второй операции на target lock,
-завершение обеих без unique violation или PostgreSQL `40P01`, одну стабильную
-строку `managed_chunk_layouts`, один `chunk_layout` resource и две полные
-ревизии со своими placement sets; ни одна операция не оставляет orphan или
-частичный набор строк.
+вызывают initial `saveLayoutDraft` с `expectedDraftRevisionId: null` для одного
+ещё отсутствующего target. Ровно одна операция создаёт version 1, а вторая после
+ожидания target lock получает `Conflict`, без unique violation или PostgreSQL
+`40P01`. Затем loser повторяет save с revision id победителя и создаёт version 2.
+Итог: одна стабильная строка `managed_chunk_layouts`, один `chunk_layout`
+resource, две полные revision со своими placement sets и ни одной orphan или
+частичной строки.
+
+Access-reassignment race acceptance использует ещё два независимых соединения:
+
+1. transaction A удаляет/блокирует `site_accesses` пользователя в штатном
+   assignment flow и перед commit вставляет новый набор доступов, для чего FK
+   получает key-share lock строки `sites`;
+2. transaction B начинает managed instance/layout write и подтверждённо
+   блокируется на manager-bound `SiteAccess FOR SHARE`, не удерживая lock
+   `sites`, page или layout target;
+3. A завершается без deadlock, затем B перечитывает актуальный access: продолжает
+   только при сохранённом разрешении либо получает `Forbidden` до target lookup
+   и любых resource/revision/typed rows.
+
+Проверка требует отсутствия PostgreSQL `40P01`, orphan/partial rows и порядка
+Access→Site для обоих managed repository paths.
 
 Package-activation race acceptance использует ещё два независимых соединения:
 

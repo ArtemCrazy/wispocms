@@ -2936,22 +2936,30 @@
   транзакцией создаёт или переиспользует стабильную identity page/site-surface
   layout, сохраняет metadata-only CMS revision и полный immutable placements
   set этой версии, включая пустой набор. Частичного placement API нет.
-- Конкурентность и tenant safety: site/page/layout/instance читаются и
-  блокируются через transaction manager в детерминированном порядке; page и
-  каждый instance проверяются в том же site. Реальный двухсоединенческий тест
-  одновременного создания одного target добавлен в план Task 7.
-- Изменено: `apps/api/src/template-packages/managed-chunk-persistence.repository.ts`,
+- Конкурентность и tenant safety: manager-bound authorization сначала блокирует
+  `SiteAccess`, и только затем repository читает/блокирует site/page/layout;
+  denial останавливается до target lookup. Instance workflow использует тот же
+  typed boundary. Page и каждый instance проверяются в том же site.
+- Позиции placements валидируются до transaction как PostgreSQL `integer`:
+  допустимы только целые значения `0..2147483647`.
+- План Task 7 исправлен: concurrent initial same-target save даёт ровно один
+  success и один `Conflict`, затем loser retry создаёт version 2; также добавлен
+  двухсоединенческий access-reassignment regression без Site→Access deadlock.
+- Изменено: `apps/api/src/content/cms-revisions.service.ts` и его spec,
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
   его spec, `docs/superpowers/plans/2026-10-07-managed-chunks-persistence-phase2.md`
   и эта запись журнала.
 - БД — схема: не менялась. Новых или отредактированных миграций нет.
 - БД — данные и формат: существующие данные не менялись. Layout snapshot имеет
   только `{ formatVersion, templateKey, templateVersion }`; placements остаются
   нормализованными строками точной revision согласно уже принятой схеме.
-- TDD: RED подтверждён ошибкой `saveLayoutDraft is not a function` при 28
-  прошедших прежних тестах; GREEN — repository suite 45/45. Regression:
-  repository + revision service 76/76; API `nest build`; адресный ESLint двух
-  изменённых TS-файлов; Prettier и `git diff --check`.
-- Коммит реализации: `feat: persist atomic managed chunk layouts` (эта запись
-  передаётся тем же коммитом).
+- TDD реализации: RED подтверждён ошибкой `saveLayoutDraft is not a function`
+  при 28 прошедших прежних тестах; GREEN — repository suite 45/45.
+- Quality review TDD: RED — 73 прежних теста прошли, 7 упали на отсутствующем
+  access-first boundary, старом lock order и принятом int32 overflow; GREEN —
+  repository + revision service 80/80. Также пройдены API `nest build`, адресный
+  ESLint/Prettier четырёх TS-файлов и `git diff --check`.
+- Коммиты: `4c86116` (`feat: persist atomic managed chunk layouts`) и отдельный
+  quality-fix commit этой записи.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, `main`, push/merge и
   deploy не затрагивались.
