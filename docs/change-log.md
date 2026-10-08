@@ -65,6 +65,18 @@
   3 Jest suites / 12 tests, API production build, targeted ESLint, Prettier и
   `git diff --check` прошли. Общая/локальная рабочая БД, Docker, VDS, Registry,
   push, merge и выкладка не затрагивались; изменение не выпущено.
+- Review-fix Task 1: первоначальный migration spec проверял часть DDL только
+  строковыми smoke-assertions. Без изменения production migration/entities
+  добавлены whitespace-insensitive структурные проверки полного legacy resource
+  list, value checks, всех tenant/composite FK и delete actions, unique/partial
+  indexes, immutable/deferred exact-resource triggers, reverse guard, первого
+  pre-drop guard, FK-safe rollback order и точного восстановления прежних
+  checks. Mutation RED подтверждён временной заменой actor FK `SET NULL` на
+  `RESTRICT`: новый тест упал строго на delete action; мутация полностью
+  отменена до commit. Исходный DDL mismatch не выявлен. GREEN после review:
+  3 Jest suites / 15 tests, API production build, targeted ESLint, Prettier и
+  `git diff --check` прошли. БД/Docker/VDS/Registry/push/merge/deploy не
+  затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
