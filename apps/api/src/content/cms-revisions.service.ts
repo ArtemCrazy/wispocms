@@ -13,6 +13,10 @@ import {
   CmsRevisionEntity,
   CmsRevisionEventEntity,
   CmsRevisionResourceEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
+  ManagedChunkLayoutEntity,
+  ManagedChunkPlacementEntity,
   PlatformRole,
   SiteAccessEntity,
   SiteRole,
@@ -75,6 +79,12 @@ export type ManagedRevisionLifecyclePrepare = (
 export type ManagedRevisionRestorePrepare = (
   db: EntityManager,
 ) => Promise<ManagedRevisionLifecycleContext>;
+
+type VerifiedManagedRevision = ManagedRevisionLifecycleContext &
+  (
+    | { kind: 'instance'; contractId: string }
+    | { kind: 'layout'; placementSet: string[] }
+  );
 
 @Injectable()
 export class CmsRevisionsService {
@@ -481,6 +491,16 @@ export class CmsRevisionsService {
     );
     return { id: revision.id, versionNumber: revision.versionNumber };
   }
+  private managedLifecycleNotFound(): never {
+    throw new NotFoundException('Версия управляемого ресурса не найдена');
+  }
+
+  private managedRestoreConflict(): never {
+    throw new ConflictException(
+      'Восстановленная managed-версия не совпадает с исходной',
+    );
+  }
+
   private assertManagedLifecycleContext(
     input: {
       siteId: string;
@@ -488,16 +508,212 @@ export class CmsRevisionsService {
       entityId: string;
       revisionId: string;
     },
-    context: ManagedRevisionLifecycleContext,
-  ): void {
+    context: unknown,
+  ): asserts context is ManagedRevisionLifecycleContext {
+    if (!context || typeof context !== 'object') {
+      this.managedLifecycleNotFound();
+    }
+    const candidate = context as Partial<ManagedRevisionLifecycleContext>;
     if (
-      context.resource.siteId !== input.siteId ||
-      context.resource.resourceType !== input.resourceType ||
-      context.resource.entityId !== input.entityId ||
-      context.revision.id !== input.revisionId ||
-      context.revision.resourceId !== context.resource.id
+      !candidate.resource ||
+      typeof candidate.resource !== 'object' ||
+      !candidate.revision ||
+      typeof candidate.revision !== 'object' ||
+      candidate.resource.siteId !== input.siteId ||
+      candidate.resource.resourceType !== input.resourceType ||
+      candidate.resource.entityId !== input.entityId ||
+      candidate.revision.id !== input.revisionId ||
+      candidate.revision.resourceId !== candidate.resource.id
     ) {
-      throw new NotFoundException('Версия управляемого ресурса не найдена');
+      this.managedLifecycleNotFound();
+    }
+  }
+
+  private placementSet(
+    placements: readonly ManagedChunkPlacementEntity[],
+  ): string[] {
+    return placements
+      .map((placement) =>
+        JSON.stringify([
+          placement.instanceId,
+          placement.slotKey,
+          placement.position,
+        ]),
+      )
+      .sort();
+  }
+
+  private async verifyManagedRevisionUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      revisionId: string;
+    },
+    prepared: unknown,
+  ): Promise<VerifiedManagedRevision> {
+    this.assertManagedLifecycleContext(input, prepared);
+    const site = await db.findOne(SiteEntity, {
+      where: { id: input.siteId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!site) this.managedLifecycleNotFound();
+
+    if (input.resourceType === 'chunk_instance') {
+      const instance = await db.findOne(ManagedChunkInstanceEntity, {
+        where: { id: input.entityId, siteId: input.siteId },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (!instance) this.managedLifecycleNotFound();
+      const resource = await db.findOne(CmsRevisionResourceEntity, {
+        where: {
+          id: instance.revisionResourceId,
+          siteId: input.siteId,
+          resourceType: input.resourceType,
+          entityId: input.entityId,
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!resource) this.managedLifecycleNotFound();
+      const revision = await db.findOne(CmsRevisionEntity, {
+        where: { id: input.revisionId, resourceId: resource.id },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (!revision) this.managedLifecycleNotFound();
+      const link = await db.findOne(ManagedChunkInstanceRevisionEntity, {
+        where: {
+          revisionId: input.revisionId,
+          revisionResourceId: resource.id,
+          siteId: input.siteId,
+          instanceId: input.entityId,
+        },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (
+        !link ||
+        prepared.resource.id !== resource.id ||
+        prepared.revision.id !== revision.id
+      ) {
+        this.managedLifecycleNotFound();
+      }
+      return {
+        resource,
+        revision,
+        kind: 'instance',
+        contractId: link.contractId,
+      };
+    }
+
+    const layout = await db.findOne(ManagedChunkLayoutEntity, {
+      where: { id: input.entityId, siteId: input.siteId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!layout) this.managedLifecycleNotFound();
+    const resource = await db.findOne(CmsRevisionResourceEntity, {
+      where: {
+        id: layout.revisionResourceId,
+        siteId: input.siteId,
+        resourceType: input.resourceType,
+        entityId: input.entityId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!resource) this.managedLifecycleNotFound();
+    const revision = await db.findOne(CmsRevisionEntity, {
+      where: { id: input.revisionId, resourceId: resource.id },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!revision) this.managedLifecycleNotFound();
+    if (
+      prepared.resource.id !== resource.id ||
+      prepared.revision.id !== revision.id
+    ) {
+      this.managedLifecycleNotFound();
+    }
+    const placements = await db.find(ManagedChunkPlacementEntity, {
+      where: { layoutRevisionId: input.revisionId },
+    });
+    const instanceIds = new Set<string>();
+    for (const placement of placements) {
+      if (
+        placement.siteId !== input.siteId ||
+        placement.layoutId !== input.entityId ||
+        placement.layoutRevisionResourceId !== resource.id ||
+        placement.layoutRevisionId !== input.revisionId
+      ) {
+        this.managedLifecycleNotFound();
+      }
+      instanceIds.add(placement.instanceId);
+    }
+    for (const instanceId of [...instanceIds].sort()) {
+      const instance = await db.findOne(ManagedChunkInstanceEntity, {
+        where: { id: instanceId, siteId: input.siteId },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (!instance) this.managedLifecycleNotFound();
+    }
+    return {
+      resource,
+      revision,
+      kind: 'layout',
+      placementSet: this.placementSet(placements),
+    };
+  }
+
+  private async verifyManagedRestoreCopyUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+    },
+    resource: CmsRevisionResourceEntity,
+    revision: CmsRevisionEntity,
+    source: VerifiedManagedRevision,
+  ): Promise<void> {
+    if (source.kind === 'instance') {
+      const link = await db.findOne(ManagedChunkInstanceRevisionEntity, {
+        where: {
+          revisionId: revision.id,
+          revisionResourceId: resource.id,
+          siteId: input.siteId,
+          instanceId: input.entityId,
+        },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (!link || link.contractId !== source.contractId) {
+        this.managedRestoreConflict();
+      }
+      return;
+    }
+
+    const placements = await db.find(ManagedChunkPlacementEntity, {
+      where: { layoutRevisionId: revision.id },
+    });
+    const instanceIds = new Set<string>();
+    for (const placement of placements) {
+      if (
+        placement.siteId !== input.siteId ||
+        placement.layoutId !== input.entityId ||
+        placement.layoutRevisionResourceId !== resource.id ||
+        placement.layoutRevisionId !== revision.id
+      ) {
+        this.managedRestoreConflict();
+      }
+      instanceIds.add(placement.instanceId);
+    }
+    for (const instanceId of [...instanceIds].sort()) {
+      const instance = await db.findOne(ManagedChunkInstanceEntity, {
+        where: { id: instanceId, siteId: input.siteId },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (!instance) this.managedRestoreConflict();
+    }
+    if (
+      !isDeepStrictEqual(this.placementSet(placements), source.placementSet)
+    ) {
+      this.managedRestoreConflict();
     }
   }
 
@@ -528,15 +744,16 @@ export class CmsRevisionsService {
       input,
       this.permission(input.resourceType),
     );
-    const context = await prepare(db);
-    this.assertManagedLifecycleContext(
+    const prepared = await prepare(db);
+    const context = await this.verifyManagedRevisionUsingManager(
+      db,
       {
         siteId: input.siteId,
         resourceType: input.resourceType,
         entityId: input.entityId,
         revisionId: input.sourceRevisionId,
       },
-      context,
+      prepared,
     );
 
     const revisionId = randomUUID();
@@ -554,6 +771,13 @@ export class CmsRevisionsService {
     });
     await db.save(restored);
     await revisionCreatedHook(db, restored, context.resource);
+    await this.verifyManagedRestoreCopyUsingManager(
+      db,
+      input,
+      context.resource,
+      restored,
+      context,
+    );
     Object.assign(context.resource, next, {
       latestVersionNumber: restored.versionNumber,
     });
@@ -591,8 +815,12 @@ export class CmsRevisionsService {
       input,
       SitePermission.APPROVE,
     );
-    const context = await prepare(db);
-    this.assertManagedLifecycleContext(input, context);
+    const prepared = await prepare(db);
+    const context = await this.verifyManagedRevisionUsingManager(
+      db,
+      input,
+      prepared,
+    );
     Object.assign(
       context.resource,
       approveRevision(this.pointers(context.resource), input.revisionId),
@@ -631,8 +859,12 @@ export class CmsRevisionsService {
         ? SitePermission.MANAGE_STRUCTURE
         : SitePermission.PUBLISH_CONTENT,
     );
-    const context = await prepare(db);
-    this.assertManagedLifecycleContext(input, context);
+    const prepared = await prepare(db);
+    const context = await this.verifyManagedRevisionUsingManager(
+      db,
+      input,
+      prepared,
+    );
     const next = publishRevision(
       this.pointers(context.resource),
       input.revisionId,

@@ -551,6 +551,29 @@ Access-reassignment race acceptance использует ещё два неза�
 Проверка требует отсутствия PostgreSQL `40P01`, orphan/partial rows и порядка
 Access→Site для обоих managed repository paths.
 
+Managed lifecycle acceptance использует реальный `CmsRevisionsService` и typed
+repository wrappers на disposable PostgreSQL, а не mock-only callbacks:
+
+1. Для instance revision без exact `managed_chunk_instance_revisions` link и
+   для layout с owner/resource/revision mismatch либо FK-invalid placement
+   approve/publish завершаются безопасной ошибкой. Проверка до и после фиксирует,
+   что draft/approved/published pointers, events, revisions и typed rows не
+   изменились; DB FK failure внутри typed copy также откатывает всю транзакцию.
+2. Restore instance/layout создаёт новую revision только вместе с точной копией
+   source contract link либо полного placement multiset, включая empty set.
+   Инъецированный no-op/wrong-contract/missing/extra/changed placement hook и
+   реальная FK-ошибка copy откатывают новую revision, typed rows, pointer и event.
+3. Два независимых соединения одновременно approve, затем publish одну и ту же
+   revision. `cms_revision_resources FOR UPDATE` сериализует операции; suite
+   фиксирует ровно один допустимый pointer transition/event, а loser получает
+   штатный `Conflict` без duplicate event или частичных записей.
+4. Для instance и layout отдельно проверяется фактический lock order
+   Access `FOR SHARE` → Site/typed owner `FOR SHARE` → resource `FOR UPDATE` →
+   revision/instance link `FOR SHARE`; immutable placement set читается целиком
+   после resource `FOR UPDATE`, включая
+   restore post-copy verification. Двухсоединенческий сценарий завершается без
+   PostgreSQL `40P01`; statement timeout считается failure, а не skip.
+
 Package-activation race acceptance использует ещё два независимых соединения:
 
 1. transaction A начинает создание instance, выполняет manager-bound проверку

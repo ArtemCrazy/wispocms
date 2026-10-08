@@ -2995,8 +2995,9 @@
   и events одной внешней транзакцией.
 - Изменено: `apps/api/src/content/cms-revisions.service.ts` и spec,
   `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
-  spec, эта запись журнала. План Task 7 не менялся: новых real-DB lifecycle
-  concurrency/constraint случаев сверх уже запланированной приёмки не выявлено.
+  spec, Task 7 plan и эта запись журнала. Task 7 теперь явно проверяет lifecycle
+  FK/typed rollback, same-revision concurrency, restore copy atomicity и
+  двухсоединенческий lock/deadlock contract на disposable PostgreSQL.
 - БД — схема: не менялась. Новых или отредактированных миграций/entity нет.
 - БД — данные и формат: существующие данные не менялись; формат snapshot,
   contract link и placement rows сохранён. Проверки использовали только
@@ -3008,5 +3009,20 @@
 - GREEN/регрессия: targeted revision service/repository/workflow — 120/120;
   API `nest build`, адресные ESLint и Prettier прошли. Финальный commit:
   `feat: guard managed chunk revision lifecycle` (этот commit).
+- Quality review fix: сервис больше не доверяет generic callback context. После
+  prepare он сам перечитывает canonical Site → typed owner → resource → revision
+  → link/placements и изменяет только canonical resource. После restore hook до
+  pointer/event он проверяет exact contract ID или полный placement multiset;
+  malformed context нормализуется без raw `TypeError`.
+- Review TDD RED: 44 прежних service-теста прошли, 11 упали на fail-open
+  fake/malformed context и no-op/wrong restore copy. GREEN — service 55/55.
+  Отдельный lock-harness RED: 67 прежних repository-тестов прошли, 6 упали,
+  потому что harness терял lock modes; GREEN — repository 73/73 с точным
+  Access→Site→owner→resource→revision→typed rows порядком для approve/publish/
+  restore и post-copy reads.
+- Финальные проверки quality fix: targeted workflow/service/repository 137/137;
+  расширенная Phase 1+2 регрессия 8 suites / 186 tests; API `nest build`,
+  адресные ESLint и Prettier, `git diff --check` прошли. Коммиты Task 5:
+  `ce2ffe6` и последующий quality-fix commit этой записи.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, внешний сервер,
   `main`, push/merge и deploy не затрагивались.

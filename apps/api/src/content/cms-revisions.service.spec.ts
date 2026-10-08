@@ -4,8 +4,15 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import type { EntityManager } from 'typeorm';
 import {
+  CmsRevisionEntity,
+  CmsRevisionEventEntity,
   CmsRevisionResourceEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
+  ManagedChunkLayoutEntity,
+  ManagedChunkPlacementEntity,
   PlatformRole,
   SiteAccessEntity,
   SiteEntity,
@@ -1547,6 +1554,548 @@ describe('CMS revision storage', () => {
       expect(dataSource.transaction).not.toHaveBeenCalled();
       expect(sites.findOne).not.toHaveBeenCalled();
       expect(siteAccesses.findOne).not.toHaveBeenCalled();
+    },
+  );
+});
+
+type FailClosedManagedState = {
+  resources: Record<string, unknown>[];
+  revisions: Record<string, unknown>[];
+  instances: Record<string, unknown>[];
+  links: Record<string, unknown>[];
+  layouts: Record<string, unknown>[];
+  placements: Record<string, unknown>[];
+  events: Record<string, unknown>[];
+};
+
+function createFailClosedManagedHarness() {
+  const siteId = '11111111-aaaa-4111-8111-111111111111';
+  const instanceId = '22222222-aaaa-4222-8222-222222222222';
+  const instanceResourceId = '33333333-aaaa-4333-8333-333333333333';
+  const instanceRevisionId = '44444444-aaaa-4444-8444-444444444444';
+  const contractId = '55555555-aaaa-4555-8555-555555555555';
+  const layoutId = '66666666-aaaa-4666-8666-666666666666';
+  const layoutResourceId = '77777777-aaaa-4777-8777-777777777777';
+  const layoutRevisionId = '88888888-aaaa-4888-8888-888888888888';
+  let committed: FailClosedManagedState = {
+    resources: [
+      {
+        id: instanceResourceId,
+        siteId,
+        resourceType: 'chunk_instance',
+        entityId: instanceId,
+        latestVersionNumber: 1,
+        draftRevisionId: instanceRevisionId,
+        approvedRevisionId: null,
+        publishedRevisionId: null,
+        reviewState: 'draft',
+      },
+      {
+        id: layoutResourceId,
+        siteId,
+        resourceType: 'chunk_layout',
+        entityId: layoutId,
+        latestVersionNumber: 1,
+        draftRevisionId: layoutRevisionId,
+        approvedRevisionId: null,
+        publishedRevisionId: null,
+        reviewState: 'draft',
+      },
+    ],
+    revisions: [
+      {
+        id: instanceRevisionId,
+        resourceId: instanceResourceId,
+        versionNumber: 1,
+        snapshot: {
+          formatVersion: 1,
+          data: { headline: 'Source' },
+          sanitizerPolicyVersion: null,
+        },
+        actorUserId: 'actor-id',
+      },
+      {
+        id: layoutRevisionId,
+        resourceId: layoutResourceId,
+        versionNumber: 1,
+        snapshot: {
+          formatVersion: 1,
+          templateKey: 'skinova-home',
+          templateVersion: '1',
+        },
+        actorUserId: 'actor-id',
+      },
+    ],
+    instances: [
+      {
+        id: instanceId,
+        siteId,
+        revisionResourceId: instanceResourceId,
+        displayName: 'Hero',
+      },
+    ],
+    links: [
+      {
+        revisionId: instanceRevisionId,
+        revisionResourceId: instanceResourceId,
+        siteId,
+        instanceId,
+        contractId,
+      },
+    ],
+    layouts: [
+      {
+        id: layoutId,
+        siteId,
+        revisionResourceId: layoutResourceId,
+        scopeKind: 'page',
+        pageId: '99999999-aaaa-4999-8999-999999999999',
+        surfaceKey: null,
+      },
+    ],
+    placements: [
+      {
+        id: 'aaaaaaaa-bbbb-4aaa-8aaa-aaaaaaaaaaaa',
+        siteId,
+        layoutId,
+        layoutRevisionResourceId: layoutResourceId,
+        layoutRevisionId,
+        instanceId,
+        slotKey: 'hero',
+        position: 0,
+      },
+    ],
+    events: [],
+  };
+  const operations: Array<{
+    operation: 'findOne' | 'find' | 'save';
+    entity: string;
+    lock: string | null;
+  }> = [];
+  const matches = (
+    row: Record<string, unknown>,
+    where: Record<string, unknown>,
+  ) => Object.entries(where).every(([key, value]) => row[key] === value);
+  const dataSource = {
+    transaction: jest.fn(
+      async (
+        callback: (manager: EntityManager) => Promise<unknown>,
+      ): Promise<unknown> => {
+        const working = structuredClone(committed);
+        const manager = {
+          findOne: jest.fn(
+            (
+              entity: unknown,
+              query: {
+                where: Record<string, unknown>;
+                lock?: { mode: string };
+              },
+            ) => {
+              const [label, rows] =
+                entity === SiteEntity
+                  ? ['site', null]
+                  : entity === SiteAccessEntity
+                    ? ['access', null]
+                    : entity === CmsRevisionResourceEntity
+                      ? ['resource', working.resources]
+                      : entity === CmsRevisionEntity
+                        ? ['revision', working.revisions]
+                        : entity === ManagedChunkInstanceEntity
+                          ? ['instance', working.instances]
+                          : entity === ManagedChunkInstanceRevisionEntity
+                            ? ['link', working.links]
+                            : entity === ManagedChunkLayoutEntity
+                              ? ['layout', working.layouts]
+                              : ['unknown', null];
+              operations.push({
+                operation: 'findOne',
+                entity: label,
+                lock: query.lock?.mode ?? null,
+              });
+              if (entity === SiteEntity) {
+                return Promise.resolve(
+                  query.where.id === siteId ? { id: siteId } : null,
+                );
+              }
+              if (entity === SiteAccessEntity) {
+                return Promise.resolve({
+                  role: SiteRole.OWNER,
+                  requiresApproval: false,
+                });
+              }
+              if (!rows) throw new Error('Unexpected managed service lookup');
+              const row = rows.find((candidate) =>
+                matches(candidate, query.where),
+              );
+              if (!row) return Promise.resolve(null);
+              if (entity === CmsRevisionResourceEntity) {
+                return Promise.resolve(
+                  Object.assign(
+                    new CmsRevisionResourceEntity(),
+                    structuredClone(row),
+                  ),
+                );
+              }
+              if (entity === CmsRevisionEntity) {
+                return Promise.resolve(
+                  Object.assign(new CmsRevisionEntity(), structuredClone(row)),
+                );
+              }
+              return Promise.resolve(structuredClone(row));
+            },
+          ),
+          find: jest.fn(
+            (entity: unknown, query: { where: Record<string, unknown> }) => {
+              if (entity !== ManagedChunkPlacementEntity)
+                throw new Error('Unexpected managed service collection lookup');
+              operations.push({
+                operation: 'find',
+                entity: 'placements',
+                lock: null,
+              });
+              return Promise.resolve(
+                working.placements
+                  .filter((row) => matches(row, query.where))
+                  .map((row) => structuredClone(row)),
+              );
+            },
+          ),
+          save: jest.fn((value: object | object[]) => {
+            const values = Array.isArray(value) ? value : [value];
+            for (const item of values) {
+              const [label, rows, identity] =
+                item instanceof CmsRevisionResourceEntity
+                  ? ['resource', working.resources, 'id']
+                  : item instanceof CmsRevisionEntity
+                    ? ['revision', working.revisions, 'id']
+                    : item instanceof ManagedChunkInstanceRevisionEntity
+                      ? ['link', working.links, 'revisionId']
+                      : item instanceof ManagedChunkPlacementEntity
+                        ? ['placement', working.placements, 'id']
+                        : item instanceof CmsRevisionEventEntity
+                          ? ['event', working.events, 'id']
+                          : ['unknown', null, 'id'];
+              operations.push({
+                operation: 'save',
+                entity: label,
+                lock: null,
+              });
+              if (!rows) throw new Error('Unexpected managed service save');
+              const row = structuredClone(item as Record<string, unknown>);
+              const index = rows.findIndex(
+                (candidate) => candidate[identity] === row[identity],
+              );
+              if (index >= 0) rows[index] = row;
+              else rows.push(row);
+            }
+            return Promise.resolve(value);
+          }),
+        } as unknown as EntityManager;
+        const result = await callback(manager);
+        committed = working;
+        return result;
+      },
+    ),
+  };
+  const service = new CmsRevisionsService(
+    dataSource as never,
+    { findOne: jest.fn() } as never,
+    { findOne: jest.fn() } as never,
+  );
+  const admin = {
+    userId: 'admin-id',
+    platformRole: PlatformRole.WISPO_ADMIN,
+  };
+  const context = (resourceId: string, revisionId: string) => {
+    const resource = committed.resources.find((row) => row.id === resourceId)!;
+    const revision = committed.revisions.find((row) => row.id === revisionId)!;
+    return {
+      resource: Object.assign(
+        new CmsRevisionResourceEntity(),
+        structuredClone(resource),
+      ),
+      revision: Object.assign(
+        new CmsRevisionEntity(),
+        structuredClone(revision),
+      ),
+    };
+  };
+  return {
+    service,
+    dataSource,
+    admin,
+    operations,
+    ids: {
+      siteId,
+      instanceId,
+      instanceResourceId,
+      instanceRevisionId,
+      contractId,
+      layoutId,
+      layoutResourceId,
+      layoutRevisionId,
+    },
+    context,
+    get state() {
+      return committed;
+    },
+    snapshot() {
+      return structuredClone(committed);
+    },
+  };
+}
+
+describe('CMS managed lifecycle fail-closed boundary', () => {
+  it.each(['approve', 'publish'] as const)(
+    'rejects a fake matching instance context without its exact typed link during %s',
+    async (operation) => {
+      const harness = createFailClosedManagedHarness();
+      const resource = harness.state.resources[0];
+      if (operation === 'approve') resource.reviewState = 'in_review';
+      harness.state.links.splice(0, 1);
+      const before = harness.snapshot();
+      const input = {
+        siteId: harness.ids.siteId,
+        resourceType: 'chunk_instance' as const,
+        entityId: harness.ids.instanceId,
+        revisionId: harness.ids.instanceRevisionId,
+        actor: harness.admin,
+      };
+
+      await expect(
+        harness.dataSource.transaction((db: EntityManager) =>
+          operation === 'approve'
+            ? harness.service.approveManagedRevisionUsingManager(
+                db,
+                input,
+                () =>
+                  Promise.resolve(
+                    harness.context(
+                      harness.ids.instanceResourceId,
+                      harness.ids.instanceRevisionId,
+                    ),
+                  ),
+              )
+            : harness.service.publishManagedRevisionUsingManager(
+                db,
+                input,
+                () =>
+                  Promise.resolve(
+                    harness.context(
+                      harness.ids.instanceResourceId,
+                      harness.ids.instanceRevisionId,
+                    ),
+                  ),
+              ),
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(harness.state).toEqual(before);
+    },
+  );
+
+  it.each(['approve', 'publish'] as const)(
+    'rejects layout %s when the stable typed owner points at another resource',
+    async (operation) => {
+      const harness = createFailClosedManagedHarness();
+      const resource = harness.state.resources[1];
+      if (operation === 'approve') resource.reviewState = 'in_review';
+      harness.state.layouts[0].revisionResourceId =
+        harness.ids.instanceResourceId;
+      const before = harness.snapshot();
+      const input = {
+        siteId: harness.ids.siteId,
+        resourceType: 'chunk_layout' as const,
+        entityId: harness.ids.layoutId,
+        revisionId: harness.ids.layoutRevisionId,
+        actor: harness.admin,
+      };
+
+      await expect(
+        harness.dataSource.transaction((db: EntityManager) =>
+          operation === 'approve'
+            ? harness.service.approveManagedRevisionUsingManager(
+                db,
+                input,
+                () =>
+                  Promise.resolve(
+                    harness.context(
+                      harness.ids.layoutResourceId,
+                      harness.ids.layoutRevisionId,
+                    ),
+                  ),
+              )
+            : harness.service.publishManagedRevisionUsingManager(
+                db,
+                input,
+                () =>
+                  Promise.resolve(
+                    harness.context(
+                      harness.ids.layoutResourceId,
+                      harness.ids.layoutRevisionId,
+                    ),
+                  ),
+              ),
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(harness.state).toEqual(before);
+    },
+  );
+
+  it.each([null, {}])(
+    'normalizes malformed managed prepare result %# without raw TypeError',
+    async (prepared) => {
+      const harness = createFailClosedManagedHarness();
+      const before = harness.snapshot();
+
+      const call = harness.dataSource.transaction((db: EntityManager) =>
+        harness.service.publishManagedRevisionUsingManager(
+          db,
+          {
+            siteId: harness.ids.siteId,
+            resourceType: 'chunk_instance',
+            entityId: harness.ids.instanceId,
+            revisionId: harness.ids.instanceRevisionId,
+            actor: harness.admin,
+          },
+          () => Promise.resolve(prepared as never),
+        ),
+      );
+
+      await expect(call).rejects.toBeInstanceOf(NotFoundException);
+      await expect(call).rejects.not.toBeInstanceOf(TypeError);
+      expect(harness.state).toEqual(before);
+    },
+  );
+
+  it('rolls back restore when an instance copy hook is a no-op', async () => {
+    const harness = createFailClosedManagedHarness();
+    const before = harness.snapshot();
+
+    await expect(
+      harness.dataSource.transaction((db: EntityManager) =>
+        harness.service.restoreManagedRevisionUsingManager(
+          db,
+          {
+            siteId: harness.ids.siteId,
+            resourceType: 'chunk_instance',
+            entityId: harness.ids.instanceId,
+            sourceRevisionId: harness.ids.instanceRevisionId,
+            expectedDraftRevisionId: harness.ids.instanceRevisionId,
+            actor: harness.admin,
+          },
+          () =>
+            Promise.resolve(
+              harness.context(
+                harness.ids.instanceResourceId,
+                harness.ids.instanceRevisionId,
+              ),
+            ),
+          () => Promise.resolve(),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.state).toEqual(before);
+  });
+
+  it('rolls back restore when the copied instance contract differs from source', async () => {
+    const harness = createFailClosedManagedHarness();
+    const before = harness.snapshot();
+
+    await expect(
+      harness.dataSource.transaction((db: EntityManager) =>
+        harness.service.restoreManagedRevisionUsingManager(
+          db,
+          {
+            siteId: harness.ids.siteId,
+            resourceType: 'chunk_instance',
+            entityId: harness.ids.instanceId,
+            sourceRevisionId: harness.ids.instanceRevisionId,
+            expectedDraftRevisionId: harness.ids.instanceRevisionId,
+            actor: harness.admin,
+          },
+          () =>
+            Promise.resolve(
+              harness.context(
+                harness.ids.instanceResourceId,
+                harness.ids.instanceRevisionId,
+              ),
+            ),
+          async (hookDb, revision, resource) => {
+            await hookDb.save(
+              Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+                revisionId: revision.id,
+                revisionResourceId: resource.id,
+                siteId: harness.ids.siteId,
+                instanceId: harness.ids.instanceId,
+                contractId: 'ffffffff-aaaa-4fff-8fff-ffffffffffff',
+              }),
+            );
+          },
+        ),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.state).toEqual(before);
+  });
+
+  it.each(['missing', 'extra', 'changed'] as const)(
+    'rolls back restore when copied layout placements are %s',
+    async (mutation) => {
+      const harness = createFailClosedManagedHarness();
+      const before = harness.snapshot();
+
+      await expect(
+        harness.dataSource.transaction((db: EntityManager) =>
+          harness.service.restoreManagedRevisionUsingManager(
+            db,
+            {
+              siteId: harness.ids.siteId,
+              resourceType: 'chunk_layout',
+              entityId: harness.ids.layoutId,
+              sourceRevisionId: harness.ids.layoutRevisionId,
+              expectedDraftRevisionId: harness.ids.layoutRevisionId,
+              actor: harness.admin,
+            },
+            () =>
+              Promise.resolve(
+                harness.context(
+                  harness.ids.layoutResourceId,
+                  harness.ids.layoutRevisionId,
+                ),
+              ),
+            async (hookDb, revision, resource) => {
+              if (mutation === 'missing') return;
+              const rows = [
+                Object.assign(new ManagedChunkPlacementEntity(), {
+                  id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+                  siteId: harness.ids.siteId,
+                  layoutId: harness.ids.layoutId,
+                  layoutRevisionResourceId: resource.id,
+                  layoutRevisionId: revision.id,
+                  instanceId: harness.ids.instanceId,
+                  slotKey: 'hero',
+                  position: mutation === 'changed' ? 1 : 0,
+                }),
+              ];
+              if (mutation === 'extra') {
+                rows.push(
+                  Object.assign(new ManagedChunkPlacementEntity(), {
+                    id: 'cccccccc-bbbb-4ccc-8ccc-cccccccccccc',
+                    siteId: harness.ids.siteId,
+                    layoutId: harness.ids.layoutId,
+                    layoutRevisionResourceId: resource.id,
+                    layoutRevisionId: revision.id,
+                    instanceId: harness.ids.instanceId,
+                    slotKey: 'hero',
+                    position: 1,
+                  }),
+                );
+              }
+              await hookDb.save(rows);
+            },
+          ),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(harness.state).toEqual(before);
     },
   );
 });

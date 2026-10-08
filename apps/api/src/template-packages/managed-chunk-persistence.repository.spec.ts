@@ -2053,7 +2053,11 @@ function initialManagedLifecycleState(): ManagedLifecycleState {
 function createManagedLifecycleHarness() {
   let committed = initialManagedLifecycleState();
   let failOnSave: null | 'link' | 'placement' = null;
-  const operations: string[] = [];
+  const operations: Array<{
+    operation: 'findOne' | 'find' | 'save';
+    entity: string;
+    lock: string | null;
+  }> = [];
   const matches = (
     row: Record<string, unknown>,
     where: Record<string, unknown>,
@@ -2089,7 +2093,11 @@ function createManagedLifecycleHarness() {
                             : entity === ManagedChunkInstanceRevisionEntity
                               ? ['link', working.links]
                               : ['unknown', null];
-              operations.push(`findOne:${label}`);
+              operations.push({
+                operation: 'findOne',
+                entity: label,
+                lock: query.lock?.mode ?? null,
+              });
               if (entity === SiteEntity) {
                 return Promise.resolve(
                   [SITE_ID, OTHER_SITE_ID].includes(String(query.where.id))
@@ -2128,7 +2136,11 @@ function createManagedLifecycleHarness() {
             (entity: unknown, query: { where: Record<string, unknown> }) => {
               if (entity !== ManagedChunkPlacementEntity)
                 throw new Error('Unexpected lifecycle collection lookup');
-              operations.push('find:placements');
+              operations.push({
+                operation: 'find',
+                entity: 'placements',
+                lock: null,
+              });
               return Promise.resolve(
                 working.placements
                   .filter((row) => matches(row, query.where))
@@ -2151,7 +2163,11 @@ function createManagedLifecycleHarness() {
                         : item instanceof CmsRevisionEventEntity
                           ? 'event'
                           : 'unknown';
-              operations.push(`save:${kind}`);
+              operations.push({
+                operation: 'save',
+                entity: kind,
+                lock: null,
+              });
               if (failOnSave === kind) throw new Error(`${kind}-copy-failed`);
               const rows =
                 kind === 'resource'
@@ -2293,12 +2309,12 @@ describe('ManagedChunkPersistenceRepository typed lifecycle', () => {
       sanitizerPolicyVersion: null,
     });
     expect(harness.operations.slice(0, 6)).toEqual([
-      'findOne:access',
-      'findOne:site',
-      'findOne:instance',
-      'findOne:resource',
-      'findOne:revision',
-      'findOne:link',
+      { operation: 'findOne', entity: 'access', lock: 'pessimistic_read' },
+      { operation: 'findOne', entity: 'site', lock: 'pessimistic_read' },
+      { operation: 'findOne', entity: 'instance', lock: 'pessimistic_read' },
+      { operation: 'findOne', entity: 'resource', lock: 'pessimistic_write' },
+      { operation: 'findOne', entity: 'revision', lock: 'pessimistic_read' },
+      { operation: 'findOne', entity: 'link', lock: 'pessimistic_read' },
     ]);
   });
 
@@ -2618,4 +2634,133 @@ describe('ManagedChunkPersistenceRepository typed lifecycle success paths', () =
     );
     expect(harness.state).toEqual(before);
   });
+});
+
+describe('ManagedChunkPersistenceRepository lifecycle lock contract', () => {
+  it.each(['approve', 'publish', 'restore'] as const)(
+    'uses Access→Site→instance→resource→revision→link locks for instance %s',
+    async (operation) => {
+      const harness = createManagedLifecycleHarness();
+      const resource = harness.state.resources.find(
+        (row) => row.id === INSTANCE_RESOURCE_ID,
+      )!;
+      if (operation === 'approve') resource.reviewState = 'in_review';
+
+      if (operation === 'approve') {
+        await harness.repository.approveInstanceRevision({
+          siteId: SITE_ID,
+          instanceId: INSTANCE_ID,
+          revisionId: INSTANCE_REVISION_ID,
+          actor: ACTOR,
+        });
+      } else if (operation === 'publish') {
+        await harness.repository.publishInstanceRevision({
+          siteId: SITE_ID,
+          instanceId: INSTANCE_ID,
+          revisionId: INSTANCE_REVISION_ID,
+          actor: ACTOR,
+        });
+      } else {
+        await harness.repository.restoreInstanceRevision({
+          siteId: SITE_ID,
+          instanceId: INSTANCE_ID,
+          sourceRevisionId: INSTANCE_REVISION_ID,
+          expectedDraftRevisionId: INSTANCE_REVISION_ID,
+          actor: ACTOR,
+        });
+      }
+
+      expect(harness.operations.slice(0, 11)).toEqual([
+        { operation: 'findOne', entity: 'access', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'site', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'instance', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'resource', lock: 'pessimistic_write' },
+        { operation: 'findOne', entity: 'revision', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'link', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'site', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'instance', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'resource', lock: 'pessimistic_write' },
+        { operation: 'findOne', entity: 'revision', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'link', lock: 'pessimistic_read' },
+      ]);
+      if (operation === 'restore') {
+        expect(harness.operations.slice(11)).toEqual([
+          { operation: 'save', entity: 'revision', lock: null },
+          { operation: 'save', entity: 'link', lock: null },
+          {
+            operation: 'findOne',
+            entity: 'link',
+            lock: 'pessimistic_read',
+          },
+          { operation: 'save', entity: 'resource', lock: null },
+          { operation: 'save', entity: 'event', lock: null },
+        ]);
+      }
+    },
+  );
+
+  it.each(['approve', 'publish', 'restore'] as const)(
+    'uses Access→Site→layout→resource→revision→placements locks for layout %s',
+    async (operation) => {
+      const harness = createManagedLifecycleHarness();
+      const resource = harness.state.resources.find(
+        (row) => row.id === LAYOUT_RESOURCE_ID,
+      )!;
+      if (operation === 'approve') resource.reviewState = 'in_review';
+
+      if (operation === 'approve') {
+        await harness.repository.approveLayoutRevision({
+          siteId: SITE_ID,
+          layoutId: LAYOUT_ID,
+          revisionId: LAYOUT_REVISION_ID,
+          actor: ACTOR,
+        });
+      } else if (operation === 'publish') {
+        await harness.repository.publishLayoutRevision({
+          siteId: SITE_ID,
+          layoutId: LAYOUT_ID,
+          revisionId: LAYOUT_REVISION_ID,
+          actor: ACTOR,
+        });
+      } else {
+        await harness.repository.restoreLayoutRevision({
+          siteId: SITE_ID,
+          layoutId: LAYOUT_ID,
+          sourceRevisionId: LAYOUT_REVISION_ID,
+          expectedDraftRevisionId: LAYOUT_REVISION_ID,
+          actor: ACTOR,
+        });
+      }
+
+      expect(harness.operations.slice(0, 13)).toEqual([
+        { operation: 'findOne', entity: 'access', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'site', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'layout', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'resource', lock: 'pessimistic_write' },
+        { operation: 'findOne', entity: 'revision', lock: 'pessimistic_read' },
+        { operation: 'find', entity: 'placements', lock: null },
+        { operation: 'findOne', entity: 'instance', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'site', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'layout', lock: 'pessimistic_read' },
+        { operation: 'findOne', entity: 'resource', lock: 'pessimistic_write' },
+        { operation: 'findOne', entity: 'revision', lock: 'pessimistic_read' },
+        { operation: 'find', entity: 'placements', lock: null },
+        { operation: 'findOne', entity: 'instance', lock: 'pessimistic_read' },
+      ]);
+      if (operation === 'restore') {
+        expect(harness.operations.slice(13)).toEqual([
+          { operation: 'save', entity: 'revision', lock: null },
+          { operation: 'save', entity: 'placement', lock: null },
+          { operation: 'find', entity: 'placements', lock: null },
+          {
+            operation: 'findOne',
+            entity: 'instance',
+            lock: 'pessimistic_read',
+          },
+          { operation: 'save', entity: 'resource', lock: null },
+          { operation: 'save', entity: 'event', lock: null },
+        ]);
+      }
+    },
+  );
 });
