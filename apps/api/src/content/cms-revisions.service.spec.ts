@@ -466,6 +466,182 @@ describe('CMS revision storage', () => {
     );
     expect(operations).toEqual(['resource', 'revision', 'instance', 'link']);
   });
+  it('snapshots the complete managed input before prepare yields', async () => {
+    const { service, db, resources, revisions } = setup();
+    let prepareStarted!: () => void;
+    let releasePrepare!: () => void;
+    const started = new Promise<void>((resolve) => {
+      prepareStarted = resolve;
+    });
+    const gate = new Promise<{
+      entityId: string;
+      proof: { kind: 'instance'; contractId: string };
+    }>((resolve) => {
+      releasePrepare = () =>
+        resolve({
+          entityId: 'instance-1',
+          proof: { kind: 'instance', contractId: 'contract-1' },
+        });
+    });
+    const input = {
+      siteId: 'site-1',
+      resourceType: 'chunk_instance' as const,
+      snapshot: { formatVersion: 1, data: { headline: 'Original' } },
+      expectedDraftRevisionId: null as string | null,
+      actor: { ...manager },
+    };
+
+    const saving = service.savePreparedManagedDraftUsingManager(
+      db as never,
+      input,
+      async () => {
+        prepareStarted();
+        return gate;
+      },
+      async (hookDb, revision, resource) => {
+        await hookDb.save(
+          Object.assign(new ManagedChunkInstanceEntity(), {
+            id: resource.entityId,
+            siteId: resource.siteId,
+            revisionResourceId: resource.id,
+          }),
+        );
+        await hookDb.save(
+          Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+            revisionId: revision.id,
+            revisionResourceId: resource.id,
+            siteId: resource.siteId,
+            instanceId: resource.entityId,
+            contractId: 'contract-1',
+          }),
+        );
+      },
+    );
+
+    await started;
+    input.siteId = 'site-2';
+    input.resourceType = 'chunk_layout' as never;
+    input.snapshot.data.headline = 'Mutated';
+    input.expectedDraftRevisionId = 'stale-revision';
+    input.actor.userId = outsider.userId;
+    releasePrepare();
+
+    await expect(saving).resolves.toMatchObject({ versionNumber: 1 });
+    expect(resources[0]).toMatchObject({
+      siteId: 'site-1',
+      resourceType: 'chunk_instance',
+      entityId: 'instance-1',
+      latestVersionNumber: 1,
+    });
+    expect(revisions[0]).toMatchObject({
+      versionNumber: 1,
+      snapshot: { formatVersion: 1, data: { headline: 'Original' } },
+      actorUserId: manager.userId,
+    });
+  });
+
+  it('does not let the managed hook mutate persisted revision metadata or resource identity', async () => {
+    const { service, db, resources } = setup();
+
+    const result = await service.saveManagedDraftUsingManager(
+      db as never,
+      {
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+        snapshot: { formatVersion: 1, data: {} },
+        expectedDraftRevisionId: null,
+        actor: manager,
+      },
+      { kind: 'instance', contractId: 'contract-1' },
+      async (hookDb, revision, resource) => {
+        await hookDb.save(
+          Object.assign(new ManagedChunkInstanceEntity(), {
+            id: 'instance-1',
+            siteId: 'site-1',
+            revisionResourceId: resource.id,
+          }),
+        );
+        await hookDb.save(
+          Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+            revisionId: revision.id,
+            revisionResourceId: resource.id,
+            siteId: 'site-1',
+            instanceId: 'instance-1',
+            contractId: 'contract-1',
+          }),
+        );
+        revision.versionNumber = 77;
+        resource.siteId = 'site-2';
+      },
+    );
+
+    expect(result.versionNumber).toBe(1);
+    expect(resources[0]).toMatchObject({
+      siteId: 'site-1',
+      latestVersionNumber: 1,
+    });
+  });
+
+  it('verifies the new revision identity even if the hook substitutes an older revision id', async () => {
+    const { service, db, resources } = setup();
+    const saveOwnerAndLink = async (
+      hookDb: EntityManager,
+      revision: CmsRevisionEntity,
+      resource: CmsRevisionResourceEntity,
+    ) => {
+      await hookDb.save(
+        Object.assign(new ManagedChunkInstanceEntity(), {
+          id: 'instance-1',
+          siteId: 'site-1',
+          revisionResourceId: resource.id,
+        }),
+      );
+      await hookDb.save(
+        Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+          revisionId: revision.id,
+          revisionResourceId: resource.id,
+          siteId: 'site-1',
+          instanceId: 'instance-1',
+          contractId: 'contract-1',
+        }),
+      );
+    };
+    const first = await service.saveManagedDraftUsingManager(
+      db as never,
+      {
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+        snapshot: { formatVersion: 1, data: { version: 1 } },
+        expectedDraftRevisionId: null,
+        actor: manager,
+      },
+      { kind: 'instance', contractId: 'contract-1' },
+      saveOwnerAndLink,
+    );
+
+    await expect(
+      service.saveManagedDraftUsingManager(
+        db as never,
+        {
+          siteId: 'site-1',
+          resourceType: 'chunk_instance',
+          entityId: 'instance-1',
+          snapshot: { formatVersion: 1, data: { version: 2 } },
+          expectedDraftRevisionId: first.id,
+          actor: manager,
+        },
+        { kind: 'instance', contractId: 'contract-1' },
+        async (_hookDb, revision) => {
+          revision.id = first.id;
+        },
+      ),
+    ).rejects.toEqual(
+      new ConflictException('Состояние управляемого черновика не подтверждено'),
+    );
+    expect(resources[0].draftRevisionId).toBe(first.id);
+  });
   it('returns safe not-found for an admin and missing site before direct managed wrapper writes', async () => {
     const { service } = setup();
     const db = {

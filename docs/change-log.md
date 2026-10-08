@@ -3323,7 +3323,7 @@
   БД, `main` и фактическая выкладка не выполнялись и не изменялись.
 ### 2026-10-08 · Phase 2: fail-closed hardening после финального аудита
 
-- Статус: **В работе**. Владелец: Роман / Codex; ветка
+- Статус: **Готово для MVP, не выложено**. Владелец: Роман / Codex; ветка
   `codex/managed-chunks-sdk-v1`.
 - Задача: исключить два fail-open пути — непроверенный результат managed draft
   hook и молчаливое исключение повреждённых present pointers из compatibility
@@ -3367,6 +3367,15 @@
   Prettier check — exit 0; `pnpm --dir apps/api build` — exit 0;
   `git diff --check` — exit 0. Реальный PostgreSQL и Docker по границам задачи
   не запускались. Коммит реализации: `fix: fail closed managed chunk persistence`.
+- MVP hardening: managed input теперь целиком клонируется до первого `await`;
+  hook получает defensive entity copies, а pointer, event и version metadata
+  используют сохранённые primitive identities. RED подтвердил три дефекта:
+  mutable input, mutable version/resource metadata и подмену новой revision на
+  старую. Итоговый целевой прогон — 2 suites / 183 tests PASS; API build и
+  `git diff --check` PASS.
+- Некритичные масштабные проверки и рефакторинг вынесены в
+  `docs/managed-chunks-post-mvp-review.md`; они не блокируют MVP.
 - БД: схема, migration ledger, данные, backfill, ручные изменения и формат
   сохранённых значений не менялись; общая/рабочая БД, VDS, push, merge и deploy
-  не затрагивались. Статус остаётся **В работе** до code review и acceptance.
+  не затрагивались. Полный PostgreSQL/regression аудит отложен до отдельного
+  post-MVP этапа.

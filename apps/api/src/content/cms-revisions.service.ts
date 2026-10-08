@@ -386,17 +386,28 @@ export class CmsRevisionsService {
       revisionId,
       input.expectedDraftRevisionId,
     );
+    const persistedVersionNumber = resource.latestVersionNumber + 1;
     const version = Object.assign(new CmsRevisionEntity(), {
       id: revisionId,
       resourceId: resource.id,
-      versionNumber: resource.latestVersionNumber + 1,
+      versionNumber: persistedVersionNumber,
       snapshot: structuredClone(input.snapshot),
       actorUserId: input.actor.userId,
     });
     await db.save(version);
-    await revisionCreatedHook?.(db, version, resource);
+    if (revisionCreatedHook) {
+      const hookRevision = Object.assign(new CmsRevisionEntity(), {
+        ...version,
+        snapshot: structuredClone(version.snapshot),
+      });
+      const hookResource = Object.assign(
+        new CmsRevisionResourceEntity(),
+        resource,
+      );
+      await revisionCreatedHook(db, hookRevision, hookResource);
+    }
     Object.assign(resource, next, {
-      latestVersionNumber: version.versionNumber,
+      latestVersionNumber: persistedVersionNumber,
     });
     await db.save(resource);
     await this.event(
@@ -407,7 +418,7 @@ export class CmsRevisionsService {
       input.actor.userId,
       reason,
     );
-    return { id: revisionId, versionNumber: version.versionNumber };
+    return { id: revisionId, versionNumber: persistedVersionNumber };
   }
 
   async saveDraft(input: {
@@ -547,6 +558,22 @@ export class CmsRevisionsService {
       }),
     });
   }
+  private snapshotManagedDraftInput(input: {
+    siteId: string;
+    resourceType: ManagedCmsResourceType;
+    snapshot: Record<string, unknown>;
+    expectedDraftRevisionId: string | null;
+    actor: RevisionActor;
+  }) {
+    this.assertManagedResourceType(input.resourceType);
+    return Object.freeze({
+      siteId: input.siteId,
+      resourceType: input.resourceType,
+      snapshot: structuredClone(input.snapshot),
+      expectedDraftRevisionId: input.expectedDraftRevisionId,
+      actor: Object.freeze({ ...input.actor }),
+    });
+  }
   private async verifyManagedDraftUsingManager(
     db: EntityManager,
     input: {
@@ -555,12 +582,12 @@ export class CmsRevisionsService {
       entityId: string;
       proof: ManagedDraftExpectedProof;
     },
-    revision: CmsRevisionEntity,
-    resource: CmsRevisionResourceEntity,
+    revision: Readonly<Pick<CmsRevisionEntity, 'id' | 'resourceId'>>,
+    resourceId: string,
   ): Promise<void> {
     const persistedResource = await db.findOne(CmsRevisionResourceEntity, {
       where: {
-        id: resource.id,
+        id: resourceId,
         siteId: input.siteId,
         resourceType: input.resourceType,
         entityId: input.entityId,
@@ -641,7 +668,7 @@ export class CmsRevisionsService {
     prepare: (manager: EntityManager) => Promise<ManagedDraftPreparation>,
     revisionCreatedHook: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number; entityId: string }> {
-    this.assertManagedResourceType(input.resourceType);
+    const stableInput = this.snapshotManagedDraftInput(input);
     if (
       typeof prepare !== 'function' ||
       typeof revisionCreatedHook !== 'function'
@@ -651,31 +678,36 @@ export class CmsRevisionsService {
       );
     }
     await this.authorizeManagedWriteUsingManager(db, {
-      siteId: input.siteId,
-      resourceType: input.resourceType,
-      actor: input.actor,
+      siteId: stableInput.siteId,
+      resourceType: stableInput.resourceType,
+      actor: stableInput.actor,
     });
     const prepared = this.snapshotManagedDraftPreparation(
-      input.resourceType,
+      stableInput.resourceType,
       await prepare(db),
     );
     const revision = await this.saveDraftInTransaction(
       db,
-      { ...input, entityId: prepared.entityId },
+      { ...stableInput, entityId: prepared.entityId },
       'draft_saved',
       null,
       async (hookDb, savedRevision, resource) => {
+        const revisionIdentity = Object.freeze({
+          id: savedRevision.id,
+          resourceId: savedRevision.resourceId,
+        });
+        const resourceId = resource.id;
         await revisionCreatedHook(hookDb, savedRevision, resource);
         await this.verifyManagedDraftUsingManager(
           hookDb,
           {
-            siteId: input.siteId,
-            resourceType: input.resourceType,
+            siteId: stableInput.siteId,
+            resourceType: stableInput.resourceType,
             entityId: prepared.entityId,
             proof: prepared.proof,
           },
-          savedRevision,
-          resource,
+          revisionIdentity,
+          resourceId,
         );
       },
     );
