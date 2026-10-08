@@ -3113,3 +3113,54 @@
   `fix: harden compatibility inventory transactions` (этот commit).
 - Docker/VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая
   выкладка не затрагивались.
+
+### 2026-10-08 · Phase 2 / Task 7: disposable PostgreSQL acceptance
+
+- Статус: **Готово локально, не выложено; есть cleanup-замечание Docker**.
+  Владелец: Роман / Codex; ветка `codex/managed-chunks-sdk-v1`.
+- Задача: добавлен fail-closed real-PostgreSQL acceptance suite полного migration
+  ledger и tenant/FK/trigger/rollback/lock/concurrency контрактов managed chunks.
+  Изменены только
+  `apps/api/src/template-packages/managed-chunk-persistence.database.spec.ts` и
+  эта запись. Production schema/entities/repository/service и применённые
+  migrations не менялись.
+- Guard TDD: исходный RED — 1 suite, 10 ожидаемых failures на отсутствующей
+  проверке; GREEN без env — 1 suite, 11 tests PASS и 17 integration cases SKIP.
+  Guard принимает только `postgres`/`postgresql`, exact `127.0.0.1:55440`,
+  pathname и opt-in `wispo_managed_chunks_phase2_test`, без query/hash;
+  небезопасно заполненный env падает, а не пропускает suite.
+- БД — схема/данные/формат: полный ledger из 52 migrations применён только к
+  временной БД `wispo_managed_chunks_phase2_test` в exact container
+  `wispo-managed-chunks-phase2-test`; исторические seed prerequisites
+  (`crazy-studio` workspace и approved privacy model) создавались только
+  test-only phased bootstrap. Отдельные fresh databases с тем же безопасным
+  префиксом создавались внутри этого container для `down()` и удалялись suite.
+  Все schema/data/rows были временными; общая/рабочая БД, формат сохраняемых
+  production-значений, backfill и ручные данные не менялись.
+- Real PostgreSQL acceptance: два финальных последовательных прогона на одной
+  disposable БД — по 1 suite / 28 tests PASS. Проверены полный ledger и второй
+  no-op; v1/v2 checks; idempotent/conflicting и opposite-order two-connection
+  contract registration без `40P01`; package/version, tenant page/instance и
+  duplicate placement constraints; atomic layout rollback; draft/published
+  inventory; page/site-surface initial races с одним v1, Conflict loser и v2
+  retry без orphan rows; Access→Site instance/layout ordering; package activation
+  в обоих lock orders; real typed lifecycle rollback/restore, включая empty,
+  wrong/missing/extra/changed/FK-invalid copies; concurrent approve/publish с
+  одним event и Conflict loser; standalone READ ONLY SQLSTATE `25006`,
+  REPEATABLE READ coherent old/new inventory и writable manager-bound reader;
+  fresh safe down, populated pre-drop guard и two-connection down-lock race;
+  owner identity SQLSTATE `55000`, mutable metadata и actor `ON DELETE SET NULL`.
+- Регрессия/статические проверки: focused Phase 1–2 — 7 suites / 209 tests PASS;
+  API production build PASS; targeted ESLint и Prettier PASS; `git diff --check`
+  PASS. Statement timeouts были failure, не skip; все DataSource/query runner
+  закрывались в `finally`.
+- Cleanup: exact test container удалён; env отсутствуют, порт `55440` свободен,
+  exact container отсутствует. Рабочие `wispo-cms-local-*` containers
+  read-only сверены и не менялись. Image `postgres:18-alpine` автоматически
+  создал anonymous Docker volume; несмотря на `--rm`, volume остался unmounted.
+  По прямому запрету Task 7 удалять volumes он не удалялся и отмечен как
+  cleanup concern; named volumes/networks не создавались, `wispo-cms-local`
+  network не использовалась.
+- Коммит реализации: `test: verify managed chunk persistence in postgres`
+  (этот commit). VDS/Registry, внешний сервер, `main`, push/merge/deploy и
+  фактическая выкладка не выполнялись.
