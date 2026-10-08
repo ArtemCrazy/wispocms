@@ -107,11 +107,12 @@ describe('managed chunk disposable PostgreSQL guard', () => {
     const order: string[] = [];
     const primary = new Error('injected assertion failure');
     const cleanupFailure = new Error('injected destroy failure');
+    const backgroundFailure = new Error('injected pending failure');
     let releasePending: (() => void) | undefined;
-    const pending = new Promise<void>((resolve) => {
+    const pending = new Promise<void>((_resolve, reject) => {
       releasePending = () => {
         order.push('pending');
-        resolve();
+        reject(backgroundFailure);
       };
     });
     const runner = {
@@ -3103,8 +3104,8 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     let guardedSource: DataSource | undefined;
     let guardWriter: DataSource | undefined;
     let locker: QueryRunner | undefined;
-    let insertV2: Promise<unknown> | undefined;
     let primaryError: unknown;
+    const pendingCleanup = new DatabaseTestCleanup();
     const cleanupDatabase = async (databaseName: string) => {
       if (!admin?.isInitialized) return;
       await admin.query(
@@ -3208,15 +3209,17 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       const [{ pg_backend_pid: writerPid }] = await guardWriter.query(
         'SELECT pg_backend_pid()',
       );
-      insertV2 = guardWriter.query(
-        `INSERT INTO template_package_versions
+      const insertV2 = pendingCleanup.track(
+        guardWriter.query(
+          `INSERT INTO template_package_versions
             (template_package_id, package_version, source_revision,
              release_digest, artifact_digest, manifest_digest,
              manifest_version, manifest, cms_api_min_schema_version,
              cms_api_max_schema_version, built_at, runtime_mode, runtime_url)
            VALUES ($1, '2', 'x', 'x', NULL, 'x', 2, '{}'::jsonb,
              '1', NULL, now(), 'embedded-next', NULL)`,
-        [packageId],
+          [packageId],
+        ),
       );
       await waitForLockWait(source, writerPid);
       await locker.rollbackTransaction();
@@ -3316,11 +3319,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
                 await locker.rollbackTransaction();
             },
           ],
-          [
-            async () => {
-              if (insertV2) await Promise.allSettled([insertV2]);
-            },
-          ],
+          [() => pendingCleanup.cleanup(primaryError)],
           [() => cleanupRunner(locker)],
           [
             () => destroySource(guardWriter),

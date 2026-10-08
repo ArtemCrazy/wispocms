@@ -3116,7 +3116,7 @@
 
 ### 2026-10-08 · Phase 2 / Task 7: disposable PostgreSQL acceptance
 
-- Статус: **Готово к проверке после exceptional-path cleanup review; остаётся
+- Статус: **Готово к проверке после residual promise-tracking review; остаётся
   cleanup-замечание по четырём ранее созданным anonymous Docker volumes**. Владелец: Роман / Codex; ветка
   `codex/managed-chunks-sdk-v1`.
 - Задача: добавлен fail-closed real-PostgreSQL acceptance suite полного migration
@@ -3150,7 +3150,13 @@
   маскируют её. Unit instrumentation с injected assertion/destroy failure
   подтверждает порядок `blocker → pending → rollback → runner → source` и
   сохранение исходной ошибки; real PostgreSQL injected setup failure подтверждает
-  отсутствие backend по сохранённому PID.- БД — схема/данные/формат: полный ledger из 52 migrations применялся только к
+  отсутствие backend по сохранённому PID. Residual review устранил последний
+  late-handler gap: down-race `insertV2` немедленно регистрируется через
+  `DatabaseTestCleanup.track` в момент создания, а cleanup освобождает blocker,
+  дожидается tracked promise и только затем закрывает runner/sources. Unit
+  instrumentation использует rejecting pending promise и подтверждает, что
+  ранний reject обработан без потери исходной assertion error.
+- БД — схема/данные/формат: полный ledger из 52 migrations применялся только к
   временной БД `wispo_managed_chunks_phase2_test` в exact container
   `wispo-managed-chunks-phase2-test`; исторические seed prerequisites
   (`crazy-studio` workspace и approved privacy model) создавались только
@@ -3196,13 +3202,13 @@
   identity SQLSTATE `55000`, разрешённые mutable поля и actor `ON DELETE SET NULL`
   также проверены.
 - Финальная проверка: no-env guard с --detectOpenHandles — 12 PASS / 20 SKIP;
-  PostgreSQL suite дважды подряд после последнего изменения — 32/32 PASS;
+  PostgreSQL suite дважды подряд после residual tracking fix — 32/32 PASS;
   focused Phase 1–2 — 7 suites / 209 tests PASS; API
   production build PASS; targeted ESLint и Prettier PASS; `git diff --check`
   PASS. Statement/test timeouts были failure, не skip; DataSource/query runners
   закрывались в `finally`.
 - Cleanup выполнен до закрытия записи: в финальном цикле exact container
-  `f742bcbf9e89…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
+  `1a5a26006e6d…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
   `127.0.0.1:55440`, с `tmpfs:/var/lib/postgresql` и без volume mounts; затем
   удалён только `wispo-managed-chunks-phase2-test`. После удаления exact container
   отсутствует, порт `55440` свободен, оба opt-in env отсутствуют. Все семь
@@ -3219,6 +3225,9 @@
   (`test: verify managed chunk persistence in postgres`). Первый spec-review fix:
   `44b128186ce2b8af35352f4f3ab2e277cac357eb`
   (`test: harden postgres concurrency acceptance`). Финальное test-only
-  уточнение: `test: make postgres lock assertions exact` (этот commit).
+  уточнение: `35862046730931843dde39f88785d697da299c61`
+  (`test: make postgres lock assertions exact`). Exceptional cleanup fix:
+  `71520f1d7f1f5f143c6ba18c2e5cd7203266e9c2`
+  (`test: harden postgres cleanup paths`).
   VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая выкладка
   не выполнялись.
