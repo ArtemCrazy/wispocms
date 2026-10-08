@@ -63,6 +63,19 @@ export type RevisionCreatedHook = (
   resource: CmsRevisionResourceEntity,
 ) => Promise<void>;
 
+export type ManagedRevisionLifecycleContext = {
+  resource: CmsRevisionResourceEntity;
+  revision: CmsRevisionEntity;
+};
+
+export type ManagedRevisionLifecyclePrepare = (
+  db: EntityManager,
+) => Promise<ManagedRevisionLifecycleContext>;
+
+export type ManagedRevisionRestorePrepare = (
+  db: EntityManager,
+) => Promise<ManagedRevisionLifecycleContext>;
+
 @Injectable()
 export class CmsRevisionsService {
   constructor(
@@ -208,16 +221,17 @@ export class CmsRevisionsService {
     return this.requireSite(siteId, actor, permission);
   }
 
-  async authorizeManagedWriteUsingManager(
+  private async authorizeManagedPermissionUsingManager(
     db: EntityManager,
     input: {
       siteId: string;
       resourceType: ManagedCmsResourceType;
       actor: RevisionActor;
     },
-  ): Promise<void> {
+    permission: SitePermission,
+  ): Promise<SiteAccessGrant | null> {
     this.assertManagedResourceType(input.resourceType);
-    if (input.actor.platformRole === PlatformRole.WISPO_ADMIN) return;
+    if (input.actor.platformRole === PlatformRole.WISPO_ADMIN) return null;
     // Match access reassignment order: never hold a site/target lock while
     // waiting for the actor's access row.
     const access = await db.findOne(SiteAccessEntity, {
@@ -230,14 +244,26 @@ export class CmsRevisionsService {
     });
     if (
       !access ||
-      !hasSitePermission(
-        input.actor.platformRole,
-        access,
-        this.permission(input.resourceType),
-      )
+      !hasSitePermission(input.actor.platformRole, access, permission)
     ) {
       throw new ForbiddenException('Недостаточно прав для этого сайта');
     }
+    return access;
+  }
+
+  async authorizeManagedWriteUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      actor: RevisionActor;
+    },
+  ): Promise<void> {
+    await this.authorizeManagedPermissionUsingManager(
+      db,
+      input,
+      this.permission(input.resourceType),
+    );
   }
 
   private async lockedResource(
@@ -455,6 +481,175 @@ export class CmsRevisionsService {
     );
     return { id: revision.id, versionNumber: revision.versionNumber };
   }
+  private assertManagedLifecycleContext(
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      revisionId: string;
+    },
+    context: ManagedRevisionLifecycleContext,
+  ): void {
+    if (
+      context.resource.siteId !== input.siteId ||
+      context.resource.resourceType !== input.resourceType ||
+      context.resource.entityId !== input.entityId ||
+      context.revision.id !== input.revisionId ||
+      context.revision.resourceId !== context.resource.id
+    ) {
+      throw new NotFoundException('Версия управляемого ресурса не найдена');
+    }
+  }
+
+  async restoreManagedRevisionUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      sourceRevisionId: string;
+      expectedDraftRevisionId: string | null;
+      actor: RevisionActor;
+    },
+    prepare: ManagedRevisionRestorePrepare,
+    revisionCreatedHook: RevisionCreatedHook,
+  ): Promise<{ id: string; versionNumber: number }> {
+    this.assertManagedResourceType(input.resourceType);
+    if (
+      typeof prepare !== 'function' ||
+      typeof revisionCreatedHook !== 'function'
+    ) {
+      throw new BadRequestException(
+        'Управляемое восстановление требует prepare и revision-created hook',
+      );
+    }
+    await this.authorizeManagedPermissionUsingManager(
+      db,
+      input,
+      this.permission(input.resourceType),
+    );
+    const context = await prepare(db);
+    this.assertManagedLifecycleContext(
+      {
+        siteId: input.siteId,
+        resourceType: input.resourceType,
+        entityId: input.entityId,
+        revisionId: input.sourceRevisionId,
+      },
+      context,
+    );
+
+    const revisionId = randomUUID();
+    const next = saveDraftRevision(
+      this.pointers(context.resource),
+      revisionId,
+      input.expectedDraftRevisionId,
+    );
+    const restored = Object.assign(new CmsRevisionEntity(), {
+      id: revisionId,
+      resourceId: context.resource.id,
+      versionNumber: context.resource.latestVersionNumber + 1,
+      snapshot: structuredClone(context.revision.snapshot),
+      actorUserId: input.actor.userId,
+    });
+    await db.save(restored);
+    await revisionCreatedHook(db, restored, context.resource);
+    Object.assign(context.resource, next, {
+      latestVersionNumber: restored.versionNumber,
+    });
+    await db.save(context.resource);
+    await this.event(
+      db,
+      context.resource.id,
+      restored.id,
+      'version_restored',
+      input.actor.userId,
+      `restored from ${input.sourceRevisionId}`,
+    );
+    return { id: restored.id, versionNumber: restored.versionNumber };
+  }
+
+  async approveManagedRevisionUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    prepare: ManagedRevisionLifecyclePrepare,
+  ): Promise<void> {
+    this.assertManagedResourceType(input.resourceType);
+    if (typeof prepare !== 'function') {
+      throw new BadRequestException(
+        'Управляемое согласование требует typed precondition',
+      );
+    }
+    await this.authorizeManagedPermissionUsingManager(
+      db,
+      input,
+      SitePermission.APPROVE,
+    );
+    const context = await prepare(db);
+    this.assertManagedLifecycleContext(input, context);
+    Object.assign(
+      context.resource,
+      approveRevision(this.pointers(context.resource), input.revisionId),
+    );
+    await db.save(context.resource);
+    await this.event(
+      db,
+      context.resource.id,
+      input.revisionId,
+      'approved',
+      input.actor.userId,
+    );
+  }
+
+  async publishManagedRevisionUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    prepare: ManagedRevisionLifecyclePrepare,
+  ): Promise<void> {
+    this.assertManagedResourceType(input.resourceType);
+    if (typeof prepare !== 'function') {
+      throw new BadRequestException(
+        'Управляемая публикация требует typed precondition',
+      );
+    }
+    const access = await this.authorizeManagedPermissionUsingManager(
+      db,
+      input,
+      input.resourceType === 'chunk_layout'
+        ? SitePermission.MANAGE_STRUCTURE
+        : SitePermission.PUBLISH_CONTENT,
+    );
+    const context = await prepare(db);
+    this.assertManagedLifecycleContext(input, context);
+    const next = publishRevision(
+      this.pointers(context.resource),
+      input.revisionId,
+      access?.role === SiteRole.CONTENT_MANAGER
+        ? access.requiresApproval
+        : false,
+    );
+    Object.assign(context.resource, next);
+    await db.save(context.resource);
+    await this.event(
+      db,
+      context.resource.id,
+      input.revisionId,
+      'published',
+      input.actor.userId,
+    );
+  }
   /** Trusted publication adapter for actors allowed to publish directly; never
    * expose this as a generic route or let it overwrite an outstanding CMS draft.
    * Caller must hold the article lock and include the live write in this transaction.
@@ -548,6 +743,7 @@ export class CmsRevisionsService {
     snapshot: Record<string, unknown>;
     actor: RevisionActor;
   }): Promise<{ id: string; versionNumber: number }> {
+    this.assertGenericResourceType(input.resourceType);
     await this.requireSite(
       input.siteId,
       input.actor,
@@ -618,6 +814,60 @@ export class CmsRevisionsService {
     });
   }
 
+  private async restoreUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: CmsResourceType;
+      entityId: string;
+      sourceRevisionId: string;
+      expectedDraftRevisionId: string | null;
+      actor: RevisionActor;
+      canManageStructure: boolean;
+    },
+  ): Promise<{ id: string; versionNumber: number }> {
+    const resource = await this.lockedResource(
+      db,
+      input.siteId,
+      input.resourceType,
+      input.entityId,
+    );
+    const source = await db.findOne(CmsRevisionEntity, {
+      where: { id: input.sourceRevisionId, resourceId: resource.id },
+    });
+    if (!source) throw new NotFoundException('Версия не найдена');
+    let snapshot = source.snapshot;
+    if (!input.canManageStructure) {
+      const currentRevisionId =
+        resource.draftRevisionId ??
+        resource.publishedRevisionId ??
+        resource.approvedRevisionId;
+      const current = currentRevisionId
+        ? await db.findOne(CmsRevisionEntity, {
+            where: { id: currentRevisionId, resourceId: resource.id },
+          })
+        : null;
+      snapshot = this.preserveTemplateAssignment(
+        input.resourceType,
+        source.snapshot,
+        current?.snapshot ?? {},
+      );
+    }
+    return this.saveDraftInTransaction(
+      db,
+      {
+        siteId: input.siteId,
+        resourceType: input.resourceType,
+        entityId: input.entityId,
+        snapshot,
+        expectedDraftRevisionId: input.expectedDraftRevisionId,
+        actor: input.actor,
+      },
+      'version_restored',
+      `restored from ${input.sourceRevisionId}`,
+    );
+  }
+
   async restore(
     siteId: string,
     resourceType: CmsResourceType,
@@ -626,6 +876,7 @@ export class CmsRevisionsService {
     expectedDraftRevisionId: string | null,
     actor: RevisionActor,
   ) {
+    this.assertGenericResourceType(resourceType);
     const access = await this.requireSite(
       siteId,
       actor,
@@ -636,50 +887,18 @@ export class CmsRevisionsService {
       access,
       SitePermission.MANAGE_STRUCTURE,
     );
-    return this.dataSource.transaction(async (db) => {
-      const resource = await this.lockedResource(
-        db,
+    return this.dataSource.transaction((db) =>
+      this.restoreUsingManager(db, {
         siteId,
         resourceType,
         entityId,
-      );
-      const source = await db.findOne(CmsRevisionEntity, {
-        where: { id: sourceRevisionId, resourceId: resource.id },
-      });
-      if (!source) throw new NotFoundException('Версия не найдена');
-      let snapshot = source.snapshot;
-      if (!canManageStructure) {
-        const currentRevisionId =
-          resource.draftRevisionId ??
-          resource.publishedRevisionId ??
-          resource.approvedRevisionId;
-        const current = currentRevisionId
-          ? await db.findOne(CmsRevisionEntity, {
-              where: { id: currentRevisionId, resourceId: resource.id },
-            })
-          : null;
-        snapshot = this.preserveTemplateAssignment(
-          resourceType,
-          source.snapshot,
-          current?.snapshot ?? {},
-        );
-      }
-      return this.saveDraftInTransaction(
-        db,
-        {
-          siteId,
-          resourceType,
-          entityId,
-          snapshot,
-          expectedDraftRevisionId,
-          actor,
-        },
-        'version_restored',
-        `restored from ${sourceRevisionId}`,
-      );
-    });
+        sourceRevisionId,
+        expectedDraftRevisionId,
+        actor,
+        canManageStructure,
+      }),
+    );
   }
-
   async requestChanges(
     siteId: string,
     resourceType: CmsResourceType,
@@ -688,6 +907,7 @@ export class CmsRevisionsService {
     actor: RevisionActor,
     reason: string,
   ): Promise<void> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, SitePermission.APPROVE);
     await this.dataSource.transaction(async (db) => {
       const resource = await this.lockedResource(
@@ -719,6 +939,7 @@ export class CmsRevisionsService {
     revisionId: string,
     actor: RevisionActor,
   ): Promise<void> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, this.permission(resourceType));
     await this.dataSource.transaction(async (db) => {
       const resource = await this.lockedResource(
@@ -736,6 +957,36 @@ export class CmsRevisionsService {
     });
   }
 
+  private async approveUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: CmsResourceType;
+      entityId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+  ): Promise<void> {
+    const resource = await this.lockedResource(
+      db,
+      input.siteId,
+      input.resourceType,
+      input.entityId,
+    );
+    Object.assign(
+      resource,
+      approveRevision(this.pointers(resource), input.revisionId),
+    );
+    await db.save(resource);
+    await this.event(
+      db,
+      resource.id,
+      input.revisionId,
+      'approved',
+      input.actor.userId,
+    );
+  }
+
   async approve(
     siteId: string,
     resourceType: CmsResourceType,
@@ -743,21 +994,93 @@ export class CmsRevisionsService {
     revisionId: string,
     actor: RevisionActor,
   ): Promise<void> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, SitePermission.APPROVE);
-    await this.dataSource.transaction(async (db) => {
-      const resource = await this.lockedResource(
-        db,
+    await this.dataSource.transaction((db) =>
+      this.approveUsingManager(db, {
         siteId,
         resourceType,
         entityId,
-      );
-      Object.assign(
-        resource,
-        approveRevision(this.pointers(resource), revisionId),
-      );
-      await db.save(resource);
-      await this.event(db, resource.id, revisionId, 'approved', actor.userId);
+        revisionId,
+        actor,
+      }),
+    );
+  }
+  private async publishUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: CmsResourceType;
+      entityId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    activate?: (
+      manager: EntityManager,
+      snapshot: Record<string, unknown>,
+    ) => Promise<void>,
+  ): Promise<void> {
+    const access = await this.requireSite(
+      input.siteId,
+      input.actor,
+      input.resourceType === 'site_layout_bindings' ||
+        input.resourceType === 'site_article_list'
+        ? SitePermission.MANAGE_STRUCTURE
+        : SitePermission.PUBLISH_CONTENT,
+      db,
+    );
+    const resource = await this.lockedResource(
+      db,
+      input.siteId,
+      input.resourceType,
+      input.entityId,
+    );
+    const next = publishRevision(
+      this.pointers(resource),
+      input.revisionId,
+      access?.role === SiteRole.CONTENT_MANAGER
+        ? access.requiresApproval
+        : false,
+    );
+    const revision = await db.findOne(CmsRevisionEntity, {
+      where: { id: input.revisionId, resourceId: resource.id },
     });
+    if (!revision) throw new NotFoundException('Версия не найдена');
+    const published = resource.publishedRevisionId
+      ? await db.findOne(CmsRevisionEntity, {
+          where: {
+            id: resource.publishedRevisionId,
+            resourceId: resource.id,
+          },
+        })
+      : null;
+    if (
+      published &&
+      this.changesTemplateAssignment(
+        input.resourceType,
+        revision.snapshot,
+        published.snapshot,
+      ) &&
+      !hasSitePermission(
+        input.actor.platformRole,
+        access,
+        SitePermission.MANAGE_STRUCTURE,
+      )
+    ) {
+      throw new ForbiddenException(
+        'Недостаточно прав для публикации структурных изменений',
+      );
+    }
+    if (activate) await activate(db, revision.snapshot);
+    Object.assign(resource, next);
+    await db.save(resource);
+    await this.event(
+      db,
+      resource.id,
+      input.revisionId,
+      'published',
+      input.actor.userId,
+    );
   }
 
   async publish(
@@ -771,70 +1094,22 @@ export class CmsRevisionsService {
       snapshot: Record<string, unknown>,
     ) => Promise<void>,
   ): Promise<void> {
-    await this.dataSource.transaction(async (db) => {
-      const access = await this.requireSite(
-        siteId,
-        actor,
-        resourceType === 'site_layout_bindings' ||
-          resourceType === 'site_article_list'
-          ? SitePermission.MANAGE_STRUCTURE
-          : SitePermission.PUBLISH_CONTENT,
+    this.assertGenericResourceType(resourceType);
+    await this.dataSource.transaction((db) =>
+      this.publishUsingManager(
         db,
-      );
-      const resource = await this.lockedResource(
-        db,
-        siteId,
-        resourceType,
-        entityId,
-      );
-      const next = publishRevision(
-        this.pointers(resource),
-        revisionId,
-        access?.role === SiteRole.CONTENT_MANAGER
-          ? access.requiresApproval
-          : false,
-      );
-      const revision = await db.findOne(CmsRevisionEntity, {
-        where: { id: revisionId, resourceId: resource.id },
-      });
-      if (!revision) throw new NotFoundException('Версия не найдена');
-      const published = resource.publishedRevisionId
-        ? await db.findOne(CmsRevisionEntity, {
-            where: {
-              id: resource.publishedRevisionId,
-              resourceId: resource.id,
-            },
-          })
-        : null;
-      if (
-        published &&
-        this.changesTemplateAssignment(
-          resourceType,
-          revision.snapshot,
-          published.snapshot,
-        ) &&
-        !hasSitePermission(
-          actor.platformRole,
-          access,
-          SitePermission.MANAGE_STRUCTURE,
-        )
-      )
-        throw new ForbiddenException(
-          'Недостаточно прав для публикации структурных изменений',
-        );
-      if (activate) await activate(db, revision.snapshot);
-      Object.assign(resource, next);
-      await db.save(resource);
-      await this.event(db, resource.id, revisionId, 'published', actor.userId);
-    });
+        { siteId, resourceType, entityId, revisionId, actor },
+        activate,
+      ),
+    );
   }
-
   async published(
     siteId: string,
     resourceType: CmsResourceType,
     entityId: string,
     actor: RevisionActor,
   ): Promise<Record<string, unknown> | null> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
@@ -866,6 +1141,7 @@ export class CmsRevisionsService {
     publishedRevisionId: string | null;
     reviewState: RevisionPointers['reviewState'];
   } | null> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
@@ -906,6 +1182,7 @@ export class CmsRevisionsService {
     versionNumber: number;
     snapshot: Record<string, unknown>;
   }> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {
@@ -930,6 +1207,7 @@ export class CmsRevisionsService {
     entityId: string,
     actor: RevisionActor,
   ): Promise<CmsRevisionEntity[]> {
+    this.assertGenericResourceType(resourceType);
     await this.requireSite(siteId, actor, SitePermission.READ);
     return this.dataSource.transaction(async (db) => {
       const resource = await db.findOne(CmsRevisionResourceEntity, {

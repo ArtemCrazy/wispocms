@@ -1448,4 +1448,105 @@ describe('CMS revision storage', () => {
       { title: 'First' },
     ]);
   });
+  it.each(['restore', 'approve', 'publish'] as const)(
+    'rejects managed resources through the public generic %s boundary before authorization or writes',
+    async (operation) => {
+      const { service, dataSource, sites, siteAccesses } = setup();
+      const resourceType = 'chunk_instance' as never;
+      const call =
+        operation === 'restore'
+          ? service.restore(
+              'site-1',
+              resourceType,
+              'instance-1',
+              'revision-1',
+              null,
+              manager,
+            )
+          : operation === 'approve'
+            ? service.approve(
+                'site-1',
+                resourceType,
+                'instance-1',
+                'revision-1',
+                manager,
+              )
+            : service.publish(
+                'site-1',
+                resourceType,
+                'instance-1',
+                'revision-1',
+                manager,
+              );
+
+      await expect(call).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(sites.findOne).not.toHaveBeenCalled();
+      expect(siteAccesses.findOne).not.toHaveBeenCalled();
+    },
+  );
+  it.each([
+    'importPublishedBaseline',
+    'requestChanges',
+    'submit',
+    'published',
+    'current',
+    'getVersion',
+    'listVersions',
+  ] as const)(
+    'rejects managed resources through the public generic %s entry point',
+    async (operation) => {
+      const { service, dataSource, sites, siteAccesses } = setup();
+      const resourceType = 'chunk_layout' as never;
+      const call =
+        operation === 'importPublishedBaseline'
+          ? service.importPublishedBaseline({
+              siteId: 'site-1',
+              resourceType,
+              entityId: 'layout-1',
+              snapshot: { formatVersion: 1 },
+              actor: manager,
+            })
+          : operation === 'requestChanges'
+            ? service.requestChanges(
+                'site-1',
+                resourceType,
+                'layout-1',
+                'revision-1',
+                ownerReviewer,
+                'Reason',
+              )
+            : operation === 'submit'
+              ? service.submit(
+                  'site-1',
+                  resourceType,
+                  'layout-1',
+                  'revision-1',
+                  manager,
+                )
+              : operation === 'published'
+                ? service.published('site-1', resourceType, 'layout-1', manager)
+                : operation === 'current'
+                  ? service.current('site-1', resourceType, 'layout-1', manager)
+                  : operation === 'getVersion'
+                    ? service.getVersion(
+                        'site-1',
+                        resourceType,
+                        'layout-1',
+                        'revision-1',
+                        manager,
+                      )
+                    : service.listVersions(
+                        'site-1',
+                        resourceType,
+                        'layout-1',
+                        manager,
+                      );
+
+      await expect(call).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(sites.findOne).not.toHaveBeenCalled();
+      expect(siteAccesses.findOne).not.toHaveBeenCalled();
+    },
+  );
 });

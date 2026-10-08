@@ -1867,3 +1867,755 @@ describe('ManagedChunkPersistenceRepository', () => {
     });
   });
 });
+
+type ManagedLifecycleState = {
+  resources: Record<string, unknown>[];
+  revisions: Record<string, unknown>[];
+  instances: Record<string, unknown>[];
+  links: Record<string, unknown>[];
+  layouts: Record<string, unknown>[];
+  placements: Record<string, unknown>[];
+  events: Record<string, unknown>[];
+};
+
+const OTHER_SITE_ID = '99999999-9999-4999-8999-999999999999';
+const INSTANCE_ID = '10101010-1010-4010-8010-101010101010';
+const OTHER_INSTANCE_ID = '20202020-2020-4020-8020-202020202020';
+const INSTANCE_RESOURCE_ID = '30303030-3030-4030-8030-303030303030';
+const OTHER_INSTANCE_RESOURCE_ID = '40404040-4040-4040-8040-404040404040';
+const INSTANCE_REVISION_ID = '50505050-5050-4050-8050-505050505050';
+const OTHER_INSTANCE_REVISION_ID = '60606060-6060-4060-8060-606060606060';
+const LAYOUT_ID = '70707070-7070-4070-8070-707070707070';
+const EMPTY_LAYOUT_ID = '80808080-8080-4080-8080-808080808080';
+const LAYOUT_RESOURCE_ID = '90909090-9090-4090-8090-909090909090';
+const EMPTY_LAYOUT_RESOURCE_ID = 'abababab-abab-4bab-8bab-abababababab';
+const LAYOUT_REVISION_ID = 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc';
+const EMPTY_LAYOUT_REVISION_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+
+function initialManagedLifecycleState(): ManagedLifecycleState {
+  return {
+    resources: [
+      {
+        id: INSTANCE_RESOURCE_ID,
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: INSTANCE_ID,
+        latestVersionNumber: 1,
+        draftRevisionId: INSTANCE_REVISION_ID,
+        approvedRevisionId: null,
+        publishedRevisionId: null,
+        reviewState: 'draft',
+      },
+      {
+        id: OTHER_INSTANCE_RESOURCE_ID,
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: OTHER_INSTANCE_ID,
+        latestVersionNumber: 1,
+        draftRevisionId: OTHER_INSTANCE_REVISION_ID,
+        approvedRevisionId: null,
+        publishedRevisionId: null,
+        reviewState: 'draft',
+      },
+      {
+        id: LAYOUT_RESOURCE_ID,
+        siteId: SITE_ID,
+        resourceType: 'chunk_layout',
+        entityId: LAYOUT_ID,
+        latestVersionNumber: 1,
+        draftRevisionId: LAYOUT_REVISION_ID,
+        approvedRevisionId: null,
+        publishedRevisionId: null,
+        reviewState: 'draft',
+      },
+      {
+        id: EMPTY_LAYOUT_RESOURCE_ID,
+        siteId: SITE_ID,
+        resourceType: 'chunk_layout',
+        entityId: EMPTY_LAYOUT_ID,
+        latestVersionNumber: 1,
+        draftRevisionId: EMPTY_LAYOUT_REVISION_ID,
+        approvedRevisionId: null,
+        publishedRevisionId: null,
+        reviewState: 'draft',
+      },
+    ],
+    revisions: [
+      {
+        id: INSTANCE_REVISION_ID,
+        resourceId: INSTANCE_RESOURCE_ID,
+        versionNumber: 1,
+        snapshot: {
+          formatVersion: 1,
+          data: { headline: 'Historic' },
+          sanitizerPolicyVersion: null,
+        },
+        actorUserId: ACTOR.userId,
+      },
+      {
+        id: OTHER_INSTANCE_REVISION_ID,
+        resourceId: OTHER_INSTANCE_RESOURCE_ID,
+        versionNumber: 1,
+        snapshot: {
+          formatVersion: 1,
+          data: { headline: 'Other' },
+          sanitizerPolicyVersion: null,
+        },
+        actorUserId: ACTOR.userId,
+      },
+      {
+        id: LAYOUT_REVISION_ID,
+        resourceId: LAYOUT_RESOURCE_ID,
+        versionNumber: 1,
+        snapshot: {
+          formatVersion: 1,
+          templateKey: 'skinova-home',
+          templateVersion: '1',
+        },
+        actorUserId: ACTOR.userId,
+      },
+      {
+        id: EMPTY_LAYOUT_REVISION_ID,
+        resourceId: EMPTY_LAYOUT_RESOURCE_ID,
+        versionNumber: 1,
+        snapshot: {
+          formatVersion: 1,
+          templateKey: 'skinova-empty',
+          templateVersion: '1',
+        },
+        actorUserId: ACTOR.userId,
+      },
+    ],
+    instances: [
+      {
+        id: INSTANCE_ID,
+        siteId: SITE_ID,
+        revisionResourceId: INSTANCE_RESOURCE_ID,
+        displayName: 'Hero',
+      },
+      {
+        id: OTHER_INSTANCE_ID,
+        siteId: SITE_ID,
+        revisionResourceId: OTHER_INSTANCE_RESOURCE_ID,
+        displayName: 'Promo',
+      },
+    ],
+    links: [
+      {
+        revisionId: INSTANCE_REVISION_ID,
+        revisionResourceId: INSTANCE_RESOURCE_ID,
+        siteId: SITE_ID,
+        instanceId: INSTANCE_ID,
+        contractId: CONTRACT_ID,
+      },
+      {
+        revisionId: OTHER_INSTANCE_REVISION_ID,
+        revisionResourceId: OTHER_INSTANCE_RESOURCE_ID,
+        siteId: SITE_ID,
+        instanceId: OTHER_INSTANCE_ID,
+        contractId: CONTRACT_ID,
+      },
+    ],
+    layouts: [
+      {
+        id: LAYOUT_ID,
+        siteId: SITE_ID,
+        revisionResourceId: LAYOUT_RESOURCE_ID,
+        scopeKind: 'page',
+        pageId: PAGE_ID,
+        surfaceKey: null,
+      },
+      {
+        id: EMPTY_LAYOUT_ID,
+        siteId: SITE_ID,
+        revisionResourceId: EMPTY_LAYOUT_RESOURCE_ID,
+        scopeKind: 'site_surface',
+        pageId: null,
+        surfaceKey: 'footer',
+      },
+    ],
+    placements: [
+      {
+        id: 'dededede-dede-4ede-8ede-dededededede',
+        siteId: SITE_ID,
+        layoutId: LAYOUT_ID,
+        layoutRevisionResourceId: LAYOUT_RESOURCE_ID,
+        layoutRevisionId: LAYOUT_REVISION_ID,
+        instanceId: INSTANCE_ID,
+        slotKey: 'hero',
+        position: 0,
+      },
+    ],
+    events: [],
+  };
+}
+
+function createManagedLifecycleHarness() {
+  let committed = initialManagedLifecycleState();
+  let failOnSave: null | 'link' | 'placement' = null;
+  const operations: string[] = [];
+  const matches = (
+    row: Record<string, unknown>,
+    where: Record<string, unknown>,
+  ) => Object.entries(where).every(([key, value]) => row[key] === value);
+  const dataSource = {
+    transaction: jest.fn(
+      async (
+        callback: (manager: EntityManager) => Promise<unknown>,
+      ): Promise<unknown> => {
+        const working = structuredClone(committed);
+        const manager = {
+          findOne: jest.fn(
+            (
+              entity: unknown,
+              query: {
+                where: Record<string, unknown>;
+                lock?: { mode: string };
+              },
+            ) => {
+              const [label, rows] =
+                entity === SiteEntity
+                  ? ['site', null]
+                  : entity === SiteAccessEntity
+                    ? ['access', null]
+                    : entity === ManagedChunkInstanceEntity
+                      ? ['instance', working.instances]
+                      : entity === ManagedChunkLayoutEntity
+                        ? ['layout', working.layouts]
+                        : entity === CmsRevisionResourceEntity
+                          ? ['resource', working.resources]
+                          : entity === CmsRevisionEntity
+                            ? ['revision', working.revisions]
+                            : entity === ManagedChunkInstanceRevisionEntity
+                              ? ['link', working.links]
+                              : ['unknown', null];
+              operations.push(`findOne:${label}`);
+              if (entity === SiteEntity) {
+                return Promise.resolve(
+                  [SITE_ID, OTHER_SITE_ID].includes(String(query.where.id))
+                    ? { id: query.where.id, templatePackageId: PACKAGE_ID }
+                    : null,
+                );
+              }
+              if (entity === SiteAccessEntity) {
+                return Promise.resolve(
+                  query.where.userId === ACTOR.userId
+                    ? { role: SiteRole.OWNER, requiresApproval: false }
+                    : null,
+                );
+              }
+              if (!rows) throw new Error('Unexpected lifecycle lookup');
+              const found = rows.find((row) => matches(row, query.where));
+              if (!found) return Promise.resolve(null);
+              if (entity === CmsRevisionResourceEntity)
+                return Promise.resolve(
+                  Object.assign(
+                    new CmsRevisionResourceEntity(),
+                    structuredClone(found),
+                  ),
+                );
+              if (entity === CmsRevisionEntity)
+                return Promise.resolve(
+                  Object.assign(
+                    new CmsRevisionEntity(),
+                    structuredClone(found),
+                  ),
+                );
+              return Promise.resolve(structuredClone(found));
+            },
+          ),
+          find: jest.fn(
+            (entity: unknown, query: { where: Record<string, unknown> }) => {
+              if (entity !== ManagedChunkPlacementEntity)
+                throw new Error('Unexpected lifecycle collection lookup');
+              operations.push('find:placements');
+              return Promise.resolve(
+                working.placements
+                  .filter((row) => matches(row, query.where))
+                  .map((row) => structuredClone(row)),
+              );
+            },
+          ),
+          save: jest.fn((value: object | object[]) => {
+            const values = Array.isArray(value) ? value : [value];
+            for (const item of values) {
+              const kind =
+                item instanceof CmsRevisionResourceEntity
+                  ? 'resource'
+                  : item instanceof CmsRevisionEntity
+                    ? 'revision'
+                    : item instanceof ManagedChunkInstanceRevisionEntity
+                      ? 'link'
+                      : item instanceof ManagedChunkPlacementEntity
+                        ? 'placement'
+                        : item instanceof CmsRevisionEventEntity
+                          ? 'event'
+                          : 'unknown';
+              operations.push(`save:${kind}`);
+              if (failOnSave === kind) throw new Error(`${kind}-copy-failed`);
+              const rows =
+                kind === 'resource'
+                  ? working.resources
+                  : kind === 'revision'
+                    ? working.revisions
+                    : kind === 'link'
+                      ? working.links
+                      : kind === 'placement'
+                        ? working.placements
+                        : kind === 'event'
+                          ? working.events
+                          : null;
+              if (!rows) throw new Error('Unexpected lifecycle save');
+              const row = structuredClone(item as Record<string, unknown>);
+              const identity = kind === 'link' ? 'revisionId' : 'id';
+              const index = rows.findIndex(
+                (existing) => existing[identity] === row[identity],
+              );
+              if (index >= 0) rows[index] = row;
+              else rows.push(row);
+            }
+            return Promise.resolve(value);
+          }),
+        } as unknown as EntityManager;
+        const result = await callback(manager);
+        committed = working;
+        return result;
+      },
+    ),
+  };
+  const revisions = new CmsRevisionsService(
+    dataSource as never,
+    {
+      findOne: jest.fn(() => {
+        throw new Error('Lifecycle site lookup escaped transaction');
+      }),
+    } as never,
+    {
+      findOne: jest.fn(() => {
+        throw new Error('Lifecycle access lookup escaped transaction');
+      }),
+    } as never,
+  );
+  return {
+    repository: new ManagedChunkPersistenceRepository(
+      dataSource as never,
+      revisions,
+    ),
+    operations,
+    get state() {
+      return committed;
+    },
+    snapshot() {
+      return structuredClone(committed);
+    },
+    failNext(kind: 'link' | 'placement') {
+      failOnSave = kind;
+    },
+  };
+}
+
+describe('ManagedChunkPersistenceRepository typed lifecycle', () => {
+  it.each(['approve', 'publish'] as const)(
+    'blocks instance %s when the exact typed contract link is missing',
+    async (operation) => {
+      const harness = createManagedLifecycleHarness();
+      harness.state.links.splice(0, 1);
+      const resource = harness.state.resources.find(
+        (row) => row.id === INSTANCE_RESOURCE_ID,
+      )!;
+      if (operation === 'approve') resource.reviewState = 'in_review';
+      const before = harness.snapshot();
+      const call =
+        operation === 'approve'
+          ? harness.repository.approveInstanceRevision({
+              siteId: SITE_ID,
+              instanceId: INSTANCE_ID,
+              revisionId: INSTANCE_REVISION_ID,
+              actor: ADMIN_ACTOR,
+            })
+          : harness.repository.publishInstanceRevision({
+              siteId: SITE_ID,
+              instanceId: INSTANCE_ID,
+              revisionId: INSTANCE_REVISION_ID,
+              actor: ADMIN_ACTOR,
+            });
+
+      await expect(call).rejects.toBeInstanceOf(NotFoundException);
+      expect(harness.state).toEqual(before);
+    },
+  );
+
+  it('restores an instance into a new immutable revision with an exact copied contract link', async () => {
+    const harness = createManagedLifecycleHarness();
+
+    const restored = await harness.repository.restoreInstanceRevision({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      sourceRevisionId: INSTANCE_REVISION_ID,
+      expectedDraftRevisionId: INSTANCE_REVISION_ID,
+      actor: ACTOR,
+    });
+
+    expect(restored.id).not.toBe(INSTANCE_REVISION_ID);
+    expect(restored.versionNumber).toBe(2);
+    const resource = harness.state.resources.find(
+      (row) => row.id === INSTANCE_RESOURCE_ID,
+    );
+    expect(resource).toMatchObject({
+      draftRevisionId: restored.id,
+      latestVersionNumber: 2,
+      approvedRevisionId: null,
+      publishedRevisionId: null,
+    });
+    expect(
+      harness.state.links.find((row) => row.revisionId === restored.id),
+    ).toEqual({
+      revisionId: restored.id,
+      revisionResourceId: INSTANCE_RESOURCE_ID,
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      contractId: CONTRACT_ID,
+    });
+    expect(
+      harness.state.links.find(
+        (row) => row.revisionId === INSTANCE_REVISION_ID,
+      ),
+    ).toBeDefined();
+    const source = harness.state.revisions.find(
+      (row) => row.id === INSTANCE_REVISION_ID,
+    )!;
+    const copy = harness.state.revisions.find((row) => row.id === restored.id)!;
+    (source.snapshot as { data: { headline: string } }).data.headline =
+      'Mutated';
+    expect(copy.snapshot).toEqual({
+      formatVersion: 1,
+      data: { headline: 'Historic' },
+      sanitizerPolicyVersion: null,
+    });
+    expect(harness.operations.slice(0, 6)).toEqual([
+      'findOne:access',
+      'findOne:site',
+      'findOne:instance',
+      'findOne:resource',
+      'findOne:revision',
+      'findOne:link',
+    ]);
+  });
+
+  it('rolls back every instance restore write when typed copy fails', async () => {
+    const harness = createManagedLifecycleHarness();
+    const before = harness.snapshot();
+    harness.failNext('link');
+
+    await expect(
+      harness.repository.restoreInstanceRevision({
+        siteId: SITE_ID,
+        instanceId: INSTANCE_ID,
+        sourceRevisionId: INSTANCE_REVISION_ID,
+        expectedDraftRevisionId: INSTANCE_REVISION_ID,
+        actor: ACTOR,
+      }),
+    ).rejects.toThrow('link-copy-failed');
+
+    expect(harness.state).toEqual(before);
+  });
+
+  it.each([
+    ['unknown', 'ffffffff-ffff-4fff-8fff-ffffffffffff'],
+    ['cross-resource', OTHER_INSTANCE_REVISION_ID],
+  ])(
+    'returns safe not-found for an %s instance revision',
+    async (_, revisionId) => {
+      const harness = createManagedLifecycleHarness();
+      const before = harness.snapshot();
+
+      await expect(
+        harness.repository.publishInstanceRevision({
+          siteId: SITE_ID,
+          instanceId: INSTANCE_ID,
+          revisionId,
+          actor: ADMIN_ACTOR,
+        }),
+      ).rejects.toEqual(
+        new NotFoundException('Версия управляемого ресурса не найдена'),
+      );
+      expect(harness.state).toEqual(before);
+    },
+  );
+
+  it('returns the same safe not-found for a cross-site instance substitution', async () => {
+    const harness = createManagedLifecycleHarness();
+    const before = harness.snapshot();
+
+    await expect(
+      harness.repository.publishInstanceRevision({
+        siteId: OTHER_SITE_ID,
+        instanceId: INSTANCE_ID,
+        revisionId: INSTANCE_REVISION_ID,
+        actor: ADMIN_ACTOR,
+      }),
+    ).rejects.toEqual(
+      new NotFoundException('Версия управляемого ресурса не найдена'),
+    );
+    expect(harness.state).toEqual(before);
+  });
+
+  it.each(['approve', 'publish'] as const)(
+    'blocks layout %s when a placement row does not belong to the exact layout identity',
+    async (operation) => {
+      const harness = createManagedLifecycleHarness();
+      harness.state.placements[0].layoutId = EMPTY_LAYOUT_ID;
+      const resource = harness.state.resources.find(
+        (row) => row.id === LAYOUT_RESOURCE_ID,
+      )!;
+      if (operation === 'approve') resource.reviewState = 'in_review';
+      const before = harness.snapshot();
+      const call =
+        operation === 'approve'
+          ? harness.repository.approveLayoutRevision({
+              siteId: SITE_ID,
+              layoutId: LAYOUT_ID,
+              revisionId: LAYOUT_REVISION_ID,
+              actor: ADMIN_ACTOR,
+            })
+          : harness.repository.publishLayoutRevision({
+              siteId: SITE_ID,
+              layoutId: LAYOUT_ID,
+              revisionId: LAYOUT_REVISION_ID,
+              actor: ADMIN_ACTOR,
+            });
+
+      await expect(call).rejects.toBeInstanceOf(NotFoundException);
+      expect(harness.state).toEqual(before);
+    },
+  );
+
+  it('blocks layout publication when typed ownership is not exact', async () => {
+    const harness = createManagedLifecycleHarness();
+    harness.state.layouts[0].revisionResourceId = EMPTY_LAYOUT_RESOURCE_ID;
+    const before = harness.snapshot();
+
+    await expect(
+      harness.repository.publishLayoutRevision({
+        siteId: SITE_ID,
+        layoutId: LAYOUT_ID,
+        revisionId: LAYOUT_REVISION_ID,
+        actor: ADMIN_ACTOR,
+      }),
+    ).rejects.toEqual(
+      new NotFoundException('Версия управляемого ресурса не найдена'),
+    );
+    expect(harness.state).toEqual(before);
+  });
+
+  it('restores the complete layout placement set into a new immutable revision', async () => {
+    const harness = createManagedLifecycleHarness();
+
+    const restored = await harness.repository.restoreLayoutRevision({
+      siteId: SITE_ID,
+      layoutId: LAYOUT_ID,
+      sourceRevisionId: LAYOUT_REVISION_ID,
+      expectedDraftRevisionId: LAYOUT_REVISION_ID,
+      actor: ACTOR,
+    });
+
+    expect(restored.id).not.toBe(LAYOUT_REVISION_ID);
+    expect(restored.versionNumber).toBe(2);
+    expect(
+      harness.state.placements.filter(
+        (row) => row.layoutRevisionId === LAYOUT_REVISION_ID,
+      ),
+    ).toHaveLength(1);
+    expect(
+      harness.state.placements.filter(
+        (row) => row.layoutRevisionId === restored.id,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        siteId: SITE_ID,
+        layoutId: LAYOUT_ID,
+        layoutRevisionResourceId: LAYOUT_RESOURCE_ID,
+        instanceId: INSTANCE_ID,
+        slotKey: 'hero',
+        position: 0,
+      }),
+    ]);
+    expect(harness.state.events).toContainEqual(
+      expect.objectContaining({
+        revisionId: restored.id,
+        eventType: 'version_restored',
+        reason: `restored from ${LAYOUT_REVISION_ID}`,
+      }),
+    );
+  });
+
+  it('restores a valid complete empty layout as another empty revision', async () => {
+    const harness = createManagedLifecycleHarness();
+
+    const restored = await harness.repository.restoreLayoutRevision({
+      siteId: SITE_ID,
+      layoutId: EMPTY_LAYOUT_ID,
+      sourceRevisionId: EMPTY_LAYOUT_REVISION_ID,
+      expectedDraftRevisionId: EMPTY_LAYOUT_REVISION_ID,
+      actor: ACTOR,
+    });
+
+    expect(restored.versionNumber).toBe(2);
+    expect(
+      harness.state.placements.filter(
+        (row) => row.layoutRevisionId === restored.id,
+      ),
+    ).toEqual([]);
+    expect(
+      harness.state.resources.find(
+        (row) => row.id === EMPTY_LAYOUT_RESOURCE_ID,
+      ),
+    ).toMatchObject({ draftRevisionId: restored.id });
+  });
+
+  it('rolls back every layout restore write when placement copy fails', async () => {
+    const harness = createManagedLifecycleHarness();
+    const before = harness.snapshot();
+    harness.failNext('placement');
+
+    await expect(
+      harness.repository.restoreLayoutRevision({
+        siteId: SITE_ID,
+        layoutId: LAYOUT_ID,
+        sourceRevisionId: LAYOUT_REVISION_ID,
+        expectedDraftRevisionId: LAYOUT_REVISION_ID,
+        actor: ACTOR,
+      }),
+    ).rejects.toThrow('placement-copy-failed');
+
+    expect(harness.state).toEqual(before);
+  });
+});
+describe('ManagedChunkPersistenceRepository typed lifecycle success paths', () => {
+  it('approves an instance only after its exact typed link precondition', async () => {
+    const harness = createManagedLifecycleHarness();
+    const resource = harness.state.resources.find(
+      (row) => row.id === INSTANCE_RESOURCE_ID,
+    )!;
+    resource.reviewState = 'in_review';
+
+    await harness.repository.approveInstanceRevision({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      revisionId: INSTANCE_REVISION_ID,
+      actor: ADMIN_ACTOR,
+    });
+
+    expect(
+      harness.state.resources.find((row) => row.id === INSTANCE_RESOURCE_ID),
+    ).toMatchObject({
+      approvedRevisionId: INSTANCE_REVISION_ID,
+      reviewState: 'approved',
+    });
+    expect(harness.state.events).toContainEqual(
+      expect.objectContaining({
+        revisionId: INSTANCE_REVISION_ID,
+        eventType: 'approved',
+      }),
+    );
+  });
+
+  it('publishes an instance only after its exact typed link precondition', async () => {
+    const harness = createManagedLifecycleHarness();
+
+    await harness.repository.publishInstanceRevision({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      revisionId: INSTANCE_REVISION_ID,
+      actor: ADMIN_ACTOR,
+    });
+
+    expect(
+      harness.state.resources.find((row) => row.id === INSTANCE_RESOURCE_ID),
+    ).toMatchObject({
+      approvedRevisionId: INSTANCE_REVISION_ID,
+      publishedRevisionId: INSTANCE_REVISION_ID,
+      reviewState: 'approved',
+    });
+    expect(harness.state.events).toContainEqual(
+      expect.objectContaining({
+        revisionId: INSTANCE_REVISION_ID,
+        eventType: 'published',
+      }),
+    );
+  });
+
+  it('accepts a complete empty layout for approve and publish', async () => {
+    const harness = createManagedLifecycleHarness();
+    const resource = harness.state.resources.find(
+      (row) => row.id === EMPTY_LAYOUT_RESOURCE_ID,
+    )!;
+    resource.reviewState = 'in_review';
+
+    await harness.repository.approveLayoutRevision({
+      siteId: SITE_ID,
+      layoutId: EMPTY_LAYOUT_ID,
+      revisionId: EMPTY_LAYOUT_REVISION_ID,
+      actor: ADMIN_ACTOR,
+    });
+    await harness.repository.publishLayoutRevision({
+      siteId: SITE_ID,
+      layoutId: EMPTY_LAYOUT_ID,
+      revisionId: EMPTY_LAYOUT_REVISION_ID,
+      actor: ADMIN_ACTOR,
+    });
+
+    expect(
+      harness.state.resources.find(
+        (row) => row.id === EMPTY_LAYOUT_RESOURCE_ID,
+      ),
+    ).toMatchObject({
+      approvedRevisionId: EMPTY_LAYOUT_REVISION_ID,
+      publishedRevisionId: EMPTY_LAYOUT_REVISION_ID,
+      reviewState: 'approved',
+    });
+    expect(
+      harness.state.placements.filter(
+        (row) => row.layoutRevisionId === EMPTY_LAYOUT_REVISION_ID,
+      ),
+    ).toEqual([]);
+  });
+
+  it('blocks a layout whose complete placement set references a missing site instance', async () => {
+    const harness = createManagedLifecycleHarness();
+    harness.state.instances.splice(
+      harness.state.instances.findIndex((row) => row.id === INSTANCE_ID),
+      1,
+    );
+    const before = harness.snapshot();
+
+    await expect(
+      harness.repository.publishLayoutRevision({
+        siteId: SITE_ID,
+        layoutId: LAYOUT_ID,
+        revisionId: LAYOUT_REVISION_ID,
+        actor: ADMIN_ACTOR,
+      }),
+    ).rejects.toEqual(
+      new NotFoundException('Версия управляемого ресурса не найдена'),
+    );
+    expect(harness.state).toEqual(before);
+  });
+
+  it('blocks cross-resource layout revision substitution without leaking ownership', async () => {
+    const harness = createManagedLifecycleHarness();
+    const before = harness.snapshot();
+
+    await expect(
+      harness.repository.publishLayoutRevision({
+        siteId: SITE_ID,
+        layoutId: LAYOUT_ID,
+        revisionId: EMPTY_LAYOUT_REVISION_ID,
+        actor: ADMIN_ACTOR,
+      }),
+    ).rejects.toEqual(
+      new NotFoundException('Версия управляемого ресурса не найдена'),
+    );
+    expect(harness.state).toEqual(before);
+  });
+});

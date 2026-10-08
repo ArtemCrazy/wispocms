@@ -8,6 +8,8 @@ import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import {
+  CmsRevisionEntity,
+  CmsRevisionResourceEntity,
   ManagedChunkContractEntity,
   ManagedChunkInstanceEntity,
   ManagedChunkInstanceRevisionEntity,
@@ -84,6 +86,347 @@ export class ManagedChunkPersistenceRepository {
     private readonly revisions: CmsRevisionsService,
   ) {}
 
+  async restoreInstanceRevision(input: {
+    siteId: string;
+    instanceId: string;
+    sourceRevisionId: string;
+    expectedDraftRevisionId: string | null;
+    actor: RevisionActor;
+  }): Promise<{ id: string; versionNumber: number }> {
+    const siteId = String(input.siteId);
+    const instanceId = String(input.instanceId);
+    const sourceRevisionId = String(input.sourceRevisionId);
+    const expectedDraftRevisionId = input.expectedDraftRevisionId;
+    const actor = { ...input.actor };
+    return this.dataSource.transaction(async (db) => {
+      let sourceLink: ManagedChunkInstanceRevisionEntity | null = null;
+      return this.revisions.restoreManagedRevisionUsingManager(
+        db,
+        {
+          siteId,
+          resourceType: 'chunk_instance',
+          entityId: instanceId,
+          sourceRevisionId,
+          expectedDraftRevisionId,
+          actor,
+        },
+        async (prepareDb) => {
+          const prepared = await this.prepareInstanceRevision(prepareDb, {
+            siteId,
+            instanceId,
+            revisionId: sourceRevisionId,
+          });
+          sourceLink = prepared.link;
+          return prepared;
+        },
+        async (hookDb, revision, resource) => {
+          if (!sourceLink) this.managedRevisionNotFound();
+          await hookDb.save(
+            Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+              revisionId: revision.id,
+              revisionResourceId: resource.id,
+              siteId,
+              instanceId,
+              contractId: sourceLink.contractId,
+            }),
+          );
+        },
+      );
+    });
+  }
+
+  async approveInstanceRevision(input: {
+    siteId: string;
+    instanceId: string;
+    revisionId: string;
+    actor: RevisionActor;
+  }): Promise<void> {
+    return this.runInstanceLifecycle(input, 'approve');
+  }
+
+  async publishInstanceRevision(input: {
+    siteId: string;
+    instanceId: string;
+    revisionId: string;
+    actor: RevisionActor;
+  }): Promise<void> {
+    return this.runInstanceLifecycle(input, 'publish');
+  }
+
+  async restoreLayoutRevision(input: {
+    siteId: string;
+    layoutId: string;
+    sourceRevisionId: string;
+    expectedDraftRevisionId: string | null;
+    actor: RevisionActor;
+  }): Promise<{ id: string; versionNumber: number }> {
+    const siteId = String(input.siteId);
+    const layoutId = String(input.layoutId);
+    const sourceRevisionId = String(input.sourceRevisionId);
+    const expectedDraftRevisionId = input.expectedDraftRevisionId;
+    const actor = { ...input.actor };
+    return this.dataSource.transaction(async (db) => {
+      let sourcePlacements: ManagedChunkPlacementEntity[] | null = null;
+      return this.revisions.restoreManagedRevisionUsingManager(
+        db,
+        {
+          siteId,
+          resourceType: 'chunk_layout',
+          entityId: layoutId,
+          sourceRevisionId,
+          expectedDraftRevisionId,
+          actor,
+        },
+        async (prepareDb) => {
+          const prepared = await this.prepareLayoutRevision(prepareDb, {
+            siteId,
+            layoutId,
+            revisionId: sourceRevisionId,
+          });
+          sourcePlacements = prepared.placements.map((placement) =>
+            Object.assign(
+              new ManagedChunkPlacementEntity(),
+              structuredClone(placement),
+            ),
+          );
+          return prepared;
+        },
+        async (hookDb, revision, resource) => {
+          if (!sourcePlacements) this.managedRevisionNotFound();
+          if (sourcePlacements.length === 0) return;
+          await hookDb.save(
+            sourcePlacements.map((placement) =>
+              Object.assign(new ManagedChunkPlacementEntity(), {
+                id: randomUUID(),
+                siteId,
+                layoutId,
+                layoutRevisionResourceId: resource.id,
+                layoutRevisionId: revision.id,
+                instanceId: placement.instanceId,
+                slotKey: placement.slotKey,
+                position: placement.position,
+              }),
+            ),
+          );
+        },
+      );
+    });
+  }
+
+  async approveLayoutRevision(input: {
+    siteId: string;
+    layoutId: string;
+    revisionId: string;
+    actor: RevisionActor;
+  }): Promise<void> {
+    return this.runLayoutLifecycle(input, 'approve');
+  }
+
+  async publishLayoutRevision(input: {
+    siteId: string;
+    layoutId: string;
+    revisionId: string;
+    actor: RevisionActor;
+  }): Promise<void> {
+    return this.runLayoutLifecycle(input, 'publish');
+  }
+
+  private async runInstanceLifecycle(
+    input: {
+      siteId: string;
+      instanceId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    operation: 'approve' | 'publish',
+  ): Promise<void> {
+    const siteId = String(input.siteId);
+    const instanceId = String(input.instanceId);
+    const revisionId = String(input.revisionId);
+    const actor = { ...input.actor };
+    await this.dataSource.transaction(async (db) => {
+      const prepare = async (prepareDb: EntityManager) =>
+        this.prepareInstanceRevision(prepareDb, {
+          siteId,
+          instanceId,
+          revisionId,
+        });
+      const lifecycleInput = {
+        siteId,
+        resourceType: 'chunk_instance' as const,
+        entityId: instanceId,
+        revisionId,
+        actor,
+      };
+      if (operation === 'approve') {
+        await this.revisions.approveManagedRevisionUsingManager(
+          db,
+          lifecycleInput,
+          prepare,
+        );
+      } else {
+        await this.revisions.publishManagedRevisionUsingManager(
+          db,
+          lifecycleInput,
+          prepare,
+        );
+      }
+    });
+  }
+
+  private async runLayoutLifecycle(
+    input: {
+      siteId: string;
+      layoutId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    operation: 'approve' | 'publish',
+  ): Promise<void> {
+    const siteId = String(input.siteId);
+    const layoutId = String(input.layoutId);
+    const revisionId = String(input.revisionId);
+    const actor = { ...input.actor };
+    await this.dataSource.transaction(async (db) => {
+      const prepare = async (prepareDb: EntityManager) =>
+        this.prepareLayoutRevision(prepareDb, {
+          siteId,
+          layoutId,
+          revisionId,
+        });
+      const lifecycleInput = {
+        siteId,
+        resourceType: 'chunk_layout' as const,
+        entityId: layoutId,
+        revisionId,
+        actor,
+      };
+      if (operation === 'approve') {
+        await this.revisions.approveManagedRevisionUsingManager(
+          db,
+          lifecycleInput,
+          prepare,
+        );
+      } else {
+        await this.revisions.publishManagedRevisionUsingManager(
+          db,
+          lifecycleInput,
+          prepare,
+        );
+      }
+    });
+  }
+
+  private async prepareInstanceRevision(
+    db: EntityManager,
+    input: { siteId: string; instanceId: string; revisionId: string },
+  ): Promise<{
+    resource: CmsRevisionResourceEntity;
+    revision: CmsRevisionEntity;
+    link: ManagedChunkInstanceRevisionEntity;
+  }> {
+    await this.requireLifecycleSite(db, input.siteId);
+    const instance = await db.findOne(ManagedChunkInstanceEntity, {
+      where: { id: input.instanceId, siteId: input.siteId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!instance) this.managedRevisionNotFound();
+    const resource = await db.findOne(CmsRevisionResourceEntity, {
+      where: {
+        id: instance.revisionResourceId,
+        siteId: input.siteId,
+        resourceType: 'chunk_instance',
+        entityId: input.instanceId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!resource) this.managedRevisionNotFound();
+    const revision = await db.findOne(CmsRevisionEntity, {
+      where: { id: input.revisionId, resourceId: resource.id },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!revision) this.managedRevisionNotFound();
+    const link = await db.findOne(ManagedChunkInstanceRevisionEntity, {
+      where: {
+        revisionId: input.revisionId,
+        revisionResourceId: resource.id,
+        siteId: input.siteId,
+        instanceId: input.instanceId,
+      },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!link) this.managedRevisionNotFound();
+    return { resource, revision, link };
+  }
+
+  private async prepareLayoutRevision(
+    db: EntityManager,
+    input: { siteId: string; layoutId: string; revisionId: string },
+  ): Promise<{
+    resource: CmsRevisionResourceEntity;
+    revision: CmsRevisionEntity;
+    placements: ManagedChunkPlacementEntity[];
+  }> {
+    await this.requireLifecycleSite(db, input.siteId);
+    const layout = await db.findOne(ManagedChunkLayoutEntity, {
+      where: { id: input.layoutId, siteId: input.siteId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!layout) this.managedRevisionNotFound();
+    const resource = await db.findOne(CmsRevisionResourceEntity, {
+      where: {
+        id: layout.revisionResourceId,
+        siteId: input.siteId,
+        resourceType: 'chunk_layout',
+        entityId: input.layoutId,
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!resource) this.managedRevisionNotFound();
+    const revision = await db.findOne(CmsRevisionEntity, {
+      where: { id: input.revisionId, resourceId: resource.id },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!revision) this.managedRevisionNotFound();
+    const placements = await db.find(ManagedChunkPlacementEntity, {
+      where: { layoutRevisionId: input.revisionId },
+    });
+    const instanceIds = new Set<string>();
+    for (const placement of placements) {
+      if (
+        placement.siteId !== input.siteId ||
+        placement.layoutId !== input.layoutId ||
+        placement.layoutRevisionResourceId !== resource.id ||
+        placement.layoutRevisionId !== input.revisionId
+      ) {
+        this.managedRevisionNotFound();
+      }
+      instanceIds.add(placement.instanceId);
+    }
+    for (const instanceId of [...instanceIds].sort()) {
+      const instance = await db.findOne(ManagedChunkInstanceEntity, {
+        where: { id: instanceId, siteId: input.siteId },
+        lock: { mode: 'pessimistic_read' },
+      });
+      if (!instance) this.managedRevisionNotFound();
+    }
+    return { resource, revision, placements };
+  }
+
+  private async requireLifecycleSite(
+    db: EntityManager,
+    siteId: string,
+  ): Promise<void> {
+    const site = await db.findOne(SiteEntity, {
+      where: { id: siteId },
+      lock: { mode: 'pessimistic_read' },
+    });
+    if (!site) this.managedRevisionNotFound();
+  }
+
+  private managedRevisionNotFound(): never {
+    throw new NotFoundException('Версия управляемого ресурса не найдена');
+  }
   async saveLayoutDraft(input: {
     siteId: string;
     target:

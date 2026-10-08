@@ -2974,3 +2974,39 @@
   quality-fix commit этой записи.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, `main`, push/merge и
   deploy не затрагивались.
+
+### 2026-10-08 · Phase 2 / Task 5: typed lifecycle managed-версий
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализовано: внутренние manager-bound prepare/copy boundaries для restore,
+  approve и publish managed instance/layout revisions; public legacy-сигнатуры
+  сохранены как delegates, а generic entry points runtime-guarded от managed
+  типов. Repository wrappers проверяют точные site/owner/resource/revision и
+  typed link либо весь фактически присутствующий placement set.
+- Restore: всегда создаётся новая immutable CMS revision. Instance получает
+  новый точный contract link; layout получает независимую копию всего source
+  placement set. Пустой placement set является валидной полной раскладкой.
+  Source revision и её typed rows не становятся draft и не изменяются.
+- Tenant/atomic safety: порядок manager workflow — Access → Site → стабильный
+  typed owner → resource → revision → typed rows/placements. Unknown,
+  cross-site и cross-resource substitutions возвращают одинаковый safe
+  NotFound. Precondition/copy failure откатывает revision, typed rows, pointers
+  и events одной внешней транзакцией.
+- Изменено: `apps/api/src/content/cms-revisions.service.ts` и spec,
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  spec, эта запись журнала. План Task 7 не менялся: новых real-DB lifecycle
+  concurrency/constraint случаев сверх уже запланированной приёмки не выявлено.
+- БД — схема: не менялась. Новых или отредактированных миграций/entity нет.
+- БД — данные и формат: существующие данные не менялись; формат snapshot,
+  contract link и placement rows сохранён. Проверки использовали только
+  stateful in-memory transaction harness с реальным `CmsRevisionsService`.
+- TDD RED: 83 прежних теста прошли, 16 новых упали — 13 на отсутствующих
+  lifecycle wrapper methods и 3 на generic restore/approve/publish, которые
+  доходили до NotFound/Forbidden. Дополнительный RED: 38 прежних service-тестов
+  прошли, 6 упали на остальных generic entry points, принимавших managed types.
+- GREEN/регрессия: targeted revision service/repository/workflow — 120/120;
+  API `nest build`, адресные ESLint и Prettier прошли. Финальный commit:
+  `feat: guard managed chunk revision lifecycle` (этот commit).
+- Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, внешний сервер,
+  `main`, push/merge и deploy не затрагивались.
