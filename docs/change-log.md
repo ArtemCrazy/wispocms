@@ -3379,3 +3379,15 @@
   сохранённых значений не менялись; общая/рабочая БД, VDS, push, merge и deploy
   не затрагивались. Полный PostgreSQL/regression аудит отложен до отдельного
   post-MVP этапа.
+### 2026-10-08 · Phase 3.1: Skinova v2 registration MVP
+
+- Статус: **В работе**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Задача: добавить отдельный реальный Skinova manifest v2 и атомарно
+  materialize его managed chunk contracts при регистрации package version.
+  Production v1 manifest, текущий сайт и legacy banners остаются активными.
+- Scope: validator-dispatch v1/v2, DTO/service registration boundary,
+  manager-aware contract registration и критичные TDD-проверки. Backfill,
+  shadow-read, API/UI, runtime switch и VDS в этот шаг не входят.
+- БД: новая migration и изменение схемы не планируются; данные общей/рабочей БД
+  и формат существующих записей не меняются. Локально код пока не изменён.
