@@ -341,17 +341,30 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
           RAISE EXCEPTION 'Managed chunk owner identities cannot be deleted'
             USING ERRCODE = '55000';
         END IF;
-        IF TG_TABLE_NAME = 'managed_chunk_layouts' THEN
+        IF TG_TABLE_NAME = 'managed_chunk_layouts'
+          AND (
+            NEW."id" IS DISTINCT FROM OLD."id"
+            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+            OR NEW."scope_kind" IS DISTINCT FROM OLD."scope_kind"
+            OR NEW."page_id" IS DISTINCT FROM OLD."page_id"
+            OR NEW."surface_key" IS DISTINCT FROM OLD."surface_key"
+            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+          )
+        THEN
           RAISE EXCEPTION 'Managed chunk layout identities are immutable'
             USING ERRCODE = '55000';
         END IF;
-        IF NEW."id" IS DISTINCT FROM OLD."id"
-          OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
-          OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
-          OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
-          OR (
-            NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
-            AND NEW."created_by_user_id" IS NOT NULL
+        IF TG_TABLE_NAME = 'managed_chunk_instances'
+          AND (
+            NEW."id" IS DISTINCT FROM OLD."id"
+            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+            OR (
+              NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
+              AND NEW."created_by_user_id" IS NOT NULL
+            )
           )
         THEN
           RAISE EXCEPTION 'Managed chunk instance identity is immutable'

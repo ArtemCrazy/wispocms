@@ -714,23 +714,51 @@ describe('ManagedChunkPersistence migration', () => {
         ),
       );
     }
-    for (const fragment of [
-      `IF TG_OP = 'DELETE' THEN`,
-      `IF TG_TABLE_NAME = 'managed_chunk_layouts' THEN`,
-      `NEW."id" IS DISTINCT FROM OLD."id"`,
-      `NEW."site_id" IS DISTINCT FROM OLD."site_id"`,
-      `NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"`,
-      `NEW."created_at" IS DISTINCT FROM OLD."created_at"`,
-      `NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"`,
-      `NEW."created_by_user_id" IS NOT NULL`,
-      `RETURN NEW`,
-    ]) {
-      expectFragment(protector, fragment);
-    }
+    expectFragment(protector, `IF TG_OP = 'DELETE' THEN`);
+    expectFragment(
+      protector,
+      `
+        IF TG_TABLE_NAME = 'managed_chunk_layouts'
+          AND (
+            NEW."id" IS DISTINCT FROM OLD."id"
+            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+            OR NEW."scope_kind" IS DISTINCT FROM OLD."scope_kind"
+            OR NEW."page_id" IS DISTINCT FROM OLD."page_id"
+            OR NEW."surface_key" IS DISTINCT FROM OLD."surface_key"
+            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+          )
+        THEN
+      `,
+    );
+    expectFragment(
+      protector,
+      `
+        IF TG_TABLE_NAME = 'managed_chunk_instances'
+          AND (
+            NEW."id" IS DISTINCT FROM OLD."id"
+            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+            OR (
+              NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
+              AND NEW."created_by_user_id" IS NOT NULL
+            )
+          )
+        THEN
+      `,
+    );
+    expectFragment(protector, 'RETURN NEW');
     expect(protector).not.toContain('NEW."display_name" IS DISTINCT');
     expect(protector).not.toContain('NEW."is_archived" IS DISTINCT');
     expect(protector).not.toContain('NEW."updated_at" IS DISTINCT');
     expect(protector).not.toContain('NEW IS DISTINCT FROM OLD');
+    expect(protector).not.toContain("TG_OP = 'UPDATE'");
+    expect(protector).not.toContain(
+      normalizeSql(
+        `IF TG_TABLE_NAME = 'managed_chunk_layouts' THEN RAISE EXCEPTION`,
+      ),
+    );
   });
 
   it('locks every guard dependency in the first rollback call before checking or dropping', () => {

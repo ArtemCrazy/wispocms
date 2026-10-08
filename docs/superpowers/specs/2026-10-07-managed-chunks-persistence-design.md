@@ -64,7 +64,14 @@ revision engine для чанков отклонён как дублирован
   остаётся невключённой;
 - добавляет к `CHK_cms_revision_resources_type` типы `chunk_instance` и
   `chunk_layout`, сохраняя все прежние значения;
-- добавляет составные unique keys, необходимые только для tenant-safe FK;
+- добавляет `pages(id, site_id)` для tenant-safe page FK; уже существующие
+  `template_package_versions(id, template_package_id)` и
+  `cms_revisions(resource_id, id)` сохраняются без дублирования;
+- exact resource identity instance/layout обеспечивается deferred constraint
+  triggers: lookup по PK `revision_resource_id`, сравнение `site_id`,
+  `resource_type` и `entity_id`, а также reverse guard от последующего
+  изменения identity ресурса. Избыточный unique
+  `cms_revision_resources(id, site_id, resource_type, entity_id)` не создаётся;
 - создаёт новые пустые таблицы и индексы; `INSERT`, backfill и ручных изменений
   существующих строк нет.
 
@@ -120,8 +127,14 @@ version и могут меняться без новой schema identity.
 `display_name` и архивный статус являются организационными метаданными, а не
 public content. Public payload определяется только опубликованной revision.
 Создание instance и его revision resource выполняется одной транзакцией.
-Composite FK фиксирует совпадение `site_id`, `resource_type = chunk_instance` и
-`entity_id = instance.id`.
+Deferred constraint trigger на instance/resource делает lookup ресурса по
+`revision_resource_id` PK и проверяет точное совпадение `site_id`,
+`resource_type = chunk_instance` и `entity_id = instance.id`; reverse guard на
+`cms_revision_resources` запрещает позднее расхождение этой identity. DELETE и
+изменение стабильных `id/site_id/revision_resource_id/created_at` запрещены.
+`display_name`, `is_archived` и `updated_at` остаются изменяемыми
+организационными метаданными. `created_by_user_id` может стать `NULL` через FK
+`ON DELETE SET NULL`, но не может быть переназначен на другого пользователя.
 
 ### `managed_chunk_instance_revisions`
 
@@ -177,6 +190,14 @@ Check constraint требует ровно один target:
 проверяет принадлежность страницы тому же сайту. Partial unique indexes не
 разрешают две layout identities для одной страницы или одного
 `site + surface_key`.
+
+Exact resource identity проверяется тем же deferred lookup по
+`revision_resource_id` PK и reverse resource guard, с type `chunk_layout` и
+`entity_id = layout.id`; отдельный four-column resource unique для этого не
+нужен. DELETE layout запрещён. UPDATE отклоняется только при изменении
+`id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`
+через null-safe `IS DISTINCT FROM`; no-op UPDATE и будущие non-identity поля
+допустимы.
 
 ### `managed_chunk_placements`
 
@@ -289,10 +310,15 @@ all`). Индексы создаются обычным способом вну�
 - нет revision resources типов `chunk_instance`/`chunk_layout`;
 - нет сохранённых `template_package_versions.manifest_version = 2`.
 
-При наличии любого из этих данных `down()` завершается ошибкой до удаления
-объектов. Откат приложения не требует и не должен автоматически откатывать эту
-аддитивную схему. После начала Phase 3 восстановление выполняется forward-fix
-или по отдельно подтверждённому плану резервной копии.
+Первой операцией `down()` один SQL batch берёт transaction-wide
+`SHARE ROW EXCLUSIVE` locks в фиксированном порядке на шесть managed tables,
+`cms_revision_resources` и `template_package_versions`, а затем выполняет
+guard. Поэтому после проверки конкурентная запись не может появиться до
+завершения migration transaction. При наличии любого из этих данных `down()`
+завершается ошибкой до удаления объектов. Откат приложения не требует и не
+должен автоматически откатывать эту аддитивную схему. После начала Phase 3
+восстановление выполняется forward-fix или по отдельно подтверждённому плану
+резервной копии.
 
 ## Проверки приёмки Phase 2
 

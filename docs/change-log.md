@@ -96,6 +96,20 @@
   Task 1 — 0. Task 7 plan дополнен двухсоединенческой lock-race и owner-identity
   DB acceptance; БД/Docker фактически не запускались. Данные/backfill, VDS,
   Registry, push, merge и deploy не затрагивались.
+- Post-review technical clarification Task 1: письменные persistence spec и
+  plan приведены в соответствие с одобренной реализацией exact resource
+  identity через deferred lookup по PK + reverse guard; избыточный
+  `cms_revision_resources(id, site_id, resource_type, entity_id)` unique не
+  возвращён. Layout owner trigger уточнён: DELETE и изменения
+  `id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`
+  запрещены null-safe сравнением, но no-op и будущие non-identity UPDATE
+  допустимы. Внешнее поведение и scope Phase 2 не расширены, данные/backfill
+  отсутствуют, миграция ни к одной БД не применялась. Mutation RED временно
+  удалял сравнение `surface_key`: новый structural test упал ровно на owner
+  contract (1 fail, остальные 9 pass); мутация восстановлена до commit. GREEN:
+  3 Jest suites / 18 tests, API production build, TypeORM metadata construction
+  (40 entities), targeted ESLint/Prettier и `git diff --check` прошли.
+  БД/Docker/VDS/Registry/push/merge/deploy не запускались и не затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

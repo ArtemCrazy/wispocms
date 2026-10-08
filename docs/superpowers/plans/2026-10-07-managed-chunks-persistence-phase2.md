@@ -40,9 +40,9 @@
 ## Точный schema contract
 
 - `managed_chunk_contracts`: identity `(template_package_id, definition_key, schema_version)`, composite FK первой package version к тому же package, digest `^sha256:[0-9a-f]{64}$`, JSON objects `field_contract`/`data_schema`, immutable update/delete.
-- `managed_chunk_instances`: `site_id`, unique `revision_resource_id`, `display_name`, `is_archived`, nullable actor; composite FK resource совпадает по site, type `chunk_instance` и `entity_id = instance.id`.
+- `managed_chunk_instances`: `site_id`, unique `revision_resource_id`, `display_name`, `is_archived`, nullable actor; deferred exact-resource trigger совпадает по site, type `chunk_instance` и `entity_id = instance.id`, reverse guard защищает resource identity.
 - `managed_chunk_instance_revisions`: PK `revision_id`; exact resource/site/instance/contract links; payload не дублируется; row immutable.
-- `managed_chunk_layouts`: page или site_surface XOR; composite page/site FK; unique page target и unique `(site_id, surface_key)` target; resource type `chunk_layout` совпадает с identity.
+- `managed_chunk_layouts`: page или site_surface XOR; composite page/site FK; unique page target и unique `(site_id, surface_key)` target; deferred/reverse triggers фиксируют resource type `chunk_layout` и identity.
 - `managed_chunk_placements`: exact layout revision/resource/site и instance; `position >= 0`; unique `(layout_revision_id, slot_key, position)`; update/delete immutable.
 - `managed_chunk_migration_provenance`: source type только `banner` или `page_banner_assignment`; ровно один target instance/layout/placement; unique migration/source identity; в Phase 2 остаётся пустой.
 ## Task 1: Migration contract и TypeORM metadata
@@ -97,7 +97,21 @@ const previousResourceTypes = [
 const managedChunkResourceTypes = ['chunk_instance', 'chunk_layout'] as const;
 ```
 
-`up()` выполняет: manifest check `IN (1, 2)`; resource check previous+new; нужные composite unique keys; шесть tables из spec; indexes; `reject_managed_chunk_history_mutation()` и triggers на contracts, instance revisions, placements, provenance. `INSERT`/backfill отсутствуют.
+`up()` выполняет: manifest check `IN (1, 2)`; resource check previous+new;
+добавляет только новый tenant-safe unique `pages(id, site_id)`, сохраняет уже
+существующие `template_package_versions(id, template_package_id)` и
+`cms_revisions(resource_id, id)`; шесть tables из spec; indexes;
+`reject_managed_chunk_history_mutation()` и triggers на contracts, instance
+revisions, placements, provenance. Exact resource identity instance/layout
+обеспечивают deferred constraint trigger lookup по `revision_resource_id` PK,
+сравнение site/type/entity и reverse resource guard; избыточный unique
+`cms_revision_resources(id, site_id, resource_type, entity_id)` не создаётся.
+Owner trigger запрещает DELETE instance/layout; у instance защищает стабильную
+identity, оставляя организационные поля и actor `SET NULL` изменяемыми; у
+layout null-safe `IS DISTINCT FROM` защищает только
+`id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`,
+поэтому no-op и будущие non-identity UPDATE допустимы. `INSERT`/backfill
+отсутствуют.
 
 Минимальный entity contract:
 
@@ -119,7 +133,12 @@ export class ManagedChunkContractEntity {
 
 Остальные entities дословно отражают spec. Никакого cascade там, где требуется `RESTRICT`; actor uses `SET NULL`.
 
-`down()` первым statement проверяет: все новые tables empty, новых resource types нет, manifest v2 нет. Только затем удаляет новые objects и возвращает оба checks. Guard failure обязан произойти до удаления.
+`down()` первым единым query batch в фиксированном порядке берёт
+transaction-wide `SHARE ROW EXCLUSIVE` locks на все шесть managed tables,
+`cms_revision_resources` и `template_package_versions`, затем проверяет: все
+новые tables empty, новых resource types нет, manifest v2 нет. Только затем
+удаляет новые objects и возвращает оба checks. Guard failure обязан произойти
+до удаления.
 
 - [ ] **Step 4: Verify GREEN**
 
@@ -492,11 +511,12 @@ Concurrency acceptance использует два независимых сое
 3. после появления новых данных повторный `down()` падает на guard и не удаляет
    ни таблицы, ни checks, ни triggers.
 
-Owner-identity negative cases: layout с revision нельзя удалить, rebind к
-другому revision resource или перенести в другой site; instance нельзя удалить,
-поменять `id/site_id/revision_resource_id/created_at` или переназначить actor.
-При этом `display_name`/`is_archived`/`updated_at` обновляются, а удаление actor
-успешно выполняет FK `ON DELETE SET NULL`.
+Owner-identity negative cases: layout с revision нельзя удалить или изменить
+`id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`;
+no-op UPDATE layout проходит. Instance нельзя удалить, поменять
+`id/site_id/revision_resource_id/created_at` или переназначить actor. При этом
+`display_name`/`is_archived`/`updated_at` обновляются, а удаление actor успешно
+выполняет FK `ON DELETE SET NULL`.
 
 - [ ] **Step 5: Удалить только тестовый контейнер**
 
