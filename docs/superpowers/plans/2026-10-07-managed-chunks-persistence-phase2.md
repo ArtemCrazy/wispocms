@@ -249,11 +249,19 @@ expect(result.versionNumber).toBe(1);
 pnpm --dir apps/api test --runInBand -- template-packages/managed-chunk-persistence.repository.spec.ts content/cms-revisions.service.spec.ts
 ```
 
-Expected: FAIL на отсутствующем type/method.
+Expected: FAIL на отсутствующей typed boundary, dedicated method и manager-bound
+authorization/lock order.
 
-- [ ] **Step 3: GREEN manager-aware hook**
+- [ ] **Step 3: GREEN typed manager-aware hook**
 
-Расширить закрытый union типами `chunk_instance`/`chunk_layout`. Добавить internal hook:
+Разделить закрытые типы: generic `CmsResourceType` не содержит managed
+resources, отдельный `ManagedCmsResourceType` содержит только
+`chunk_instance`/`chunk_layout`. Public `saveDraft` и обычный
+`saveDraftUsingManager` принимают только generic type и дополнительно runtime
+guard отклоняют managed строки до любых writes при обходе TypeScript.
+
+Добавить dedicated internal метод `saveManagedDraftUsingManager` с обязательным
+hook, не подключая его к controller/API:
 
 ```ts
 type RevisionCreatedHook = (
@@ -263,7 +271,13 @@ type RevisionCreatedHook = (
 ) => Promise<void>;
 ```
 
-`saveDraftUsingManager` вызывает hook после save revision, но до pointer/event commit. Repository hook сохраняет `ManagedChunkInstanceRevisionEntity`.
+Dedicated метод вызывает hook после save revision, но до pointer/event commit.
+Public generic authorization выполняется внутри открытой transaction; оба
+manager draft methods проверяют site/access через переданный `EntityManager`.
+Repository в hook сначала получает `pessimistic_read` lock строки `sites`, затем
+читает contract и проверяет exact `templatePackageId`; только после этого
+сохраняет `ManagedChunkInstanceEntity` и
+`ManagedChunkInstanceRevisionEntity`.
 
 Snapshot строго:
 
@@ -283,7 +297,9 @@ Phase 2 не sanitizes payload и не exposes controller.
 pnpm --dir apps/api test --runInBand -- content/cms-revisions.service.spec.ts template-packages/managed-chunk-persistence.repository.spec.ts
 ```
 
-Expected: PASS; thrown hook error не оставляет committed resource/revision/pointer.
+Expected: PASS; generic managed bypass отклонён до writes; manager-bound
+site/access reads и site-lock-before-contract order подтверждены; thrown hook
+error не оставляет committed resource/revision/instance/link/pointer/event.
 
 - [ ] **Step 5: Commit**
 

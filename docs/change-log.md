@@ -190,8 +190,10 @@
   `managed-chunk-persistence.repository.ts` и spec,
   `template-package.module.ts`, эта запись журнала. Generic API/controller,
   sanitizer/media validation, schema/entities/migrations не менялись.
-- Формат новых сохраняемых значений: closed `CmsResourceType` расширен
-  `chunk_instance`/`chunk_layout`; snapshot instance строго равен
+- Формат новых сохраняемых значений: типы разделены — generic
+  `CmsResourceType` не содержит managed resources, а отдельный закрытый
+  `ManagedCmsResourceType` содержит `chunk_instance`/`chunk_layout`; snapshot
+  instance строго равен
   `{ formatVersion: 1, data, sanitizerPolicyVersion }`; typed link хранит точные
   `revisionId`, `revisionResourceId`, `siteId`, `instanceId`, `contractId`.
   Вызов снимает independent clone `data` до первого `await`, без санитаризации
@@ -207,7 +209,8 @@
   `revision-workflow` и `managed-chunk-schema` — 4 suites / 68 tests; API
   production build, targeted ESLint/Prettier и `git diff --check` прошли.
 - Коммит реализации: `feat: persist typed chunk instance revisions`.
-  Docker/VDS/Registry, push/merge/deploy не запускались и не затрагивались.- Quality review Task 3 завершён локально 08.10.2026, статус: **Готово, не
+  Docker/VDS/Registry, push/merge/deploy не запускались и не затрагивались.
+- Quality review Task 3 завершён локально 08.10.2026, статус: **Готово, не
   выложено**. Generic `saveDraft`/`saveDraftUsingManager` теперь типами и runtime
   guard закрыты для `chunk_instance`/`chunk_layout`; managed write доступен
   только через внутренний `saveManagedDraftUsingManager` с обязательным hook.
@@ -231,6 +234,12 @@
   targeted ESLint/Prettier и `git diff --check` прошли.
 - Коммит review-fix: `fix: enforce typed chunk revision boundary`.
   Push/merge/deploy не выполнялись.
+- Spec re-review Task 3 завершён локально 08.10.2026: журнал и Phase 2 plan
+  приведены к фактической разделённой границе generic/managed revisions;
+  исправлено сцепление строк journal. Изменены только два Markdown-файла.
+  Schema/данные/формат сохраняемых значений, код, БД и выкладка не менялись;
+  проверки — placeholder scan и `git diff --check`. Коммит:
+  `docs: align typed chunk revision plan`.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
