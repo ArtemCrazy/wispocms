@@ -91,6 +91,9 @@ function sameIdentity(
   );
 }
 
+const identityLabel = (identity: ContractIdentity): string =>
+  `${identity.definitionKey}@${identity.schemaVersion}`;
+
 function cloneContract(row: ManagedChunkContractEntity) {
   return {
     ...row,
@@ -98,6 +101,14 @@ function cloneContract(row: ManagedChunkContractEntity) {
     dataSchema: structuredClone(row.dataSchema),
     createdAt: new Date(row.createdAt),
   };
+}
+
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
 }
 
 function createHarness(options?: {
@@ -109,6 +120,7 @@ function createHarness(options?: {
   >;
   contracts?: ManagedChunkContractEntity[];
   concurrentRow?: ManagedChunkContractEntity;
+  beforeTransaction?: () => Promise<void>;
 }) {
   const versions = options?.versions ?? [
     {
@@ -121,24 +133,33 @@ function createHarness(options?: {
   let nextId = contracts.length + 1;
   let insertAttempts = 0;
   let concurrentRowVisible = false;
+  const versionLookups: Array<{
+    id: string;
+    templatePackageId: string;
+    manifestVersion: number;
+  }> = [];
+  const contractLookups: ContractIdentity[] = [];
+  const contractInserts: ContractIdentity[] = [];
 
   const dataSource = {
     transaction: jest.fn(
       async (
         callback: (manager: EntityManager) => Promise<unknown>,
       ): Promise<unknown> => {
+        await options?.beforeTransaction?.();
         const workingContracts = contracts.map(cloneContract);
         const contractRepository = {
-          findOne: jest.fn(({ where }: { where: ContractIdentity }) =>
-            Promise.resolve(
+          findOne: jest.fn(({ where }: { where: ContractIdentity }) => {
+            contractLookups.push({ ...where });
+            return Promise.resolve(
               workingContracts.find((row) => sameIdentity(row, where)) ??
                 (concurrentRowVisible &&
                 options?.concurrentRow &&
                 sameIdentity(options.concurrentRow, where)
                   ? options.concurrentRow
                   : null),
-            ),
-          ),
+            );
+          }),
         };
         const versionRepository = {
           findOne: jest.fn(
@@ -150,15 +171,17 @@ function createHarness(options?: {
                 templatePackageId: string;
                 manifestVersion: number;
               };
-            }) =>
-              Promise.resolve(
+            }) => {
+              versionLookups.push({ ...where });
+              return Promise.resolve(
                 versions.find(
                   (version) =>
                     version.id === where.id &&
                     version.templatePackageId === where.templatePackageId &&
                     version.manifestVersion === where.manifestVersion,
                 ) ?? null,
-              ),
+              );
+            },
           ),
         };
         let pendingInsert: Partial<ManagedChunkContractEntity> | undefined;
@@ -188,6 +211,7 @@ function createHarness(options?: {
               return Promise.resolve({ raw: [] });
             }
             const identity = pendingInsert as ContractIdentity;
+            contractInserts.push({ ...identity });
             if (workingContracts.some((row) => sameIdentity(row, identity)))
               return Promise.resolve({ raw: [] });
             const saved = {
@@ -233,6 +257,9 @@ function createHarness(options?: {
     repository: new ManagedChunkPersistenceRepository(dataSource as never),
     contracts,
     dataSource,
+    versionLookups,
+    contractLookups,
+    contractInserts,
     get insertAttempts() {
       return insertAttempts;
     },
@@ -269,16 +296,14 @@ describe('ManagedChunkPersistenceRepository', () => {
 
     expect(result.map((row) => row.definitionKey)).toEqual(['promo', 'hero']);
     expect(harness.contracts).toHaveLength(2);
-    expect(harness.contracts.map((row) => row.definitionKey)).toEqual([
-      'promo',
-      'hero',
-    ]);
-    expect(harness.contracts[0]).toMatchObject({
-      templatePackageId: PACKAGE_ID,
-      firstSeenTemplatePackageVersionId: VERSION_ID,
-      definitionKey: 'promo',
-      schemaVersion: '2',
-    });
+    expect(harness.contracts).toContainEqual(
+      expect.objectContaining({
+        templatePackageId: PACKAGE_ID,
+        firstSeenTemplatePackageVersionId: VERSION_ID,
+        definitionKey: 'promo',
+        schemaVersion: '2',
+      }),
+    );
   });
 
   it('returns the same row for an identical repeat without inserting again', async () => {
@@ -291,6 +316,132 @@ describe('ManagedChunkPersistenceRepository', () => {
     expect(second.id).toBe(first.id);
     expect(harness.contracts).toHaveLength(1);
     expect(harness.insertAttempts).toBe(1);
+  });
+
+  it('returns one stored entity in every position for semantic duplicates', async () => {
+    const harness = createHarness();
+    const first = definition();
+    const presentationDuplicate = definition({
+      title: 'Новый заголовок',
+      categoryKey: 'featured',
+      rendererKey: 'hero-v2',
+    });
+
+    const result = await register(harness.repository, [
+      first,
+      presentationDuplicate,
+      first,
+    ]);
+
+    expect(result.map((row) => row.id)).toEqual([
+      result[0].id,
+      result[0].id,
+      result[0].id,
+    ]);
+    expect(result[1]).toBe(result[0]);
+    expect(result[2]).toBe(result[0]);
+    expect(harness.contracts).toHaveLength(1);
+    expect(harness.insertAttempts).toBe(1);
+  });
+
+  it('rejects conflicting duplicate identities before opening a transaction', async () => {
+    const harness = createHarness();
+    const conflicting = definition({
+      fields: [
+        {
+          key: 'headline',
+          label: 'Headline',
+          widget: 'textarea',
+        },
+      ],
+    });
+
+    await expect(
+      register(harness.repository, [definition(), conflicting]),
+    ).rejects.toMatchObject({
+      message: 'Контракт чанка уже зарегистрирован с другим содержимым',
+    });
+
+    expect(harness.dataSource.transaction).not.toHaveBeenCalled();
+    expect(harness.contracts).toHaveLength(0);
+    expect(harness.insertAttempts).toBe(0);
+  });
+
+  it('processes unique identities in sorted lock order and restores input order', async () => {
+    const harness = createHarness();
+    const zeta = definition({ key: 'zeta', schemaVersion: '1' });
+    const alpha2 = definition({ key: 'alpha', schemaVersion: '2' });
+    const alpha10 = definition({ key: 'alpha', schemaVersion: '10' });
+
+    const result = await register(harness.repository, [zeta, alpha2, alpha10]);
+
+    expect(result.map(identityLabel)).toEqual([
+      'zeta@1',
+      'alpha@2',
+      'alpha@10',
+    ]);
+    expect(harness.contractInserts.map(identityLabel)).toEqual([
+      'alpha@10',
+      'alpha@2',
+      'zeta@1',
+    ]);
+    expect(harness.contractLookups.map(identityLabel)).toEqual([
+      'alpha@10',
+      'alpha@10',
+      'alpha@2',
+      'alpha@2',
+      'zeta@1',
+      'zeta@1',
+    ]);
+  });
+
+  it('validates the exact v2 package version for an empty batch', async () => {
+    const harness = createHarness();
+
+    await expect(register(harness.repository, [])).resolves.toEqual([]);
+
+    expect(harness.versionLookups).toEqual([
+      {
+        id: VERSION_ID,
+        templatePackageId: PACKAGE_ID,
+        manifestVersion: 2,
+      },
+    ]);
+    expect(harness.contractLookups).toHaveLength(0);
+    expect(harness.insertAttempts).toBe(0);
+  });
+
+  it('snapshots mutable caller definitions before the transaction can await', async () => {
+    const transactionGate = deferred();
+    const source = definition();
+    const expectedFieldContract = JSON.parse(
+      canonicalManagedChunkContract(source.fields),
+    ) as Record<string, unknown>;
+    const expectedDataSchema = deriveManagedChunkDataSchema(source.fields);
+    const harness = createHarness({
+      beforeTransaction: () => transactionGate.promise,
+    });
+
+    const registration = register(harness.repository, [source]);
+    source.key = 'mutated';
+    source.schemaVersion = '99';
+    source.fields = [
+      {
+        key: 'mutated_field',
+        label: 'Mutated',
+        widget: 'boolean',
+      },
+    ];
+    transactionGate.release();
+
+    const [stored] = await registration;
+
+    expect(stored).toMatchObject({
+      definitionKey: 'hero',
+      schemaVersion: '1',
+      fieldContract: expectedFieldContract,
+      dataSchema: expectedDataSchema,
+    });
   });
 
   it('ignores presentation-only changes and stores a canonical contract', async () => {
@@ -329,6 +480,9 @@ describe('ManagedChunkPersistenceRepository', () => {
     expect(harness.contracts).toHaveLength(1);
     expect(harness.contracts[0].fieldContract).toEqual(
       JSON.parse(canonicalManagedChunkContract(initial.fields)),
+    );
+    expect(harness.contracts[0].dataSchema).toEqual(
+      deriveManagedChunkDataSchema(initial.fields),
     );
     expect(JSON.stringify(harness.contracts[0].fieldContract)).not.toContain(
       'Headline',
@@ -376,6 +530,44 @@ describe('ManagedChunkPersistenceRepository', () => {
     );
 
     expect(harness.contracts).toEqual([existing]);
+  });
+
+  it('rejects an altered stored data schema without mutation', async () => {
+    const source = definition();
+    const existing = storedContract(source, {
+      dataSchema: {
+        ...deriveManagedChunkDataSchema(source.fields),
+        additionalProperties: true,
+      } as unknown as Record<string, unknown>,
+    });
+    const harness = createHarness({ contracts: [existing] });
+
+    await expect(register(harness.repository, [source])).rejects.toMatchObject({
+      message: 'Контракт чанка уже зарегистрирован с другим содержимым',
+    });
+
+    expect(harness.contracts).toEqual([existing]);
+    expect(harness.insertAttempts).toBe(0);
+  });
+
+  it('rejects an altered concurrent data schema after conflict-do-nothing reread', async () => {
+    const source = definition();
+    const concurrentRow = storedContract(source, {
+      id: 'contract-concurrent',
+      dataSchema: {
+        ...deriveManagedChunkDataSchema(source.fields),
+        properties: {},
+      },
+    });
+    const harness = createHarness({ concurrentRow });
+
+    await expect(register(harness.repository, [source])).rejects.toMatchObject({
+      message: 'Контракт чанка уже зарегистрирован с другим содержимым',
+    });
+
+    expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(harness.insertAttempts).toBe(1);
+    expect(harness.contracts).toEqual([concurrentRow]);
   });
 
   it.each([

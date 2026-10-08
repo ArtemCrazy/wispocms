@@ -149,6 +149,25 @@
   build, targeted ESLint/Prettier и `git diff --check` прошли. Коммит
   реализации: `feat: register immutable chunk contracts`.
 - БД/Docker/VDS/Registry/push/merge/deploy не запускались и не затрагивались.
+- Code-quality review Task 2 завершён локально 08.10.2026, статус: **Готово,
+  не выложено**. До первого `await` repository снимает независимый call-time
+  snapshot identities, canonical `field_contract`, derived `data_schema` и
+  digest; одинаковые identities группируются, semantic-conflict отклоняется
+  до DB writes, unique work items обрабатываются в стабильном порядке
+  `definition_key`/`schema_version`, а результат восстанавливает caller order
+  вместе с duplicates. Empty batch по-прежнему проверяет exact manifest v2
+  package version. Existing и concurrent rows теперь сверяются по digest,
+  `field_contract` и `data_schema` без зависимости от порядка JSONB-ключей.
+- Review TDD RED: repository suite — 5 ожидаемых failures / 14 passes:
+  data-schema mismatch, caller-order DB processing, mutable input после gate и
+  late duplicate conflict. GREEN: repository + schema — 2 suites / 25 tests;
+  API production build, targeted ESLint/Prettier и `git diff --check` прошли.
+  В Task 7 добавлен two-connection PostgreSQL acceptance для одновременных
+  совместимых batch `[A, B]`/`[B, A]` без `40P01` и с теми же двумя rows.
+  Коммит review-fix: `fix: harden chunk contract registration`.
+- Review не менял schema/entities/migrations/API или формат сохраняемых
+  значений. Строки в общую/локальную БД не записывались; Docker/VDS/Registry,
+  push/merge/deploy не запускались и не затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

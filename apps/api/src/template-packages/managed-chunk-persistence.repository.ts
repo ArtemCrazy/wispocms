@@ -28,6 +28,25 @@ type DerivedContract = {
   dataSchema: Record<string, unknown>;
 };
 
+type ContractIdentity = {
+  templatePackageId: string;
+  definitionKey: string;
+  schemaVersion: string;
+};
+
+type ContractWorkItem = Readonly<{
+  identityKey: string;
+  identity: Readonly<ContractIdentity>;
+  derived: Readonly<DerivedContract>;
+}>;
+
+type PreparedRegistration = Readonly<{
+  templatePackageId: string;
+  templatePackageVersionId: string;
+  workItems: readonly ContractWorkItem[];
+  resultIdentityKeys: readonly string[];
+}>;
+
 const canonicalJson = (value: unknown): string => {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(',')}]`;
@@ -53,41 +72,101 @@ export class ManagedChunkPersistenceRepository {
   async registerContracts(
     input: RegisterManagedChunkContractsInput,
   ): Promise<ManagedChunkContractEntity[]> {
-    return this.dataSource.transaction((manager) =>
-      this.registerInTransaction(manager, input),
-    );
+    const prepared = this.prepareRegistration(input);
+    return this.dataSource.transaction(async (manager) => {
+      const storedByIdentity = await this.registerInTransaction(
+        manager,
+        prepared,
+      );
+      return prepared.resultIdentityKeys.map((identityKey) => {
+        const stored = storedByIdentity.get(identityKey);
+        if (!stored) {
+          throw new ConflictException(
+            'Контракт чанка не удалось зарегистрировать',
+          );
+        }
+        return stored;
+      });
+    });
+  }
+
+  private prepareRegistration(
+    input: RegisterManagedChunkContractsInput,
+  ): PreparedRegistration {
+    const templatePackageId = String(input.templatePackageId);
+    const templatePackageVersionId = String(input.templatePackageVersionId);
+    const uniqueItems = new Map<string, ContractWorkItem>();
+    const resultIdentityKeys: string[] = [];
+
+    for (const definition of input.definitions) {
+      const identity = Object.freeze({
+        templatePackageId,
+        definitionKey: String(definition.key),
+        schemaVersion: String(definition.schemaVersion),
+      });
+      const identityKey = JSON.stringify([
+        identity.templatePackageId,
+        identity.definitionKey,
+        identity.schemaVersion,
+      ]);
+      const derived = Object.freeze(this.deriveContract(definition));
+      const existing = uniqueItems.get(identityKey);
+      if (existing) {
+        this.assertSameDerivedContract(existing.derived, derived);
+      } else {
+        uniqueItems.set(
+          identityKey,
+          Object.freeze({ identityKey, identity, derived }),
+        );
+      }
+      resultIdentityKeys.push(identityKey);
+    }
+
+    const workItems = [...uniqueItems.values()].sort((left, right) => {
+      const keyOrder = this.compareStrings(
+        left.identity.definitionKey,
+        right.identity.definitionKey,
+      );
+      return keyOrder === 0
+        ? this.compareStrings(
+            left.identity.schemaVersion,
+            right.identity.schemaVersion,
+          )
+        : keyOrder;
+    });
+    return Object.freeze({
+      templatePackageId,
+      templatePackageVersionId,
+      workItems,
+      resultIdentityKeys,
+    });
   }
 
   private async registerInTransaction(
     manager: EntityManager,
-    input: RegisterManagedChunkContractsInput,
-  ): Promise<ManagedChunkContractEntity[]> {
+    prepared: PreparedRegistration,
+  ): Promise<Map<string, ManagedChunkContractEntity>> {
     const version = await manager
       .getRepository(TemplatePackageVersionEntity)
       .findOne({
         where: {
-          id: input.templatePackageVersionId,
-          templatePackageId: input.templatePackageId,
+          id: prepared.templatePackageVersionId,
+          templatePackageId: prepared.templatePackageId,
           manifestVersion: 2,
         },
       });
     if (!version) throw new NotFoundException('Версия пакета не найдена');
 
     const contracts = manager.getRepository(ManagedChunkContractEntity);
-    const registered: ManagedChunkContractEntity[] = [];
-    for (const definition of input.definitions) {
-      const identity = {
-        templatePackageId: input.templatePackageId,
-        definitionKey: definition.key,
-        schemaVersion: definition.schemaVersion,
-      };
-      const derived = this.deriveContract(definition);
+    const registered = new Map<string, ManagedChunkContractEntity>();
+    for (const workItem of prepared.workItems) {
+      const { identity, identityKey, derived } = workItem;
       let stored = await contracts.findOne({ where: identity });
 
       if (!stored) {
         const insertValues = {
           ...identity,
-          firstSeenTemplatePackageVersionId: input.templatePackageVersionId,
+          firstSeenTemplatePackageVersionId: prepared.templatePackageVersionId,
           ...derived,
         };
         await manager
@@ -110,9 +189,13 @@ export class ManagedChunkPersistenceRepository {
         );
       }
       this.assertSameContract(stored, derived);
-      registered.push(stored);
+      registered.set(identityKey, stored);
     }
     return registered;
+  }
+
+  private compareStrings(left: string, right: string): number {
+    return left < right ? -1 : left > right ? 1 : 0;
   }
 
   private deriveContract(definition: ManagedChunkDefinition): DerivedContract {
@@ -128,10 +211,18 @@ export class ManagedChunkPersistenceRepository {
     stored: ManagedChunkContractEntity,
     derived: DerivedContract,
   ): void {
+    this.assertSameDerivedContract(stored, derived);
+  }
+
+  private assertSameDerivedContract(
+    stored: DerivedContract,
+    derived: DerivedContract,
+  ): void {
     if (
       stored.contractDigest !== derived.contractDigest ||
       canonicalJson(stored.fieldContract) !==
-        canonicalJson(derived.fieldContract)
+        canonicalJson(derived.fieldContract) ||
+      canonicalJson(stored.dataSchema) !== canonicalJson(derived.dataSchema)
     ) {
       throw new ConflictException(
         'Контракт чанка уже зарегистрирован с другим содержимым',

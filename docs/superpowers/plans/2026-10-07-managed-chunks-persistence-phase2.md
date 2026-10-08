@@ -503,6 +503,13 @@ idempotent contract; cross-package/version FK; cross-site page/instance FK;
 duplicate position; rollback layout; draft/published inventory; empty safe down
 на fresh second database; blocked down после managed data до любого drop.
 
+Contract-registration concurrency acceptance использует два независимых
+соединения к disposable DB: одновременно регистрирует совместимые batch
+definitions в противоположном caller order (`[A, B]` и `[B, A]`), ожидает
+завершения обеих операций без PostgreSQL `40P01` и проверяет, что в
+`managed_chunk_contracts` остались ровно те же две semantic rows без
+дубликатов или частичных записей.
+
 Concurrency acceptance использует два независимых соединения к disposable DB:
 
 1. transaction A выполняет первый `down()` batch (`LOCK TABLE ... IN SHARE ROW
