@@ -181,6 +181,33 @@
   формат данных не менялись. Коммит:
   `test: prove chunk contract batch rollback`. Docker/VDS/Registry,
   push/merge/deploy не запускались и не затрагивались.
+- Task 3 Phase 2 завершён локально 08.10.2026, статус: **Готово, не выложено**.
+  Добавлено атомарное создание site-scoped managed chunk instance через
+  существующий CMS revision workflow: после сохранения resource/revision
+  внутренний manager-only hook создаёт instance и typed contract link до
+  обновления draft pointer и события. Ошибка hook откатывает все записи.
+- Файлы: `cms-revisions.service.ts` и spec,
+  `managed-chunk-persistence.repository.ts` и spec,
+  `template-package.module.ts`, эта запись журнала. Generic API/controller,
+  sanitizer/media validation, schema/entities/migrations не менялись.
+- Формат новых сохраняемых значений: closed `CmsResourceType` расширен
+  `chunk_instance`/`chunk_layout`; snapshot instance строго равен
+  `{ formatVersion: 1, data, sanitizerPolicyVersion }`; typed link хранит точные
+  `revisionId`, `revisionResourceId`, `siteId`, `instanceId`, `contractId`.
+  Вызов снимает independent clone `data` до первого `await`, без санитаризации
+  или иных преобразований. Неизвестный контракт, несовпадение пакета сайта и
+  исчезнувший после авторизации сайт дают одинаковый безопасный `NotFound`.
+- БД — схема/миграции: без изменений. Общая/локальная БД и фактические строки
+  не изменялись; тесты используют только stateful in-memory transaction fake.
+  При будущем вызове метода новые instance/resource/revision/link/event
+  сохраняются одной транзакцией; backfill и ручные изменения данных не нужны.
+- TDD RED: точный targeted command — 2 failed suites, 10 ожидаемых failures,
+  42 existing passes (`createInstanceDraft` отсутствовал, hook не вызывался).
+  GREEN: targeted 2 suites / 53 tests; regression-набор вместе с
+  `revision-workflow` и `managed-chunk-schema` — 4 suites / 68 tests; API
+  production build, targeted ESLint/Prettier и `git diff --check` прошли.
+- Коммит реализации: `feat: persist typed chunk instance revisions`.
+  Docker/VDS/Registry, push/merge/deploy не запускались и не затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

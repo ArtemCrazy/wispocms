@@ -1,7 +1,18 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { EntityManager } from 'typeorm';
 import {
+  CmsRevisionEntity,
+  CmsRevisionEventEntity,
+  CmsRevisionResourceEntity,
   ManagedChunkContractEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
+  PlatformRole,
+  SiteEntity,
   TemplatePackageVersionEntity,
 } from '../database/entities';
 import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
@@ -14,6 +25,12 @@ import type { ManagedChunkDefinition } from './managed-chunk.types';
 
 const PACKAGE_ID = '11111111-1111-4111-8111-111111111111';
 const VERSION_ID = '22222222-2222-4222-8222-222222222222';
+const SITE_ID = '33333333-3333-4333-8333-333333333333';
+const CONTRACT_ID = '44444444-4444-4444-8444-444444444444';
+const ACTOR = {
+  userId: '55555555-5555-4555-8555-555555555555',
+  platformRole: PlatformRole.EMPLOYEE,
+};
 
 function definition(
   overrides: Partial<ManagedChunkDefinition> = {},
@@ -254,7 +271,14 @@ function createHarness(options?: {
   };
 
   return {
-    repository: new ManagedChunkPersistenceRepository(dataSource as never),
+    repository: new ManagedChunkPersistenceRepository(
+      dataSource as never,
+      {
+        saveDraftUsingManager: jest.fn(() => {
+          throw new Error('Unexpected revision draft');
+        }),
+      } as never,
+    ),
     contracts,
     dataSource,
     versionLookups,
@@ -266,6 +290,197 @@ function createHarness(options?: {
   };
 }
 
+type InstanceState = {
+  resources: Record<string, unknown>[];
+  revisions: Record<string, unknown>[];
+  instances: Record<string, unknown>[];
+  links: Record<string, unknown>[];
+  events: Record<string, unknown>[];
+};
+
+function createInstanceHarness(options?: {
+  contract?: ManagedChunkContractEntity | null;
+  siteTemplatePackageId?: string | null;
+  siteExists?: boolean;
+  denyAccess?: boolean;
+  failOnSave?: 'instance' | 'link';
+  beforeTransaction?: () => Promise<void>;
+}) {
+  let committed: InstanceState = {
+    resources: [],
+    revisions: [],
+    instances: [],
+    links: [],
+    events: [],
+  };
+  const contract =
+    options?.contract === undefined
+      ? storedContract(definition(), {
+          id: CONTRACT_ID,
+          templatePackageId: PACKAGE_ID,
+        })
+      : options.contract;
+  const contractLookups: string[] = [];
+  const saveAttempts: string[] = [];
+  let resourceNumber = 0;
+  let revisionNumber = 0;
+
+  const revisionsService = {
+    saveDraftUsingManager: jest.fn(
+      async (
+        db: EntityManager,
+        input: {
+          siteId: string;
+          resourceType: string;
+          entityId: string;
+          snapshot: Record<string, unknown>;
+          actor: typeof ACTOR;
+        },
+        hook: (
+          manager: EntityManager,
+          revision: CmsRevisionEntity,
+          resource: CmsRevisionResourceEntity,
+        ) => Promise<void>,
+      ) => {
+        if (options?.denyAccess)
+          throw new ForbiddenException('Недостаточно прав для этого сайта');
+        const resource = Object.assign(new CmsRevisionResourceEntity(), {
+          id: `resource-${++resourceNumber}`,
+          siteId: input.siteId,
+          resourceType: input.resourceType,
+          entityId: input.entityId,
+          latestVersionNumber: 0,
+          draftRevisionId: null,
+          approvedRevisionId: null,
+          publishedRevisionId: null,
+          reviewState: 'draft',
+        });
+        await db.save(resource);
+        const revision = Object.assign(new CmsRevisionEntity(), {
+          id: `revision-${++revisionNumber}`,
+          resourceId: resource.id,
+          versionNumber: 1,
+          snapshot: structuredClone(input.snapshot),
+          actorUserId: input.actor.userId,
+        });
+        await db.save(revision);
+        await hook(db, revision, resource);
+        resource.draftRevisionId = revision.id;
+        resource.latestVersionNumber = revision.versionNumber;
+        await db.save(resource);
+        await db.save(
+          Object.assign(new CmsRevisionEventEntity(), {
+            id: `event-${revisionNumber}`,
+            resourceId: resource.id,
+            revisionId: revision.id,
+            eventType: 'draft_saved',
+            actorUserId: input.actor.userId,
+            reason: null,
+          }),
+        );
+        return { id: revision.id, versionNumber: revision.versionNumber };
+      },
+    ),
+  };
+
+  const dataSource = {
+    transaction: jest.fn(
+      async (
+        callback: (manager: EntityManager) => Promise<unknown>,
+      ): Promise<unknown> => {
+        await options?.beforeTransaction?.();
+        const working = structuredClone(committed);
+        const manager = {
+          findOne: jest.fn(
+            (
+              entity: { name: string },
+              query: { where: Record<string, unknown> },
+            ) => {
+              if (entity === SiteEntity)
+                return Promise.resolve(
+                  query.where.id === SITE_ID && options?.siteExists !== false
+                    ? {
+                        id: SITE_ID,
+                        templatePackageId:
+                          options?.siteTemplatePackageId === undefined
+                            ? PACKAGE_ID
+                            : options.siteTemplatePackageId,
+                      }
+                    : null,
+                );
+              if (entity === ManagedChunkContractEntity) {
+                contractLookups.push(String(query.where.id));
+                return Promise.resolve(
+                  contract?.id === query.where.id ? contract : null,
+                );
+              }
+              throw new Error(`Unexpected lookup: ${entity.name}`);
+            },
+          ),
+          save: jest.fn((value: object) => {
+            const kind =
+              value instanceof CmsRevisionResourceEntity
+                ? 'resource'
+                : value instanceof CmsRevisionEntity
+                  ? 'revision'
+                  : value instanceof ManagedChunkInstanceEntity
+                    ? 'instance'
+                    : value instanceof ManagedChunkInstanceRevisionEntity
+                      ? 'link'
+                      : value instanceof CmsRevisionEventEntity
+                        ? 'event'
+                        : 'unknown';
+            saveAttempts.push(kind);
+            if (options?.failOnSave === kind)
+              throw new Error(`${kind}-save-failed`);
+            const rows =
+              kind === 'resource'
+                ? working.resources
+                : kind === 'revision'
+                  ? working.revisions
+                  : kind === 'instance'
+                    ? working.instances
+                    : kind === 'link'
+                      ? working.links
+                      : kind === 'event'
+                        ? working.events
+                        : null;
+            if (!rows) throw new Error('Unexpected save entity');
+            const record = value as Record<string, unknown>;
+            const identity =
+              value instanceof ManagedChunkInstanceRevisionEntity
+                ? 'revisionId'
+                : 'id';
+            const existing = rows.findIndex(
+              (row) => row[identity] === record[identity],
+            );
+            if (existing >= 0) rows[existing] = structuredClone(record);
+            else rows.push(structuredClone(record));
+            return Promise.resolve(value);
+          }),
+        } as unknown as EntityManager;
+        const result = await callback(manager);
+        committed = working;
+        return result;
+      },
+    ),
+  };
+  const repository = new ManagedChunkPersistenceRepository(
+    dataSource as never,
+    revisionsService as never,
+  );
+
+  return {
+    repository,
+    dataSource,
+    revisionsService,
+    contractLookups,
+    saveAttempts,
+    get state() {
+      return committed;
+    },
+  };
+}
 const register = (
   repository: ManagedChunkPersistenceRepository,
   definitions: readonly ManagedChunkDefinition[],
@@ -688,5 +903,209 @@ describe('ManagedChunkPersistenceRepository', () => {
 
     expect(result.id).toBe(existing.id);
     expect(harness.insertAttempts).toBe(0);
+  });
+  describe('createInstanceDraft', () => {
+    it('atomically creates an instance, revision resource, strict snapshot, and typed revision link', async () => {
+      const harness = createInstanceHarness();
+      const data = {
+        headline: 'Safe synthetic payload',
+        nested: { enabled: true },
+      };
+
+      const result = await harness.repository.createInstanceDraft({
+        siteId: SITE_ID,
+        displayName: 'Hero instance',
+        contractId: CONTRACT_ID,
+        data,
+        sanitizerPolicyVersion: 'policy-1',
+        actor: ACTOR,
+      });
+
+      expect(result).toEqual({
+        instanceId: harness.state.instances[0].id,
+        revisionId: harness.state.revisions[0].id,
+        versionNumber: 1,
+      });
+      expect(harness.state.instances).toEqual([
+        expect.objectContaining({
+          id: result.instanceId,
+          siteId: SITE_ID,
+          revisionResourceId: harness.state.resources[0].id,
+          displayName: 'Hero instance',
+          isArchived: false,
+          createdByUserId: ACTOR.userId,
+        }),
+      ]);
+      expect(harness.state.resources).toEqual([
+        expect.objectContaining({
+          siteId: SITE_ID,
+          resourceType: 'chunk_instance',
+          entityId: result.instanceId,
+          draftRevisionId: result.revisionId,
+          latestVersionNumber: 1,
+        }),
+      ]);
+      expect(harness.state.revisions).toEqual([
+        expect.objectContaining({
+          id: result.revisionId,
+          resourceId: harness.state.resources[0].id,
+          versionNumber: 1,
+          snapshot: {
+            formatVersion: 1,
+            data,
+            sanitizerPolicyVersion: 'policy-1',
+          },
+        }),
+      ]);
+      expect(harness.state.links).toEqual([
+        expect.objectContaining({
+          revisionId: result.revisionId,
+          revisionResourceId: harness.state.resources[0].id,
+          siteId: SITE_ID,
+          instanceId: result.instanceId,
+          contractId: CONTRACT_ID,
+        }),
+      ]);
+      expect(harness.state.events).toHaveLength(1);
+      expect(
+        harness.revisionsService.saveDraftUsingManager,
+      ).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['an unknown contract', { contract: null }],
+      [
+        'a contract from another site package',
+        {
+          siteTemplatePackageId: '66666666-6666-4666-8666-666666666666',
+        },
+      ],
+      ['a site missing after authorization', { siteExists: false }],
+    ])('uses the same safe not-found for %s', async (_case, options) => {
+      const harness = createInstanceHarness(options);
+
+      await expect(
+        harness.repository.createInstanceDraft({
+          siteId: SITE_ID,
+          displayName: 'Hero instance',
+          contractId: CONTRACT_ID,
+          data: {},
+          sanitizerPolicyVersion: null,
+          actor: ACTOR,
+        }),
+      ).rejects.toEqual(new NotFoundException('Контракт чанка не найден'));
+
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        instances: [],
+        links: [],
+        events: [],
+      });
+    });
+
+    it('denies site access before contract lookup or any write', async () => {
+      const harness = createInstanceHarness({ denyAccess: true });
+
+      await expect(
+        harness.repository.createInstanceDraft({
+          siteId: SITE_ID,
+          displayName: 'Hero instance',
+          contractId: CONTRACT_ID,
+          data: {},
+          sanitizerPolicyVersion: null,
+          actor: ACTOR,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(harness.contractLookups).toEqual([]);
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        instances: [],
+        links: [],
+        events: [],
+      });
+    });
+
+    it.each(['instance', 'link'] as const)(
+      'rolls back every draft write when the %s save fails inside the hook',
+      async (failOnSave) => {
+        const harness = createInstanceHarness({ failOnSave });
+
+        await expect(
+          harness.repository.createInstanceDraft({
+            siteId: SITE_ID,
+            displayName: 'Hero instance',
+            contractId: CONTRACT_ID,
+            data: { headline: 'Uncommitted' },
+            sanitizerPolicyVersion: null,
+            actor: ACTOR,
+          }),
+        ).rejects.toThrow(`${failOnSave}-save-failed`);
+
+        expect(harness.saveAttempts).toEqual(
+          failOnSave === 'instance'
+            ? ['resource', 'revision', 'instance']
+            : ['resource', 'revision', 'instance', 'link'],
+        );
+        expect(harness.state).toEqual({
+          resources: [],
+          revisions: [],
+          instances: [],
+          links: [],
+          events: [],
+        });
+      },
+    );
+
+    it('captures input data before the first await and ignores later caller mutation', async () => {
+      const transactionGate = deferred();
+      const harness = createInstanceHarness({
+        beforeTransaction: () => transactionGate.promise,
+      });
+      const data = { nested: { headline: 'Original' } };
+
+      const creation = harness.repository.createInstanceDraft({
+        siteId: SITE_ID,
+        displayName: 'Hero instance',
+        contractId: CONTRACT_ID,
+        data,
+        sanitizerPolicyVersion: 'policy-1',
+        actor: ACTOR,
+      });
+      data.nested.headline = 'Mutated after call';
+      transactionGate.release();
+      await creation;
+
+      expect(harness.state.revisions[0].snapshot).toEqual({
+        formatVersion: 1,
+        data: { nested: { headline: 'Original' } },
+        sanitizerPolicyVersion: 'policy-1',
+      });
+    });
+
+    it('preserves a safe synthetic payload without sanitization or transformation', async () => {
+      const harness = createInstanceHarness();
+      const data = {
+        html: '<script data-safe="synthetic">kept verbatim</script>',
+        values: [0, false, null, { custom_key: 'custom-value' }],
+      };
+
+      await harness.repository.createInstanceDraft({
+        siteId: SITE_ID,
+        displayName: 'Synthetic',
+        contractId: CONTRACT_ID,
+        data,
+        sanitizerPolicyVersion: null,
+        actor: ACTOR,
+      });
+
+      expect(harness.state.revisions[0].snapshot).toEqual({
+        formatVersion: 1,
+        data,
+        sanitizerPolicyVersion: null,
+      });
+    });
   });
 });

@@ -47,10 +47,18 @@ export type CmsResourceType =
   | 'site_privacy'
   | 'site_article_list'
   | 'site_layout_bindings'
+  | 'chunk_instance'
+  | 'chunk_layout'
   | 'media_alt'
   | 'site_variable';
 
 export type RevisionActor = { userId: string; platformRole: PlatformRole };
+
+export type RevisionCreatedHook = (
+  db: EntityManager,
+  revision: CmsRevisionEntity,
+  resource: CmsRevisionResourceEntity,
+) => Promise<void>;
 
 @Injectable()
 export class CmsRevisionsService {
@@ -234,6 +242,7 @@ export class CmsRevisionsService {
     },
     eventType = 'draft_saved',
     reason: string | null = null,
+    revisionCreatedHook?: RevisionCreatedHook,
   ) {
     let resource = await db.findOne(CmsRevisionResourceEntity, {
       where: {
@@ -271,6 +280,7 @@ export class CmsRevisionsService {
       actorUserId: input.actor.userId,
     });
     await db.save(version);
+    await revisionCreatedHook?.(db, version, resource);
     Object.assign(resource, next, {
       latestVersionNumber: version.versionNumber,
     });
@@ -314,13 +324,20 @@ export class CmsRevisionsService {
       expectedDraftRevisionId: string | null;
       actor: RevisionActor;
     },
+    revisionCreatedHook?: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number }> {
     await this.requireSite(
       input.siteId,
       input.actor,
       this.permission(input.resourceType),
     );
-    return this.saveDraftInTransaction(db, input);
+    return this.saveDraftInTransaction(
+      db,
+      input,
+      'draft_saved',
+      null,
+      revisionCreatedHook,
+    );
   }
 
   /** Trusted publication adapter for actors allowed to publish directly; never

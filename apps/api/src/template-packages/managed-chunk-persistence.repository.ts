@@ -3,12 +3,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import {
   ManagedChunkContractEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
+  SiteEntity,
   TemplatePackageVersionEntity,
 } from '../database/entities';
+import {
+  CmsRevisionsService,
+  type RevisionActor,
+} from '../content/cms-revisions.service';
 import {
   canonicalManagedChunkContract,
   computeManagedChunkContractDigest,
@@ -67,7 +75,88 @@ const canonicalJson = (value: unknown): string => {
 
 @Injectable()
 export class ManagedChunkPersistenceRepository {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly revisions: CmsRevisionsService,
+  ) {}
+
+  async createInstanceDraft(input: {
+    siteId: string;
+    displayName: string;
+    contractId: string;
+    data: Record<string, unknown>;
+    sanitizerPolicyVersion: string | null;
+    actor: RevisionActor;
+  }): Promise<{
+    instanceId: string;
+    revisionId: string;
+    versionNumber: number;
+  }> {
+    const instanceId = randomUUID();
+    const siteId = input.siteId;
+    const displayName = input.displayName;
+    const contractId = input.contractId;
+    const actor = { ...input.actor };
+    const snapshot = {
+      formatVersion: 1,
+      data: structuredClone(input.data),
+      sanitizerPolicyVersion: input.sanitizerPolicyVersion,
+    };
+
+    return this.dataSource.transaction(async (db) => {
+      const revision = await this.revisions.saveDraftUsingManager(
+        db,
+        {
+          siteId,
+          resourceType: 'chunk_instance',
+          entityId: instanceId,
+          snapshot,
+          expectedDraftRevisionId: null,
+          actor,
+        },
+        async (hookDb, savedRevision, resource) => {
+          const [contract, site] = await Promise.all([
+            hookDb.findOne(ManagedChunkContractEntity, {
+              where: { id: contractId },
+            }),
+            hookDb.findOne(SiteEntity, { where: { id: siteId } }),
+          ]);
+          if (
+            !contract ||
+            !site ||
+            site.templatePackageId !== contract.templatePackageId
+          ) {
+            throw new NotFoundException('Контракт чанка не найден');
+          }
+
+          await hookDb.save(
+            Object.assign(new ManagedChunkInstanceEntity(), {
+              id: instanceId,
+              siteId,
+              revisionResourceId: resource.id,
+              displayName,
+              isArchived: false,
+              createdByUserId: actor.userId,
+            }),
+          );
+          await hookDb.save(
+            Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+              revisionId: savedRevision.id,
+              revisionResourceId: resource.id,
+              siteId,
+              instanceId,
+              contractId,
+            }),
+          );
+        },
+      );
+      return {
+        instanceId,
+        revisionId: revision.id,
+        versionNumber: revision.versionNumber,
+      };
+    });
+  }
 
   async registerContracts(
     input: RegisterManagedChunkContractsInput,

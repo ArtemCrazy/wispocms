@@ -26,6 +26,7 @@ describe('CMS revision storage', () => {
     const resources: Record<string, unknown>[] = [];
     const revisions: Record<string, unknown>[] = [];
     const events: Record<string, unknown>[] = [];
+    const operations: string[] = [];
     const saved = (value: Record<string, unknown>) => {
       if (
         'resourceType' in value &&
@@ -48,6 +49,13 @@ describe('CMS revision storage', () => {
           : 'snapshot' in value
             ? revisions
             : events;
+      operations.push(
+        'resourceType' in value
+          ? 'resource'
+          : 'snapshot' in value
+            ? 'revision'
+            : 'event',
+      );
       const existing = collection.findIndex((row) => row.id === value.id);
       if (existing >= 0) collection[existing] = { ...value };
       else collection.push({ ...value });
@@ -130,8 +138,168 @@ describe('CMS revision storage', () => {
       sites as never,
       siteAccesses as never,
     );
-    return { service, resources, revisions, events, db };
+    return { service, resources, revisions, events, operations, db };
   }
+
+  it('uses content editing permission for chunk instance drafts', async () => {
+    const { service, resources, operations } = setup();
+
+    await expect(
+      service.saveDraft({
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+        snapshot: { formatVersion: 1, data: {} },
+        expectedDraftRevisionId: null,
+        actor: manager,
+      }),
+    ).resolves.toMatchObject({ versionNumber: 1 });
+
+    expect(resources).toContainEqual(
+      expect.objectContaining({
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+      }),
+    );
+    expect(operations).toEqual(['resource', 'revision', 'resource', 'event']);
+  });
+
+  it('runs the manager revision hook once after revision persistence and before pointer/event persistence', async () => {
+    const { service, db, operations } = setup();
+    const hook = jest.fn(
+      (
+        hookManager: unknown,
+        revision: Record<string, unknown>,
+        resource: Record<string, unknown>,
+      ) => {
+        operations.push('hook');
+        expect(hookManager).toBe(db);
+        expect(revision).toMatchObject({
+          resourceId: resource.id,
+          versionNumber: 1,
+        });
+        expect(resource).toMatchObject({
+          resourceType: 'chunk_instance',
+          entityId: 'instance-1',
+          draftRevisionId: null,
+        });
+        return Promise.resolve();
+      },
+    );
+
+    await service.saveDraftUsingManager(
+      db as never,
+      {
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+        snapshot: { formatVersion: 1, data: { headline: 'Safe' } },
+        expectedDraftRevisionId: null,
+        actor: manager,
+      },
+      hook,
+    );
+
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(operations).toEqual([
+      'resource',
+      'revision',
+      'hook',
+      'resource',
+      'event',
+    ]);
+  });
+
+  it('propagates manager hook failures so the surrounding transaction can roll back every draft write', async () => {
+    const committed = {
+      resources: [] as Record<string, unknown>[],
+      revisions: [] as Record<string, unknown>[],
+      events: [] as Record<string, unknown>[],
+    };
+    const dataSource = {
+      transaction: jest.fn(
+        async (
+          operation: (manager: Record<string, unknown>) => Promise<unknown>,
+        ) => {
+          const working = {
+            resources: structuredClone(committed.resources),
+            revisions: structuredClone(committed.revisions),
+            events: structuredClone(committed.events),
+          };
+          const transactionManager = {
+            findOne: jest.fn(
+              (
+                entity: { name: string },
+                options: { where: Record<string, unknown> },
+              ) => {
+                if (entity.name === 'SiteEntity') return { id: 'site-1' };
+                if (entity.name === 'SiteAccessEntity')
+                  return {
+                    role: SiteRole.CONTENT_MANAGER,
+                    requiresApproval: true,
+                  };
+                return (
+                  working.resources.find((row) =>
+                    Object.entries(options.where).every(
+                      ([key, value]) => row[key] === value,
+                    ),
+                  ) ?? null
+                );
+              },
+            ),
+            save: jest.fn((value: Record<string, unknown>) => {
+              const rows =
+                'resourceType' in value
+                  ? working.resources
+                  : 'snapshot' in value
+                    ? working.revisions
+                    : working.events;
+              const existing = rows.findIndex((row) => row.id === value.id);
+              if (existing >= 0) rows[existing] = { ...value };
+              else rows.push({ ...value });
+              return value;
+            }),
+          };
+          const result = await operation(transactionManager);
+          committed.resources = working.resources;
+          committed.revisions = working.revisions;
+          committed.events = working.events;
+          return result;
+        },
+      ),
+    };
+    const service = new CmsRevisionsService(
+      dataSource as never,
+      {
+        findOne: jest.fn().mockResolvedValue({ id: 'site-1' }),
+      } as never,
+      {
+        findOne: jest.fn().mockResolvedValue({
+          role: SiteRole.CONTENT_MANAGER,
+          requiresApproval: true,
+        }),
+      } as never,
+    );
+    const failure = new Error('typed-link-save-failed');
+
+    await expect(
+      dataSource.transaction((db) =>
+        service.saveDraftUsingManager(
+          db as never,
+          {
+            siteId: 'site-1',
+            resourceType: 'chunk_instance',
+            entityId: 'instance-1',
+            snapshot: { formatVersion: 1, data: {} },
+            expectedDraftRevisionId: null,
+            actor: manager,
+          },
+          () => Promise.reject(failure),
+        ),
+      ),
+    ).rejects.toBe(failure);
+    expect(committed).toEqual({ resources: [], revisions: [], events: [] });
+  });
 
   it('records owner publication atomically and preserves the prior baseline', async () => {
     const { service, db, revisions, events, resources } = setup();

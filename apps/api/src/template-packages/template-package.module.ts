@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
+import { ContentModule } from '../content/content.module';
 import { PlatformAdminGuard } from '../platform/platform-admin.guard';
 import { ReleaseTokenGuard } from './release-token.guard';
 import {
@@ -12,7 +13,7 @@ import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.r
 import { TemplatePackageService } from './template-package.service';
 
 @Module({
-  imports: [AuditModule, AuthModule],
+  imports: [AuditModule, AuthModule, ContentModule],
   controllers: [
     TemplatePackageController,
     TemplatePackageCurrentController,
