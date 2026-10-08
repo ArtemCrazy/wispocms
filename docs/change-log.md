@@ -77,6 +77,25 @@
   3 Jest suites / 15 tests, API production build, targeted ESLint, Prettier и
   `git diff --check` прошли. БД/Docker/VDS/Registry/push/merge/deploy не
   затрагивались.
+- Code-quality fix Task 1: `down()` теперь первым единым query batch берёт
+  transaction-wide `SHARE ROW EXCLUSIVE` locks в фиксированном порядке на все
+  шесть managed tables, `cms_revision_resources` и
+  `template_package_versions`, затем выполняет guard; race между проверкой и
+  `DROP` закрыт. Instance нельзя удалить или перенести между site/resource;
+  разрешены display/archive/updated metadata и actor `SET NULL`. Layout update
+  и delete запрещены отдельным owner-identity trigger. Удалены неиспользуемые
+  `UQ_cms_revision_resources_exact_identity` и
+  `IDX_managed_chunk_contracts_package` из DDL/rollback/TypeORM metadata.
+- Review TDD: исходный DDL дал 5 ожидаемых failures на отсутствующих locks/
+  owner triggers и лишних unique/index. Отдельный mutation RED
+  `source_checksum varchar(128) -> varchar(127)` доказал exact column contract:
+  упал только column test; мутация отменена. GREEN — 3 Jest suites / 18 tests,
+  API build, targeted ESLint/Prettier, TypeORM metadata construction
+  (40 entities) и `git diff --check` прошли. Полный `tsc --noEmit` по-прежнему
+  завершается на 106 ранее существовавших diagnostics в чужих spec; diagnostics
+  Task 1 — 0. Task 7 plan дополнен двухсоединенческой lock-race и owner-identity
+  DB acceptance; БД/Docker фактически не запускались. Данные/backfill, VDS,
+  Registry, push, merge и deploy не затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

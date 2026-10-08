@@ -2100,7 +2100,6 @@ export class PageActivityEntity {
 
 @Entity('cms_revision_resources')
 @Unique(['siteId', 'resourceType', 'entityId'])
-@Unique(['id', 'siteId', 'resourceType', 'entityId'])
 export class CmsRevisionResourceEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -2186,7 +2185,6 @@ export class CmsRevisionEventEntity {
 
 @Entity('managed_chunk_contracts')
 @Unique(['templatePackageId', 'definitionKey', 'schemaVersion'])
-@Index(['templatePackageId'])
 @Check(
   'CHK_managed_chunk_contracts_field_contract_object',
   `jsonb_typeof("field_contract") = 'object'`,

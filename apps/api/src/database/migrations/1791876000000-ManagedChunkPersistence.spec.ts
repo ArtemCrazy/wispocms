@@ -111,6 +111,15 @@ const quotedCheckValues = (statement: string, column: string) => {
   );
 };
 
+const expectColumn = (
+  tableStatement: string,
+  column: string,
+  definition: string,
+) => {
+  const match = tableStatement.match(new RegExp('"' + column + '" ([^,]+),'));
+  expect(match?.[1]).toBe(normalizeSql(definition));
+};
+
 describe('ManagedChunkPersistence migration', () => {
   let upStatements: string[];
   let downStatements: string[];
@@ -149,9 +158,16 @@ describe('ManagedChunkPersistence migration', () => {
     );
   });
 
-  it('exposes the composite unique metadata needed by tenant-safe foreign keys', () => {
+  it('exposes only the composite unique metadata consumed by tenant-safe foreign keys', () => {
     const uniques = getMetadataArgsStorage().uniques;
-    const hasUnique = (target: typeof PageEntity, expected: string[]) =>
+    const indices = getMetadataArgsStorage().indices;
+    const hasUnique = (
+      target:
+        | typeof PageEntity
+        | typeof CmsRevisionResourceEntity
+        | typeof CmsRevisionEntity,
+      expected: string[],
+    ) =>
       uniques.some(({ target: candidate, columns }) => {
         const resolved = typeof columns === 'function' ? columns({}) : columns;
         return (
@@ -169,8 +185,16 @@ describe('ManagedChunkPersistence migration', () => {
         'resourceType',
         'entityId',
       ]),
-    ).toBe(true);
+    ).toBe(false);
     expect(hasUnique(CmsRevisionEntity, ['resourceId', 'id'])).toBe(true);
+    expect(
+      indices.some(
+        ({ target, columns }) =>
+          target === ManagedChunkContractEntity &&
+          Array.isArray(columns) &&
+          columns.join(',') === 'templatePackageId',
+      ),
+    ).toBe(false);
   });
 
   it('preserves every resource type and creates all value checks without backfill', () => {
@@ -253,6 +277,87 @@ describe('ManagedChunkPersistence migration', () => {
       )`,
     );
     expect(sql).not.toMatch(/INSERT\s+INTO/i);
+  });
+
+  it('keeps every managed table column type, nullability, length, and default exact', () => {
+    const table = (name: string) =>
+      statementContaining(upStatements, 'CREATE TABLE "' + name + '"');
+    const definitions: Record<string, Record<string, string>> = {
+      managed_chunk_contracts: {
+        id: 'uuid NOT NULL DEFAULT uuid_generate_v4()',
+        template_package_id: 'uuid NOT NULL',
+        first_seen_template_package_version_id: 'uuid NOT NULL',
+        definition_key: 'varchar(80) NOT NULL',
+        schema_version: 'varchar(40) NOT NULL',
+        contract_digest: 'varchar(80) NOT NULL',
+        field_contract: 'jsonb NOT NULL',
+        data_schema: 'jsonb NOT NULL',
+        created_at: 'timestamptz NOT NULL DEFAULT now()',
+      },
+      managed_chunk_instances: {
+        id: 'uuid NOT NULL DEFAULT uuid_generate_v4()',
+        site_id: 'uuid NOT NULL',
+        revision_resource_id: 'uuid NOT NULL',
+        display_name: 'varchar(160) NOT NULL',
+        is_archived: 'boolean NOT NULL DEFAULT false',
+        created_by_user_id: 'uuid',
+        created_at: 'timestamptz NOT NULL DEFAULT now()',
+        updated_at: 'timestamptz NOT NULL DEFAULT now()',
+      },
+      managed_chunk_instance_revisions: {
+        revision_id: 'uuid NOT NULL',
+        revision_resource_id: 'uuid NOT NULL',
+        site_id: 'uuid NOT NULL',
+        instance_id: 'uuid NOT NULL',
+        contract_id: 'uuid NOT NULL',
+      },
+      managed_chunk_layouts: {
+        id: 'uuid NOT NULL DEFAULT uuid_generate_v4()',
+        site_id: 'uuid NOT NULL',
+        revision_resource_id: 'uuid NOT NULL',
+        scope_kind: 'varchar(24) NOT NULL',
+        page_id: 'uuid',
+        surface_key: 'varchar(80)',
+        created_at: 'timestamptz NOT NULL DEFAULT now()',
+      },
+      managed_chunk_placements: {
+        id: 'uuid NOT NULL DEFAULT uuid_generate_v4()',
+        site_id: 'uuid NOT NULL',
+        layout_id: 'uuid NOT NULL',
+        layout_revision_resource_id: 'uuid NOT NULL',
+        layout_revision_id: 'uuid NOT NULL',
+        instance_id: 'uuid NOT NULL',
+        slot_key: 'varchar(80) NOT NULL',
+        position: 'integer NOT NULL',
+      },
+      managed_chunk_migration_provenance: {
+        id: 'uuid NOT NULL DEFAULT uuid_generate_v4()',
+        site_id: 'uuid NOT NULL',
+        migration_version: 'varchar(80) NOT NULL',
+        source_type: 'varchar(40) NOT NULL',
+        source_id: 'uuid NOT NULL',
+        source_checksum: 'varchar(128) NOT NULL',
+        instance_id: 'uuid',
+        layout_id: 'uuid',
+        placement_id: 'uuid',
+        created_at: 'timestamptz NOT NULL DEFAULT now()',
+      },
+    };
+
+    for (const [tableName, columns] of Object.entries(definitions)) {
+      const tableStatement = table(tableName);
+      const columnsOnly = tableStatement.slice(
+        tableStatement.indexOf('('),
+        tableStatement.indexOf(',CONSTRAINT'),
+      );
+      const actualColumnNames = [
+        ...columnsOnly.matchAll(/(?:\(|,)"([^"]+)" /g),
+      ].map(([, column]) => column);
+      expect(actualColumnNames).toEqual(Object.keys(columns));
+      for (const [column, definition] of Object.entries(columns)) {
+        expectColumn(tableStatement, column, definition);
+      }
+    }
   });
 
   it('wires every tenant-safe foreign key with the required delete action', () => {
@@ -414,12 +519,11 @@ describe('ManagedChunkPersistence migration', () => {
       statementContaining(upStatements, 'ALTER TABLE "pages"'),
       'ADD CONSTRAINT "UQ_pages_id_site_id" UNIQUE ("id", "site_id")',
     );
-    expectFragment(
-      statementContaining(
-        upStatements,
-        'ADD CONSTRAINT "UQ_cms_revision_resources_exact_identity"',
-      ),
-      'UNIQUE ("id", "site_id", "resource_type", "entity_id")',
+    expect(upStatements.join(' ')).not.toContain(
+      'UQ_cms_revision_resources_exact_identity',
+    );
+    expect(upStatements.join(' ')).not.toContain(
+      'IDX_managed_chunk_contracts_package',
     );
     expectUnique(contract, 'UQ_managed_chunk_contracts_identity', [
       'template_package_id',
@@ -584,6 +688,76 @@ describe('ManagedChunkPersistence migration', () => {
     }
   });
 
+  it('protects stable owner identities while allowing instance organization updates', () => {
+    const protector = statementContaining(
+      upStatements,
+      'CREATE FUNCTION "protect_managed_chunk_owner_identity"',
+    );
+
+    for (const tableName of [
+      'managed_chunk_instances',
+      'managed_chunk_layouts',
+    ]) {
+      expect(
+        statementContaining(
+          upStatements,
+          'CREATE TRIGGER "TRG_' + tableName + '_protect_identity"',
+        ),
+      ).toBe(
+        normalizeSql(
+          'CREATE TRIGGER "TRG_' +
+            tableName +
+            '_protect_identity" BEFORE UPDATE OR DELETE ON "' +
+            tableName +
+            '" FOR EACH ROW EXECUTE FUNCTION ' +
+            '"protect_managed_chunk_owner_identity"()',
+        ),
+      );
+    }
+    for (const fragment of [
+      `IF TG_OP = 'DELETE' THEN`,
+      `IF TG_TABLE_NAME = 'managed_chunk_layouts' THEN`,
+      `NEW."id" IS DISTINCT FROM OLD."id"`,
+      `NEW."site_id" IS DISTINCT FROM OLD."site_id"`,
+      `NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"`,
+      `NEW."created_at" IS DISTINCT FROM OLD."created_at"`,
+      `NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"`,
+      `NEW."created_by_user_id" IS NOT NULL`,
+      `RETURN NEW`,
+    ]) {
+      expectFragment(protector, fragment);
+    }
+    expect(protector).not.toContain('NEW."display_name" IS DISTINCT');
+    expect(protector).not.toContain('NEW."is_archived" IS DISTINCT');
+    expect(protector).not.toContain('NEW."updated_at" IS DISTINCT');
+    expect(protector).not.toContain('NEW IS DISTINCT FROM OLD');
+  });
+
+  it('locks every guard dependency in the first rollback call before checking or dropping', () => {
+    const firstCall = downStatements[0];
+    const lockFragment = `
+      LOCK TABLE
+        "template_package_versions",
+        "cms_revision_resources",
+        "managed_chunk_contracts",
+        "managed_chunk_instances",
+        "managed_chunk_instance_revisions",
+        "managed_chunk_layouts",
+        "managed_chunk_placements",
+        "managed_chunk_migration_provenance"
+      IN SHARE ROW EXCLUSIVE MODE;
+    `;
+
+    expect(firstCall.startsWith(normalizeSql(lockFragment))).toBe(true);
+    expect(firstCall.indexOf('LOCK TABLE')).toBeLessThan(
+      firstCall.indexOf('DO $$'),
+    );
+    expect(firstCall.indexOf('DO $$')).toBeLessThan(
+      firstCall.indexOf('IF EXISTS'),
+    );
+    expect(firstCall).not.toMatch(/\bDROP\b/);
+  });
+
   it('guards rollback before drops, uses FK-safe order, and restores exact checks', () => {
     const guard = downStatements[0];
     const firstDropIndex = downStatements.findIndex((statement) =>
@@ -600,7 +774,7 @@ describe('ManagedChunkPersistence migration', () => {
       expect(indexOf(first)).toBeLessThan(indexOf(second));
     };
 
-    expect(guard).toMatch(/^DO \$\$/);
+    expect(guard).toContain('DO $$');
     expect(firstDropIndex).toBeGreaterThan(0);
     for (const tableName of tableNames) {
       expectFragment(guard, 'EXISTS (SELECT 1 FROM "' + tableName + '")');
@@ -636,10 +810,6 @@ describe('ManagedChunkPersistence migration', () => {
       'DROP TABLE "managed_chunk_contracts"',
     );
     expectBefore(
-      'DROP TABLE "managed_chunk_instances"',
-      'DROP CONSTRAINT "UQ_cms_revision_resources_exact_identity"',
-    );
-    expectBefore(
       'DROP TABLE "managed_chunk_layouts"',
       'DROP CONSTRAINT "UQ_pages_id_site_id"',
     );
@@ -650,6 +820,18 @@ describe('ManagedChunkPersistence migration', () => {
     expectBefore(
       'DROP TRIGGER "TRG_managed_chunk_layouts_resource_identity"',
       'DROP TABLE "managed_chunk_layouts"',
+    );
+    expectBefore(
+      'DROP TRIGGER "TRG_managed_chunk_instances_protect_identity"',
+      'DROP TABLE "managed_chunk_instances"',
+    );
+    expectBefore(
+      'DROP TRIGGER "TRG_managed_chunk_layouts_protect_identity"',
+      'DROP TABLE "managed_chunk_layouts"',
+    );
+    expectBefore(
+      'DROP FUNCTION "protect_managed_chunk_owner_identity"()',
+      'DROP TABLE "managed_chunk_instances"',
     );
 
     const resourceRestore = statementContaining(
@@ -665,6 +847,12 @@ describe('ManagedChunkPersistence migration', () => {
         'ALTER TABLE "template_package_versions"',
       ),
       'CHECK ("manifest_version" = 1)',
+    );
+    expect(downStatements.join(' ')).not.toContain(
+      'UQ_cms_revision_resources_exact_identity',
+    );
+    expect(downStatements.join(' ')).not.toContain(
+      'IDX_managed_chunk_contracts_package',
     );
     expect(downStatements.join(' ')).not.toMatch(/DELETE\s+FROM/i);
   });

@@ -27,12 +27,6 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
         ADD CONSTRAINT "UQ_pages_id_site_id" UNIQUE ("id", "site_id")
     `);
     await queryRunner.query(`
-      ALTER TABLE "cms_revision_resources"
-        ADD CONSTRAINT "UQ_cms_revision_resources_exact_identity"
-          UNIQUE ("id", "site_id", "resource_type", "entity_id")
-    `);
-
-    await queryRunner.query(`
       CREATE TABLE "managed_chunk_contracts" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "template_package_id" uuid NOT NULL,
@@ -63,11 +57,6 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
           ON DELETE RESTRICT
       )
     `);
-    await queryRunner.query(`
-      CREATE INDEX "IDX_managed_chunk_contracts_package"
-        ON "managed_chunk_contracts" ("template_package_id")
-    `);
-
     await queryRunner.query(`
       CREATE TABLE "managed_chunk_instances" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -345,6 +334,45 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
     `);
 
     await queryRunner.query(`
+      CREATE FUNCTION "protect_managed_chunk_owner_identity"()
+      RETURNS trigger AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'Managed chunk owner identities cannot be deleted'
+            USING ERRCODE = '55000';
+        END IF;
+        IF TG_TABLE_NAME = 'managed_chunk_layouts' THEN
+          RAISE EXCEPTION 'Managed chunk layout identities are immutable'
+            USING ERRCODE = '55000';
+        END IF;
+        IF NEW."id" IS DISTINCT FROM OLD."id"
+          OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+          OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+          OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+          OR (
+            NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
+            AND NEW."created_by_user_id" IS NOT NULL
+          )
+        THEN
+          RAISE EXCEPTION 'Managed chunk instance identity is immutable'
+            USING ERRCODE = '55000';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await queryRunner.query(`
+      CREATE TRIGGER "TRG_managed_chunk_instances_protect_identity"
+      BEFORE UPDATE OR DELETE ON "managed_chunk_instances"
+      FOR EACH ROW EXECUTE FUNCTION "protect_managed_chunk_owner_identity"()
+    `);
+    await queryRunner.query(`
+      CREATE TRIGGER "TRG_managed_chunk_layouts_protect_identity"
+      BEFORE UPDATE OR DELETE ON "managed_chunk_layouts"
+      FOR EACH ROW EXECUTE FUNCTION "protect_managed_chunk_owner_identity"()
+    `);
+
+    await queryRunner.query(`
       CREATE FUNCTION "reject_managed_chunk_history_mutation"()
       RETURNS trigger AS $$
       BEGIN
@@ -371,6 +399,17 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
 
   async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
+      LOCK TABLE
+        "template_package_versions",
+        "cms_revision_resources",
+        "managed_chunk_contracts",
+        "managed_chunk_instances",
+        "managed_chunk_instance_revisions",
+        "managed_chunk_layouts",
+        "managed_chunk_placements",
+        "managed_chunk_migration_provenance"
+      IN SHARE ROW EXCLUSIVE MODE;
+
       DO $$
       BEGIN
         IF EXISTS (SELECT 1 FROM "managed_chunk_contracts")
@@ -409,6 +448,15 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
     );
     await queryRunner.query(
       'DROP FUNCTION "verify_managed_chunk_revision_resource"()',
+    );
+    await queryRunner.query(
+      'DROP TRIGGER "TRG_managed_chunk_layouts_protect_identity" ON "managed_chunk_layouts"',
+    );
+    await queryRunner.query(
+      'DROP TRIGGER "TRG_managed_chunk_instances_protect_identity" ON "managed_chunk_instances"',
+    );
+    await queryRunner.query(
+      'DROP FUNCTION "protect_managed_chunk_owner_identity"()',
     );
     for (const tableName of [
       'managed_chunk_migration_provenance',
@@ -451,8 +499,6 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
     await queryRunner.query(
       'DROP INDEX "IDX_managed_chunk_instances_site_archived"',
     );
-    await queryRunner.query('DROP INDEX "IDX_managed_chunk_contracts_package"');
-
     await queryRunner.query('DROP TABLE "managed_chunk_migration_provenance"');
     await queryRunner.query('DROP TABLE "managed_chunk_placements"');
     await queryRunner.query('DROP TABLE "managed_chunk_layouts"');
@@ -460,10 +506,6 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
     await queryRunner.query('DROP TABLE "managed_chunk_instances"');
     await queryRunner.query('DROP TABLE "managed_chunk_contracts"');
 
-    await queryRunner.query(`
-      ALTER TABLE "cms_revision_resources"
-        DROP CONSTRAINT "UQ_cms_revision_resources_exact_identity"
-    `);
     await queryRunner.query(`
       ALTER TABLE "pages"
         DROP CONSTRAINT "UQ_pages_id_site_id"

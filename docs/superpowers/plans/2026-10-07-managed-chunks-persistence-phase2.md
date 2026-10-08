@@ -478,7 +478,25 @@ $env:WISPO_MANAGED_CHUNK_ISOLATED_DB='wispo_managed_chunks_phase2_test'
 pnpm --dir apps/api test --runInBand -- template-packages/managed-chunk-persistence.database.spec.ts
 ```
 
-Suite применяет весь ledger; повторный run no-op; проверяет v1/v2 checks; idempotent contract; cross-package/version FK; cross-site page/instance FK; duplicate position; rollback layout; draft/published inventory; empty safe down на fresh second database; blocked down после managed data до любого drop.
+Suite применяет весь ledger; повторный run no-op; проверяет v1/v2 checks;
+idempotent contract; cross-package/version FK; cross-site page/instance FK;
+duplicate position; rollback layout; draft/published inventory; empty safe down
+на fresh second database; blocked down после managed data до любого drop.
+
+Concurrency acceptance использует два независимых соединения к disposable DB:
+
+1. transaction A выполняет первый `down()` batch (`LOCK TABLE ... IN SHARE ROW
+   EXCLUSIVE MODE` + guard) и удерживает transaction-wide locks;
+2. transaction B пытается вставить/изменить guard dependency и подтверждённо
+   блокируется до rollback/commit A;
+3. после появления новых данных повторный `down()` падает на guard и не удаляет
+   ни таблицы, ни checks, ни triggers.
+
+Owner-identity negative cases: layout с revision нельзя удалить, rebind к
+другому revision resource или перенести в другой site; instance нельзя удалить,
+поменять `id/site_id/revision_resource_id/created_at` или переназначить actor.
+При этом `display_name`/`is_archived`/`updated_at` обновляются, а удаление actor
+успешно выполняет FK `ON DELETE SET NULL`.
 
 - [ ] **Step 5: Удалить только тестовый контейнер**
 
