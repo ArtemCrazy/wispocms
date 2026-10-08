@@ -323,6 +323,10 @@ function createInstanceHarness(options?: {
   siteDisappearsAfterAuthorization?: boolean;
   denyAccess?: boolean;
   failOnSave?: 'instance' | 'link';
+  corruptAfterTypedSave?: (
+    state: InstanceState,
+    kind: 'instance' | 'link',
+  ) => void;
   beforeTransaction?: () => Promise<void>;
 }) {
   let committed: InstanceState = {
@@ -406,6 +410,32 @@ function createInstanceHarness(options?: {
                   ) ?? null,
                 );
               }
+              if (entity === ManagedChunkInstanceEntity) {
+                lookupOperations.push({
+                  entity: 'instance',
+                  lock: query.lock ?? null,
+                });
+                return Promise.resolve(
+                  working.instances.find((row) =>
+                    Object.entries(query.where).every(
+                      ([key, value]) => row[key] === value,
+                    ),
+                  ) ?? null,
+                );
+              }
+              if (entity === ManagedChunkInstanceRevisionEntity) {
+                lookupOperations.push({
+                  entity: 'link',
+                  lock: query.lock ?? null,
+                });
+                return Promise.resolve(
+                  working.links.find((row) =>
+                    Object.entries(query.where).every(
+                      ([key, value]) => row[key] === value,
+                    ),
+                  ) ?? null,
+                );
+              }
               if (entity === ManagedChunkContractEntity) {
                 lookupOperations.push({
                   entity: 'contract',
@@ -458,6 +488,9 @@ function createInstanceHarness(options?: {
             );
             if (existing >= 0) rows[existing] = structuredClone(record);
             else rows.push(structuredClone(record));
+            if (kind === 'instance' || kind === 'link') {
+              options?.corruptAfterTypedSave?.(working, kind);
+            }
             return Promise.resolve(value);
           }),
         } as unknown as EntityManager;
@@ -509,6 +542,10 @@ function createLayoutHarness(options?: {
   pages?: Array<{ id: string; siteId: string }>;
   instances?: Array<{ id: string; siteId: string }>;
   failOnSave?: 'layout' | 'placement';
+  corruptAfterTypedSave?: (
+    state: LayoutState,
+    kind: 'layout' | 'placement',
+  ) => void;
   denyAccess?: boolean;
   siteExists?: boolean;
   beforeTransaction?: () => Promise<void>;
@@ -627,6 +664,28 @@ function createLayoutHarness(options?: {
               throw new Error('Unexpected lookup: ' + entity.name);
             },
           ),
+          find: jest.fn(
+            (
+              entity: { name: string },
+              query: { where: Record<string, unknown> },
+            ) => {
+              if (entity !== ManagedChunkPlacementEntity) {
+                throw new Error('Unexpected collection lookup: ' + entity.name);
+              }
+              lookupOperations.push({
+                entity: 'placements',
+                where: { ...query.where },
+                lock: null,
+              });
+              return Promise.resolve(
+                working.placements.filter((row) =>
+                  Object.entries(query.where).every(
+                    ([key, value]) => row[key] === value,
+                  ),
+                ),
+              );
+            },
+          ),
           save: jest.fn((value: object | object[]) => {
             const values = Array.isArray(value) ? value : [value];
             for (const item of values) {
@@ -662,6 +721,9 @@ function createLayoutHarness(options?: {
               const existing = rows.findIndex((row) => row.id === record.id);
               if (existing >= 0) rows[existing] = structuredClone(record);
               else rows.push(structuredClone(record));
+              if (kind === 'layout' || kind === 'placement') {
+                options?.corruptAfterTypedSave?.(working, kind);
+              }
             }
             return Promise.resolve(value);
           }),
@@ -1191,6 +1253,9 @@ describe('ManagedChunkPersistenceRepository', () => {
         { entity: 'site', lock: { mode: 'pessimistic_read' } },
         { entity: 'contract', lock: null },
         { entity: 'resource', lock: { mode: 'pessimistic_write' } },
+        { entity: 'resource', lock: null },
+        { entity: 'instance', lock: null },
+        { entity: 'link', lock: null },
       ]);
     });
 
@@ -1307,6 +1372,70 @@ describe('ManagedChunkPersistenceRepository', () => {
             ? ['resource', 'revision', 'instance']
             : ['resource', 'revision', 'instance', 'link'],
         );
+        expect(harness.state).toEqual({
+          resources: [],
+          revisions: [],
+          instances: [],
+          links: [],
+          events: [],
+        });
+      },
+    );
+
+    it.each([
+      [
+        'missing instance owner',
+        (state: InstanceState) => {
+          state.instances = [];
+        },
+      ],
+      [
+        'wrong instance owner resource',
+        (state: InstanceState) => {
+          state.instances[0].revisionResourceId = 'wrong-resource';
+        },
+      ],
+      [
+        'missing typed revision link',
+        (state: InstanceState) => {
+          state.links = [];
+        },
+      ],
+      [
+        'wrong typed revision contract',
+        (state: InstanceState) => {
+          state.links[0].contractId = 'wrong-contract';
+        },
+      ],
+    ] as const)(
+      'fails closed after the hook leaves %s and rolls back pointer/event writes',
+      async (_, corrupt) => {
+        const harness = createInstanceHarness({
+          corruptAfterTypedSave: (state, kind) => {
+            if (kind === 'link') corrupt(state);
+          },
+        });
+
+        const saving = harness.repository.createInstanceDraft({
+          siteId: SITE_ID,
+          displayName: 'Corrupt instance',
+          contractId: CONTRACT_ID,
+          data: {},
+          sanitizerPolicyVersion: null,
+          actor: ACTOR,
+        });
+        await expect(saving).rejects.toEqual(
+          new ConflictException(
+            'Состояние управляемого черновика не подтверждено',
+          ),
+        );
+        await expect(saving).rejects.not.toThrow(DATABASE_UUID_PATTERN);
+        expect(harness.saveAttempts).toEqual([
+          'resource',
+          'revision',
+          'instance',
+          'link',
+        ]);
         expect(harness.state).toEqual({
           resources: [],
           revisions: [],
@@ -1521,6 +1650,30 @@ describe('ManagedChunkPersistenceRepository', () => {
           entity: 'instance',
           where: { id: PROMO_INSTANCE_ID, siteId: SITE_ID },
           lock: { mode: 'pessimistic_read' },
+        },
+        {
+          entity: 'resource',
+          where: {
+            id: harness.state.resources[0].id,
+            siteId: SITE_ID,
+            resourceType: 'chunk_layout',
+            entityId: result.layoutId,
+          },
+          lock: null,
+        },
+        {
+          entity: 'layout',
+          where: {
+            id: result.layoutId,
+            siteId: SITE_ID,
+            revisionResourceId: harness.state.resources[0].id,
+          },
+          lock: null,
+        },
+        {
+          entity: 'placements',
+          where: { layoutRevisionId: result.revisionId },
+          lock: null,
         },
       ]);
     });
@@ -1758,6 +1911,74 @@ describe('ManagedChunkPersistenceRepository', () => {
           failOnSave + '-save-failed',
         );
 
+        expect(harness.state).toEqual({
+          resources: [],
+          revisions: [],
+          layouts: [],
+          placements: [],
+          events: [],
+        });
+      },
+    );
+
+    it.each([
+      [
+        'missing layout owner',
+        (state: LayoutState) => {
+          state.layouts = [];
+        },
+      ],
+      [
+        'wrong layout owner resource',
+        (state: LayoutState) => {
+          state.layouts[0].revisionResourceId = 'wrong-resource';
+        },
+      ],
+      [
+        'missing placement',
+        (state: LayoutState) => {
+          state.placements = [];
+        },
+      ],
+      [
+        'extra placement',
+        (state: LayoutState) => {
+          state.placements.push({
+            ...state.placements[0],
+            id: 'extra-placement',
+            slotKey: 'extra',
+            position: 1,
+          });
+        },
+      ],
+      [
+        'changed placement',
+        (state: LayoutState) => {
+          state.placements[0].slotKey = 'changed';
+        },
+      ],
+    ] as const)(
+      'fails closed after the hook leaves a %s and rolls back the layout draft',
+      async (_, corrupt) => {
+        const harness = createLayoutHarness({
+          corruptAfterTypedSave: (state, kind) => {
+            if (kind === 'placement') corrupt(state);
+          },
+        });
+
+        const saving = savePageLayout(harness.repository);
+        await expect(saving).rejects.toEqual(
+          new ConflictException(
+            'Состояние управляемого черновика не подтверждено',
+          ),
+        );
+        await expect(saving).rejects.not.toThrow(DATABASE_UUID_PATTERN);
+        expect(harness.saveAttempts).toEqual([
+          'resource',
+          'revision',
+          'layout',
+          'placement',
+        ]);
         expect(harness.state).toEqual({
           resources: [],
           revisions: [],
@@ -3363,6 +3584,36 @@ function compatibilityInventoryState(): CompatibilityInventoryState {
 
 function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
   const state = compatibilityInventoryState();
+  const invalidInstanceIds = new Set([
+    'foreign-instance',
+    'wrong-type-instance',
+    'wrong-revision-instance',
+    'wrong-link-instance',
+  ]);
+  const invalidResourceIds = new Set([
+    'resource-foreign',
+    'resource-wrong-type',
+    'resource-wrong-revision',
+    'resource-wrong-link',
+  ]);
+  state.instances = state.instances.filter(
+    (row) => !invalidInstanceIds.has(String(row.id)),
+  );
+  state.resources = state.resources.filter(
+    (row) => !invalidResourceIds.has(String(row.id)),
+  );
+  state.revisions = state.revisions.filter(
+    (row) => !invalidResourceIds.has(String(row.resourceId)),
+  );
+  state.instanceLinks = state.instanceLinks.filter(
+    (row) => !invalidResourceIds.has(String(row.revisionResourceId)),
+  );
+  state.placements = state.placements.filter(
+    (row) =>
+      row.id !== 'draft-missing-pointer' &&
+      row.id !== 'published-missing-pointer' &&
+      row.id !== 'wrong-layout-revision-resource',
+  );
   if (options?.reverse) {
     for (const rows of Object.values(state)) rows.reverse();
   }
@@ -3379,23 +3630,28 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
   const queryCalls: Array<{
     operation: 'find' | 'findOne';
     entity: unknown;
-    where?: Record<string, unknown>;
+    where?: Record<string, unknown> | Array<Record<string, unknown>>;
     select?: Record<string, boolean>;
   }> = [];
   const matches = (
     row: Record<string, unknown>,
-    where: Record<string, unknown>,
+    where: Record<string, unknown> | Array<Record<string, unknown>>,
   ): boolean =>
-    Object.entries(where).every(([key, value]) => {
-      const findOperator = value as {
-        _type?: unknown;
-        _value?: unknown;
-      };
-      if (findOperator?._type === 'in' && Array.isArray(findOperator._value)) {
-        return findOperator._value.includes(row[key]);
-      }
-      return row[key] === value;
-    });
+    (Array.isArray(where) ? where : [where]).some((candidate) =>
+      Object.entries(candidate).every(([key, value]) => {
+        const findOperator = value as {
+          _type?: unknown;
+          _value?: unknown;
+        };
+        if (
+          findOperator?._type === 'in' &&
+          Array.isArray(findOperator._value)
+        ) {
+          return findOperator._value.includes(row[key]);
+        }
+        return row[key] === value;
+      }),
+    );
   const rowsFor = (entity: unknown): Array<Record<string, unknown>> => {
     if (entity === CmsRevisionResourceEntity) return state.resources;
     if (entity === CmsRevisionEntity) return state.revisions;
@@ -3481,7 +3737,7 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
       (
         entity: unknown,
         options?: {
-          where?: Record<string, unknown>;
+          where?: Record<string, unknown> | Array<Record<string, unknown>>;
           select?: Record<string, boolean>;
         },
       ): Promise<Array<Record<string, unknown>>> => {
@@ -3906,7 +4162,7 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       },
     ],
   ])(
-    'excludes %s without leaking page placements',
+    'fails closed for %s',
     async (
       _: string,
       mutate: (
@@ -3916,19 +4172,126 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       const harness = createCompatibilityInventoryHarness();
       mutate(harness);
 
-      const inventory = await harness.repository.readCompatibilityInventory({
+      const reading = harness.repository.readCompatibilityInventory({
         siteId: SITE_ID,
         templatePackageId: PACKAGE_ID,
       });
-
-      expect(inventory.placements).not.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            source: 'draft',
-            layoutKey: 'page:' + INVENTORY_PAGE_ID,
-          }),
-        ]),
+      await expect(reading).rejects.toEqual(
+        new ConflictException('Данные управляемого контента повреждены'),
       );
+      await expect(reading).rejects.not.toThrow(DATABASE_UUID_PATTERN);
+    },
+  );
+
+  it.each([
+    [
+      'a managed resource whose owner is missing',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        harness.state.instances = harness.state.instances.filter(
+          (row) => row.id !== SHARED_INSTANCE_ID,
+        );
+      },
+    ],
+    [
+      'a resource owner from another site',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const resource = harness.state.resources.find(
+          (row) => row.id === 'resource-shared',
+        );
+        if (!resource) throw new Error('Fixture resource is missing');
+        resource.siteId = INVENTORY_OTHER_SITE_ID;
+      },
+    ],
+    [
+      'a missing pointed revision',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        harness.state.revisions = harness.state.revisions.filter(
+          (row) => row.id !== 'shared-draft',
+        );
+      },
+    ],
+    [
+      'a pointed revision owned by another resource',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const revision = harness.state.revisions.find(
+          (row) => row.id === 'shared-draft',
+        );
+        if (!revision) throw new Error('Fixture revision is missing');
+        revision.resourceId = 'wrong-resource';
+      },
+    ],
+    [
+      'a missing typed instance link',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        harness.state.instanceLinks = harness.state.instanceLinks.filter(
+          (row) => row.revisionId !== 'shared-draft',
+        );
+      },
+    ],
+    [
+      'a typed link to a missing contract',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const link = harness.state.instanceLinks.find(
+          (row) => row.revisionId === 'shared-draft',
+        );
+        if (!link) throw new Error('Fixture link is missing');
+        link.contractId = 'missing-contract';
+      },
+    ],
+    [
+      'a typed link to a contract outside the explicit candidate',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const link = harness.state.instanceLinks.find(
+          (row) => row.revisionId === 'shared-draft',
+        );
+        if (!link) throw new Error('Fixture link is missing');
+        link.contractId = 'contract-other-package';
+      },
+    ],
+    [
+      'a placement with the wrong layout identity',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const placement = harness.state.placements.find(
+          (row) => row.id === 'draft-switch',
+        );
+        if (!placement) throw new Error('Fixture placement is missing');
+        placement.layoutId = 'wrong-layout';
+      },
+    ],
+    [
+      'a placement for an unknown instance',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const placement = harness.state.placements.find(
+          (row) => row.id === 'draft-switch',
+        );
+        if (!placement) throw new Error('Fixture placement is missing');
+        placement.instanceId = 'missing-instance';
+      },
+    ],
+    [
+      'a placement whose instance has no same-source pointer',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const placement = harness.state.placements.find(
+          (row) => row.id === 'draft-switch',
+        );
+        if (!placement) throw new Error('Fixture placement is missing');
+        placement.instanceId = PUBLISHED_ONLY_INSTANCE_ID;
+      },
+    ],
+  ] as const)(
+    'fails closed for present pointer corruption: %s',
+    async (_, mutate) => {
+      const harness = createCompatibilityInventoryHarness();
+      mutate(harness);
+
+      const reading = harness.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      });
+      await expect(reading).rejects.toEqual(
+        new ConflictException('Данные управляемого контента повреждены'),
+      );
+      await expect(reading).rejects.not.toThrow(DATABASE_UUID_PATTERN);
     },
   );
 
@@ -3940,7 +4303,7 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       templatePackageId: PACKAGE_ID,
     });
 
-    expect(harness.queryCalls).toHaveLength(9);
+    expect(harness.queryCalls).toHaveLength(10);
     const inValues = (value: unknown): unknown[] => {
       expect(value).toBeDefined();
       if (value === null || value === undefined || typeof value !== 'object') {
@@ -3993,13 +4356,36 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       pageId: true,
       surfaceKey: true,
     });
-    const revisionRead = read(CmsRevisionEntity);
-    expect(revisionRead?.select).toEqual({
+    const revisionReads = harness.queryCalls.filter(
+      (candidate) =>
+        candidate.operation === 'find' &&
+        candidate.entity === CmsRevisionEntity,
+    );
+    expect(revisionReads).toHaveLength(2);
+    const instanceRevisionRead = revisionReads.find(
+      (candidate) => candidate.select?.snapshot !== true,
+    );
+    const layoutRevisionRead = revisionReads.find(
+      (candidate) => candidate.select?.snapshot === true,
+    );
+    expect(instanceRevisionRead?.select).toEqual({
+      id: true,
+      resourceId: true,
+    });
+    expect(inValues(instanceRevisionRead?.where?.id)).toEqual([
+      'shared-draft',
+      'shared-published',
+      'switch-draft',
+      'switch-published',
+      'published-only-published',
+      'draft-only-draft',
+    ]);
+    expect(layoutRevisionRead?.select).toEqual({
       id: true,
       resourceId: true,
       snapshot: true,
     });
-    expect(inValues(revisionRead?.where?.id)).toEqual([
+    expect(inValues(layoutRevisionRead?.where?.id)).toEqual([
       INVENTORY_LAYOUT_DRAFT_ID,
       INVENTORY_LAYOUT_PUBLISHED_ID,
       'surface-layout-draft',
@@ -4031,9 +4417,21 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       position: true,
     });
     const resourceRead = read(CmsRevisionResourceEntity);
-    expect(inValues(resourceRead?.where?.resourceType)).toEqual([
+    expect(Array.isArray(resourceRead?.where)).toBe(true);
+    const resourcePredicates = resourceRead?.where as Array<
+      Record<string, unknown>
+    >;
+    expect(inValues(resourcePredicates[0].resourceType)).toEqual([
       'chunk_instance',
       'chunk_layout',
+    ]);
+    expect(inValues(resourcePredicates[1].id)).toEqual([
+      'resource-shared',
+      'resource-switch',
+      'resource-published-only',
+      'resource-draft-only',
+      INVENTORY_LAYOUT_RESOURCE_ID,
+      'surface-layout-resource',
     ]);
     expect(inValues(contractRead?.where?.id)).not.toContain(
       'contract-wrong-resource',
@@ -4073,7 +4471,7 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
     ).toEqual([]);
   });
   it.each([null, 'invalid', []])(
-    'excludes a layout revision with malformed snapshot %p',
+    'fails closed for a layout revision with malformed snapshot %p',
     async (snapshot) => {
       const harness = createCompatibilityInventoryHarness();
       const revision = harness.state.revisions.find(
@@ -4082,18 +4480,14 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       if (!revision) throw new Error('Fixture layout revision is missing');
       revision.snapshot = snapshot;
 
-      const inventory = await harness.repository.readCompatibilityInventory({
+      const reading = harness.repository.readCompatibilityInventory({
         siteId: SITE_ID,
         templatePackageId: PACKAGE_ID,
       });
-      expect(inventory.placements).not.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            source: 'draft',
-            layoutKey: 'page:' + INVENTORY_PAGE_ID,
-          }),
-        ]),
+      await expect(reading).rejects.toEqual(
+        new ConflictException('Данные управляемого контента повреждены'),
       );
+      await expect(reading).rejects.not.toThrow(DATABASE_UUID_PATTERN);
     },
   );
 

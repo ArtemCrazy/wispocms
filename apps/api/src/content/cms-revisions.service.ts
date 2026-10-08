@@ -67,6 +67,22 @@ export type RevisionCreatedHook = (
   resource: CmsRevisionResourceEntity,
 ) => Promise<void>;
 
+export type ManagedDraftExpectedProof =
+  | Readonly<{ kind: 'instance'; contractId: string }>
+  | Readonly<{
+      kind: 'layout';
+      placements: readonly Readonly<{
+        slotKey: string;
+        position: number;
+        instanceId: string;
+      }>[];
+    }>;
+
+export type ManagedDraftPreparation = Readonly<{
+  entityId: string;
+  proof: ManagedDraftExpectedProof;
+}>;
+
 export type ManagedRevisionLifecycleContext = {
   resource: CmsRevisionResourceEntity;
   revision: CmsRevisionEntity;
@@ -435,6 +451,184 @@ export class CmsRevisionsService {
     return this.saveDraftInTransaction(db, input);
   }
 
+  private managedDraftVerificationConflict(): never {
+    throw new ConflictException(
+      'Состояние управляемого черновика не подтверждено',
+    );
+  }
+
+  private canonicalManagedDraftPlacements(
+    placements: readonly Readonly<{
+      slotKey: string;
+      position: number;
+      instanceId: string;
+    }>[],
+  ): string[] {
+    return placements
+      .map((placement) =>
+        JSON.stringify([
+          placement.slotKey,
+          placement.position,
+          placement.instanceId,
+        ]),
+      )
+      .sort();
+  }
+
+  private snapshotManagedDraftPreparation(
+    resourceType: ManagedCmsResourceType,
+    prepared: ManagedDraftPreparation,
+  ): ManagedDraftPreparation {
+    // Runtime snapshot intentionally happens before the hook: Readonly is only
+    // a compile-time guarantee and caller-owned proof must not become TOCTOU state.
+    if (
+      !prepared ||
+      typeof prepared !== 'object' ||
+      typeof prepared.entityId !== 'string' ||
+      !prepared.entityId
+    ) {
+      this.managedDraftVerificationConflict();
+    }
+    const proof: unknown = prepared.proof;
+    if (!proof || typeof proof !== 'object' || Array.isArray(proof)) {
+      this.managedDraftVerificationConflict();
+    }
+    const proofRecord = proof as Record<string, unknown>;
+    if (resourceType === 'chunk_instance') {
+      if (
+        proofRecord.kind !== 'instance' ||
+        typeof proofRecord.contractId !== 'string' ||
+        !proofRecord.contractId
+      ) {
+        this.managedDraftVerificationConflict();
+      }
+      return Object.freeze({
+        entityId: prepared.entityId,
+        proof: Object.freeze({
+          kind: 'instance' as const,
+          contractId: proofRecord.contractId,
+        }),
+      });
+    }
+    if (
+      proofRecord.kind !== 'layout' ||
+      !Array.isArray(proofRecord.placements)
+    ) {
+      this.managedDraftVerificationConflict();
+    }
+    const placements = proofRecord.placements.map((placement: unknown) => {
+      if (
+        !placement ||
+        typeof placement !== 'object' ||
+        Array.isArray(placement)
+      ) {
+        this.managedDraftVerificationConflict();
+      }
+      const record = placement as Record<string, unknown>;
+      if (
+        typeof record.slotKey !== 'string' ||
+        typeof record.position !== 'number' ||
+        !Number.isInteger(record.position) ||
+        typeof record.instanceId !== 'string'
+      ) {
+        this.managedDraftVerificationConflict();
+      }
+      return Object.freeze({
+        slotKey: record.slotKey,
+        position: record.position,
+        instanceId: record.instanceId,
+      });
+    });
+    return Object.freeze({
+      entityId: prepared.entityId,
+      proof: Object.freeze({
+        kind: 'layout' as const,
+        placements: Object.freeze(placements),
+      }),
+    });
+  }
+  private async verifyManagedDraftUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      proof: ManagedDraftExpectedProof;
+    },
+    revision: CmsRevisionEntity,
+    resource: CmsRevisionResourceEntity,
+  ): Promise<void> {
+    const persistedResource = await db.findOne(CmsRevisionResourceEntity, {
+      where: {
+        id: resource.id,
+        siteId: input.siteId,
+        resourceType: input.resourceType,
+        entityId: input.entityId,
+      },
+    });
+    if (!persistedResource || revision.resourceId !== persistedResource.id) {
+      this.managedDraftVerificationConflict();
+    }
+
+    if (input.resourceType === 'chunk_instance') {
+      if (input.proof.kind !== 'instance') {
+        this.managedDraftVerificationConflict();
+      }
+      const instance = await db.findOne(ManagedChunkInstanceEntity, {
+        where: {
+          id: input.entityId,
+          siteId: input.siteId,
+          revisionResourceId: persistedResource.id,
+        },
+      });
+      const link = await db.findOne(ManagedChunkInstanceRevisionEntity, {
+        where: {
+          revisionId: revision.id,
+          revisionResourceId: persistedResource.id,
+          siteId: input.siteId,
+          instanceId: input.entityId,
+          contractId: input.proof.contractId,
+        },
+      });
+      if (!instance || !link) this.managedDraftVerificationConflict();
+      return;
+    }
+
+    if (input.proof.kind !== 'layout') {
+      this.managedDraftVerificationConflict();
+    }
+    const layout = await db.findOne(ManagedChunkLayoutEntity, {
+      where: {
+        id: input.entityId,
+        siteId: input.siteId,
+        revisionResourceId: persistedResource.id,
+      },
+    });
+    if (!layout) this.managedDraftVerificationConflict();
+    const placements = await db.find(ManagedChunkPlacementEntity, {
+      where: { layoutRevisionId: revision.id },
+    });
+    const actualPlacements = this.canonicalManagedDraftPlacements(placements);
+    const expectedPlacements = this.canonicalManagedDraftPlacements(
+      input.proof.placements,
+    );
+    if (
+      placements.some(
+        (placement) =>
+          placement.siteId !== input.siteId ||
+          placement.layoutId !== input.entityId ||
+          placement.layoutRevisionResourceId !== persistedResource.id ||
+          placement.layoutRevisionId !== revision.id,
+      ) ||
+      actualPlacements.length !== expectedPlacements.length ||
+      actualPlacements.some(
+        (placement, index) => placement !== expectedPlacements[index],
+      )
+    ) {
+      this.managedDraftVerificationConflict();
+    }
+  }
+
   async savePreparedManagedDraftUsingManager(
     db: EntityManager,
     input: {
@@ -444,7 +638,7 @@ export class CmsRevisionsService {
       expectedDraftRevisionId: string | null;
       actor: RevisionActor;
     },
-    prepare: (manager: EntityManager) => Promise<{ entityId: string }>,
+    prepare: (manager: EntityManager) => Promise<ManagedDraftPreparation>,
     revisionCreatedHook: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number; entityId: string }> {
     this.assertManagedResourceType(input.resourceType);
@@ -461,13 +655,29 @@ export class CmsRevisionsService {
       resourceType: input.resourceType,
       actor: input.actor,
     });
-    const prepared = await prepare(db);
+    const prepared = this.snapshotManagedDraftPreparation(
+      input.resourceType,
+      await prepare(db),
+    );
     const revision = await this.saveDraftInTransaction(
       db,
       { ...input, entityId: prepared.entityId },
       'draft_saved',
       null,
-      revisionCreatedHook,
+      async (hookDb, savedRevision, resource) => {
+        await revisionCreatedHook(hookDb, savedRevision, resource);
+        await this.verifyManagedDraftUsingManager(
+          hookDb,
+          {
+            siteId: input.siteId,
+            resourceType: input.resourceType,
+            entityId: prepared.entityId,
+            proof: prepared.proof,
+          },
+          savedRevision,
+          resource,
+        );
+      },
     );
     return { ...revision, entityId: prepared.entityId };
   }
@@ -482,6 +692,7 @@ export class CmsRevisionsService {
       expectedDraftRevisionId: string | null;
       actor: RevisionActor;
     },
+    proof: ManagedDraftExpectedProof,
     revisionCreatedHook: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number }> {
     const { entityId, ...managedInput } = input;
@@ -494,7 +705,7 @@ export class CmsRevisionsService {
           lock: { mode: 'pessimistic_read' },
         });
         if (!site) throw new NotFoundException('Сайт не найден');
-        return { entityId };
+        return { entityId, proof };
       },
       revisionCreatedHook,
     );

@@ -40,6 +40,10 @@ describe('CMS revision storage', () => {
     const resources: Record<string, unknown>[] = [];
     const revisions: Record<string, unknown>[] = [];
     const events: Record<string, unknown>[] = [];
+    const instances: Record<string, unknown>[] = [];
+    const links: Record<string, unknown>[] = [];
+    const layouts: Record<string, unknown>[] = [];
+    const placements: Record<string, unknown>[] = [];
     const operations: string[] = [];
     const saved = (value: Record<string, unknown>) => {
       if (
@@ -57,20 +61,39 @@ describe('CMS revision storage', () => {
         !resources.some((resource) => resource.id === value.resourceId)
       )
         throw new Error('FK resource must exist before revision');
+      const kind =
+        value instanceof ManagedChunkInstanceEntity
+          ? 'instance'
+          : value instanceof ManagedChunkInstanceRevisionEntity
+            ? 'link'
+            : value instanceof ManagedChunkLayoutEntity
+              ? 'layout'
+              : value instanceof ManagedChunkPlacementEntity
+                ? 'placement'
+                : 'resourceType' in value
+                  ? 'resource'
+                  : 'snapshot' in value
+                    ? 'revision'
+                    : 'event';
       const collection =
-        'resourceType' in value
-          ? resources
-          : 'snapshot' in value
-            ? revisions
-            : events;
-      operations.push(
-        'resourceType' in value
-          ? 'resource'
-          : 'snapshot' in value
-            ? 'revision'
-            : 'event',
+        kind === 'instance'
+          ? instances
+          : kind === 'link'
+            ? links
+            : kind === 'layout'
+              ? layouts
+              : kind === 'placement'
+                ? placements
+                : kind === 'resource'
+                  ? resources
+                  : kind === 'revision'
+                    ? revisions
+                    : events;
+      operations.push(kind);
+      const identity = kind === 'link' ? 'revisionId' : 'id';
+      const existing = collection.findIndex(
+        (row) => row[identity] === value[identity],
       );
-      const existing = collection.findIndex((row) => row.id === value.id);
       if (existing >= 0) collection[existing] = { ...value };
       else collection.push({ ...value });
       return value;
@@ -114,7 +137,16 @@ describe('CMS revision storage', () => {
             return { id: 'site-1', workspaceId: 'workspace-1' };
           if (name === 'SiteAccessEntity')
             return siteAccessFor(String(where.userId));
-          const rows = name.includes('Resource') ? resources : revisions;
+          const rows =
+            entity === ManagedChunkInstanceEntity
+              ? instances
+              : entity === ManagedChunkInstanceRevisionEntity
+                ? links
+                : entity === ManagedChunkLayoutEntity
+                  ? layouts
+                  : name.includes('Resource')
+                    ? resources
+                    : revisions;
           return (
             rows.find((row) =>
               Object.entries(where).every(([key, value]) => row[key] === value),
@@ -124,12 +156,21 @@ describe('CMS revision storage', () => {
       ),
       save: jest.fn(saved),
       find: jest.fn(
-        (_entity: unknown, options: { where: { resourceId: string } }) =>
-          revisions
-            .filter(
-              (revision) => revision.resourceId === options.where.resourceId,
-            )
-            .sort((a, b) => Number(b.versionNumber) - Number(a.versionNumber)),
+        (entity: unknown, options: { where: Record<string, unknown> }) =>
+          entity === ManagedChunkPlacementEntity
+            ? placements.filter((placement) =>
+                Object.entries(options.where).every(
+                  ([key, value]) => placement[key] === value,
+                ),
+              )
+            : revisions
+                .filter(
+                  (revision) =>
+                    revision.resourceId === options.where.resourceId,
+                )
+                .sort(
+                  (a, b) => Number(b.versionNumber) - Number(a.versionNumber),
+                ),
       ),
     };
     const dataSource = {
@@ -326,7 +367,22 @@ describe('CMS revision storage', () => {
           entityId: 'instance-1',
           draftRevisionId: null,
         });
-        return Promise.resolve();
+        db.save(
+          Object.assign(new ManagedChunkInstanceEntity(), {
+            id: 'instance-1',
+            siteId: 'site-1',
+            revisionResourceId: resource.id,
+          }),
+        );
+        db.save(
+          Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+            revisionId: revision.id,
+            revisionResourceId: resource.id,
+            siteId: 'site-1',
+            instanceId: 'instance-1',
+            contractId: 'contract-1',
+          }),
+        );
       },
     );
 
@@ -340,6 +396,7 @@ describe('CMS revision storage', () => {
         expectedDraftRevisionId: null,
         actor: manager,
       },
+      { kind: 'instance', contractId: 'contract-1' },
       hook,
     );
 
@@ -350,6 +407,9 @@ describe('CMS revision storage', () => {
       SiteAccessEntity,
       SiteEntity,
       CmsRevisionResourceEntity,
+      CmsRevisionResourceEntity,
+      ManagedChunkInstanceEntity,
+      ManagedChunkInstanceRevisionEntity,
     ]);
     expect(sites.findOne).not.toHaveBeenCalled();
     expect(siteAccesses.findOne).not.toHaveBeenCalled();
@@ -358,11 +418,54 @@ describe('CMS revision storage', () => {
       'resource',
       'revision',
       'hook',
+      'instance',
+      'link',
       'resource',
       'event',
     ]);
   });
 
+  it('snapshots managed expected proof before the hook can mutate caller-owned input', async () => {
+    const { service, db, operations } = setup();
+    const proof = { kind: 'instance' as const, contractId: 'contract-1' };
+
+    const saving = service.saveManagedDraftUsingManager(
+      db as never,
+      {
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+        snapshot: { formatVersion: 1, data: {} },
+        expectedDraftRevisionId: null,
+        actor: manager,
+      },
+      proof,
+      async (hookDb, revision, resource) => {
+        await hookDb.save(
+          Object.assign(new ManagedChunkInstanceEntity(), {
+            id: 'instance-1',
+            siteId: 'site-1',
+            revisionResourceId: resource.id,
+          }),
+        );
+        proof.contractId = 'contract-2';
+        await hookDb.save(
+          Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+            revisionId: revision.id,
+            revisionResourceId: resource.id,
+            siteId: 'site-1',
+            instanceId: 'instance-1',
+            contractId: proof.contractId,
+          }),
+        );
+      },
+    );
+
+    await expect(saving).rejects.toEqual(
+      new ConflictException('Состояние управляемого черновика не подтверждено'),
+    );
+    expect(operations).toEqual(['resource', 'revision', 'instance', 'link']);
+  });
   it('returns safe not-found for an admin and missing site before direct managed wrapper writes', async () => {
     const { service } = setup();
     const db = {
@@ -387,6 +490,7 @@ describe('CMS revision storage', () => {
             platformRole: PlatformRole.WISPO_ADMIN,
           },
         },
+        { kind: 'instance', contractId: 'contract-1' },
         hook,
       ),
     ).rejects.toEqual(new NotFoundException('Сайт не найден'));
@@ -512,6 +616,7 @@ describe('CMS revision storage', () => {
             expectedDraftRevisionId: null,
             actor: manager,
           },
+          { kind: 'instance', contractId: 'contract-1' },
           () => Promise.reject(failure),
         ),
       ),

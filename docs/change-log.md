@@ -3336,3 +3336,37 @@
   пользовательские данные не меняются. Общая/рабочая БД и VDS не используются.
 - Файлы и проверки будут дополнены по мере выполнения. Push/merge/deploy не
   выполняются.
+- Продолжение 08.10.2026: branch/status/relevant diff проверены до изменений —
+  ветка `codex/managed-chunks-sdk-v1`, рабочее дерево чистое. Начат TDD-цикл
+  для связанных Tasks 1+2; production callsites prepared managed draft
+  ограничены instance/layout repository paths, прямой managed wrapper найден
+  только в unit tests. БД, Docker, VDS и внешние сервисы не затрагивались.
+- Реализация: `cms-revisions.service` теперь требует discriminated expected
+  proof и после hook точно перечитывает owner + instance link либо полный
+  canonical multiset layout placements до записи pointer/event; repository
+  callsites передают proof из уже проверенных входов. Compatibility inventory
+  сохраняет валидное отсутствие pointer, но любой present pointer и вся его
+  owner/revision/link/contract/snapshot/placement цепочка проверяются fail-closed
+  для явно запрошенного package без draft/published fallback и без чтения
+  instance payload. Hardened wrapper больше не имеет fail-open вызова без proof.
+- Изменены только `apps/api/src/content/cms-revisions.service.ts` и `.spec.ts`,
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  `.spec.ts`, а также эта существующая запись журнала. Migration, entity,
+  schema, API/controller/UI и persisted format не менялись.
+- TDD RED: точная Task 1 command завершилась exit 1 — 13 новых negative cases
+  ошибочно resolved (154 существующих теста PASS); Task 2 command завершилась
+  exit 1 — compatibility suite PASS, новые corruption cases repository ещё
+  исключались вместо безопасного reject. Review regression RED для mutable
+  caller-owned proof: Task 1 command — 1 failed / 177 passed (promise ошибочно
+  resolved). Proof/entity identity теперь runtime-валидируются, клонируются и
+  замораживаются до hook; negative harness отдельно доказывает отсутствие попыток
+  pointer/event writes. Финальный GREEN: Task 1 command — 2/2 suites, 180/180
+  tests PASS, 0 snapshots; Task 2 command — 2/2 suites, 130/130 tests PASS,
+  0 snapshots.
+- Проверки: scoped ESLint четырёх изменённых TS-файлов — exit 0; scoped
+  Prettier check — exit 0; `pnpm --dir apps/api build` — exit 0;
+  `git diff --check` — exit 0. Реальный PostgreSQL и Docker по границам задачи
+  не запускались. Коммит реализации: `fix: fail closed managed chunk persistence`.
+- БД: схема, migration ledger, данные, backfill, ручные изменения и формат
+  сохранённых значений не менялись; общая/рабочая БД, VDS, push, merge и deploy
+  не затрагивались. Статус остаётся **В работе** до code review и acceptance.
