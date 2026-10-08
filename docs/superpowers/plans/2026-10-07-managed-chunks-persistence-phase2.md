@@ -591,6 +591,26 @@ Package-activation race acceptance использует ещё два незав
 устаревшего package assignment; нет orphan resource/revision/link, PostgreSQL
 `40P01` или частично сохранённой транзакции.
 
+Compatibility-inventory acceptance использует реальные PostgreSQL transactions
+и два независимых соединения:
+
+1. Для standalone reader test-only `DataSource.transaction` wrapper записывает
+   первый manager command, проверяет exact `SET TRANSACTION READ ONLY`, после
+   завершения mapper до commit выполняет контрольный `UPDATE`. PostgreSQL обязан
+   отклонить его как read-only transaction (`25006`); inventory остаётся
+   неизменным, mutation/event rows не появляются.
+2. Для согласованности pointers/snapshots transaction A явно начинает
+   `REPEATABLE READ`, фиксирует snapshot и вызывает
+   `readCompatibilityInventoryUsingManager` без дополнительного `SET`. Между
+   фиксацией snapshot и mapper transaction B атомарно создаёт новые instance и
+   layout revisions/typed rows, переключает draft pointers и commit-ится.
+   A обязана вернуть целиком старый contract/layout pair, а новый standalone
+   вызов после commit — целиком новый pair; смешанный old/new inventory запрещён.
+3. Отдельно проверяются site с `template_package_id IS NULL` и site, назначенный
+   другому package: explicit candidate package читается без изменения assignment.
+   Unknown site/package дают одинаковый safe `NotFound`, а manager-bound reader
+   оставляет внешнюю transaction writable для последующей activation записи.
+
 Concurrency acceptance использует два независимых соединения к disposable DB:
 
 1. transaction A выполняет первый `down()` batch (`LOCK TABLE ... IN SHARE ROW

@@ -3044,14 +3044,15 @@
 
 - Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
   `codex/managed-chunks-sdk-v1`.
-- Реализован внутренний read-only
-  `ManagedChunkPersistenceRepository.readCompatibilityInventory`: он
-  валидирует UUID и exact связь site/package безопасным одинаковым `NotFound`,
-  затем в одном `REPEATABLE READ` snapshot читает только ресурсы
-  `chunk_instance`/`chunk_layout`, их текущие draft/published pointers,
-  точные typed links, связанные contracts и placements. Чтение ограничено
-  девятью batch-запросами; обычные CMS resources/revisions и несвязанные
-  package contracts не материализуются.
+- Реализован внутренний compatibility inventory reader. Standalone
+  `ManagedChunkPersistenceRepository.readCompatibilityInventory` независимо
+  валидирует UUID, существование site и explicit candidate package одинаковым
+  безопасным `NotFound`, затем открывает `REPEATABLE READ` snapshot и первым
+  manager command выполняет `SET TRANSACTION READ ONLY`. Site может быть без
+  текущего package либо иметь другое назначение: candidate scope не меняет его
+  pointers. `readCompatibilityInventoryUsingManager` повторно использует тот же
+  mapper внутри уже существующей site-locking transaction, не открывает свою
+  transaction и не переводит внешнюю transaction в read-only режим.
 - Draft и published разрешаются независимо без fallback. Одинаковый contract
   агрегирует `sources` в каноническом порядке `draft`, `published`; разные
   schema version/digest остаются отдельными требованиями. Placement получает
@@ -3063,8 +3064,8 @@
   от DB insertion order или мутации результата прошлого вызова.
 - Изменены
   `apps/api/src/template-packages/managed-chunk-persistence.repository.ts`,
-  `.spec.ts` и эта запись журнала. Controller/API, Phase 1 types/algorithm,
-  release CLI и runtime не менялись.
+  `.spec.ts`, Task 7 plan и эта запись журнала. Controller/API, Phase 1
+  types/algorithm, release CLI и runtime не менялись.
 - БД — схема, миграции, данные и формат сохраняемых значений не менялись.
   Reader не пишет pointers, events, revisions или пользовательские данные;
   общая и локальная БД не запускались и не изменялись.
@@ -3090,6 +3091,25 @@
   tests. API build, targeted ESLint, Prettier и `git diff --check` прошли;
   production code не менялся. Повторный независимый review: Critical 0,
   Important 0, Minor 0, READY. Test-only commit:
-  `test: prove compatibility inventory source isolation` (этот commit).
+  `46a364f99765ec19b527258678e5b4bdefbe8448` (`test: prove compatibility inventory source isolation`).
+- Quality-review fixes: reader больше не связывает explicit candidate с текущим
+  `site.templatePackageId`; null и другое assignment покрыты без mutation site.
+  Instance/layout pointer sets разделены: instance snapshots вообще не читаются,
+  layout revisions получают только identity/snapshot metadata, а resources,
+  typed links, contracts и placements — exact projections без contract JSONB.
+  Empty dependent ID sets не порождают запросов. Stateful harness материализует
+  только requested columns, содержит большие JSON sentinels, отклоняет mutation
+  APIs/raw SQL и доказывает, что standalone `SET TRANSACTION READ ONLY` является
+  первым manager command; manager-bound вызов не выполняет SET/transaction.
+- Quality-fix TDD RED: 103 прежних теста прошли, 6 новых упали отдельно на
+  current-package gating, отсутствующем manager-bound reader/READ ONLY, overfetch
+  и empty-set reads. GREEN: focused — 2 suites / 111 tests; широкая Phase 1–2
+  регрессия — 8 suites / 210 tests; полный API — 126 suites / 1079 tests, ещё
+  5 suites / 81 tests штатно skipped. API build/typecheck, targeted ESLint и
+  Prettier, `git diff --check` прошли. Task 7 plan дополнен real-PostgreSQL
+  `25006` enforcement и two-connection old/new pointer-snapshot acceptance.
+  Независимый quality-fix review после исправления journal: Critical 0,
+  Important 0, Minor 0, READY. Коммит quality fix:
+  `fix: harden compatibility inventory transactions` (этот commit).
 - Docker/VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая
   выкладка не затрагивались.

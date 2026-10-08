@@ -2848,6 +2848,10 @@ type CompatibilityInventoryState = Record<
 
 const INVENTORY_PACKAGE_KEY = 'skinova-media';
 const INVENTORY_OTHER_PACKAGE_ID = '12121212-1212-4212-8212-121212121212';
+const INVENTORY_UNKNOWN_PACKAGE_ID = '23232323-2323-4323-8323-232323232323';
+const INVENTORY_UNKNOWN_SITE_ID = '24242424-2424-4424-8424-242424242424';
+const INSTANCE_PAYLOAD_SENTINEL = 'INSTANCE_PAYLOAD_MUST_NOT_MATERIALIZE';
+const CONTRACT_PAYLOAD_SENTINEL = 'CONTRACT_JSONB_MUST_NOT_MATERIALIZE';
 const INVENTORY_OTHER_SITE_ID = '13131313-1313-4313-8313-131313131313';
 const INVENTORY_PAGE_ID = '14141414-1414-4414-8414-141414141414';
 const SHARED_INSTANCE_ID = '15151515-1515-4515-8515-151515151515';
@@ -2888,6 +2892,8 @@ function compatibilityInventoryState(): CompatibilityInventoryState {
         definitionKey: 'draft-only',
         schemaVersion: '1',
         contractDigest: DIGEST_D,
+        fieldContract: { huge: CONTRACT_PAYLOAD_SENTINEL.repeat(2048) },
+        dataSchema: { huge: CONTRACT_PAYLOAD_SENTINEL.repeat(2048) },
       },
       {
         id: 'contract-published-only',
@@ -3084,7 +3090,11 @@ function compatibilityInventoryState(): CompatibilityInventoryState {
       },
     ],
     revisions: [
-      { id: 'shared-draft', resourceId: 'resource-shared', snapshot: {} },
+      {
+        id: 'shared-draft',
+        resourceId: 'resource-shared',
+        snapshot: { huge: INSTANCE_PAYLOAD_SENTINEL.repeat(2048) },
+      },
       {
         id: 'shared-published',
         resourceId: 'resource-shared',
@@ -3214,7 +3224,7 @@ function compatibilityInventoryState(): CompatibilityInventoryState {
       },
       {
         revisionId: 'wrong-revision-draft',
-        revisionResourceId: 'resource-wrong-revision',
+        revisionResourceId: 'another-resource',
         siteId: SITE_ID,
         instanceId: 'wrong-revision-instance',
         contractId: 'contract-wrong-revision',
@@ -3352,10 +3362,19 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
   }
   const before = structuredClone(state);
   const transactionCalls: unknown[][] = [];
+  const rawCommands: string[] = [];
+  const mutationAttempts: string[] = [];
+  const materializedRows: Array<Record<string, unknown>> = [];
+  const managerOperations: Array<{
+    operation: 'query' | 'find' | 'findOne' | 'mutation';
+    entity?: unknown;
+    sql?: string;
+  }> = [];
   const queryCalls: Array<{
     operation: 'find' | 'findOne';
     entity: unknown;
     where?: Record<string, unknown>;
+    select?: Record<string, boolean>;
   }> = [];
   const matches = (
     row: Record<string, unknown>,
@@ -3384,19 +3403,55 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
       `Unexpected inventory collection: ${(entity as { name?: string }).name}`,
     );
   };
+  const project = (
+    row: Record<string, unknown>,
+    select?: Record<string, boolean>,
+  ): Record<string, unknown> => {
+    const projected = select
+      ? Object.fromEntries(
+          Object.entries(select)
+            .filter(([, selected]) => selected)
+            .map(([key]) => [key, structuredClone(row[key])]),
+        )
+      : structuredClone(row);
+    materializedRows.push(structuredClone(projected));
+    return projected;
+  };
+  const rejectMutation = (operation: string): Promise<never> => {
+    mutationAttempts.push(operation);
+    managerOperations.push({ operation: 'mutation' });
+    return Promise.reject(
+      new Error(`Compatibility inventory attempted mutation: ${operation}`),
+    );
+  };
   const manager = {
+    query: jest.fn((sql: string): Promise<unknown[]> => {
+      rawCommands.push(sql);
+      managerOperations.push({ operation: 'query', sql });
+      const normalized = sql.trim().replace(/\s+/g, ' ').toUpperCase();
+      if (normalized !== 'SET TRANSACTION READ ONLY') {
+        return rejectMutation(`raw:${normalized}`);
+      }
+      return Promise.resolve([]);
+    }),
     findOne: jest.fn(
       (
         entity: unknown,
-        options: { where: Record<string, unknown> },
+        options: {
+          where: Record<string, unknown>;
+          select?: Record<string, boolean>;
+        },
       ): Promise<Record<string, unknown> | null> => {
-        queryCalls.push({ operation: 'findOne', entity, where: options.where });
+        queryCalls.push({
+          operation: 'findOne',
+          entity,
+          where: options.where,
+          select: options.select,
+        });
+        managerOperations.push({ operation: 'findOne', entity });
         if (
           (entity === SiteEntity &&
-            (!DATABASE_UUID_PATTERN.test(String(options.where.id)) ||
-              !DATABASE_UUID_PATTERN.test(
-                String(options.where.templatePackageId),
-              ))) ||
+            !DATABASE_UUID_PATTERN.test(String(options.where.id))) ||
           (entity === TemplatePackageEntity &&
             !DATABASE_UUID_PATTERN.test(String(options.where.id)))
         ) {
@@ -3412,24 +3467,37 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
             : entity === TemplatePackageEntity
               ? state.packages
               : rowsFor(entity);
-        return Promise.resolve(
-          rows.find((row) => matches(row, options.where)) ?? null,
-        );
+        const row = rows.find((candidate) => matches(candidate, options.where));
+        return Promise.resolve(row ? project(row, options.select) : null);
       },
     ),
     find: jest.fn(
       (
         entity: unknown,
-        options?: { where?: Record<string, unknown> },
+        options?: {
+          where?: Record<string, unknown>;
+          select?: Record<string, boolean>;
+        },
       ): Promise<Array<Record<string, unknown>>> => {
-        queryCalls.push({ operation: 'find', entity, where: options?.where });
+        queryCalls.push({
+          operation: 'find',
+          entity,
+          where: options?.where,
+          select: options?.select,
+        });
+        managerOperations.push({ operation: 'find', entity });
         return Promise.resolve(
           rowsFor(entity)
             .filter((row) => !options?.where || matches(row, options.where))
-            .map((row) => structuredClone(row)),
+            .map((row) => project(row, options?.select)),
         );
       },
     ),
+    save: jest.fn(() => rejectMutation('save')),
+    insert: jest.fn(() => rejectMutation('insert')),
+    update: jest.fn(() => rejectMutation('update')),
+    delete: jest.fn(() => rejectMutation('delete')),
+    remove: jest.fn(() => rejectMutation('remove')),
   };
   const dataSource = {
     transaction: jest.fn(async (...args: unknown[]) => {
@@ -3443,13 +3511,17 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
       dataSource as never,
       {} as CmsRevisionsService,
     ),
+    manager,
     state,
     before,
     transactionCalls,
+    rawCommands,
+    mutationAttempts,
+    materializedRows,
+    managerOperations,
     queryCalls,
   };
 }
-
 function exactSourceCandidate(
   source: 'draft' | 'published',
 ): ManagedChunkCompatibilityCandidate {
@@ -3631,6 +3703,81 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
     expect(JSON.stringify(inventory)).not.toContain('wrong-link');
   });
 
+  it.each([
+    ['an unassigned site', null],
+    ['a site assigned to another package', INVENTORY_OTHER_PACKAGE_ID],
+  ] as const)(
+    'reads the explicit candidate package for %s',
+    async (_, assignedTemplatePackageId) => {
+      const harness = createCompatibilityInventoryHarness();
+      const site = harness.state.sites.find((row) => row.id === SITE_ID);
+      if (!site) throw new Error('Fixture site is missing');
+      site.templatePackageId = assignedTemplatePackageId;
+
+      const inventory = await harness.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      });
+
+      expect(inventory.contracts).not.toHaveLength(0);
+      expect(
+        inventory.contracts.every(
+          (requirement) => requirement.packageId === INVENTORY_PACKAGE_KEY,
+        ),
+      ).toBe(true);
+      expect(JSON.stringify(inventory)).not.toContain('foreign');
+      const siteRead = harness.queryCalls.find(
+        (call) => call.operation === 'findOne' && call.entity === SiteEntity,
+      );
+      expect(siteRead?.where).toEqual({ id: SITE_ID });
+      expect(site.templatePackageId).toBe(assignedTemplatePackageId);
+    },
+  );
+
+  it('sets the standalone snapshot transaction read-only before its first manager read', async () => {
+    const harness = createCompatibilityInventoryHarness();
+
+    await harness.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+
+    expect(harness.transactionCalls).toEqual([
+      ['REPEATABLE READ', expect.any(Function)],
+    ]);
+    expect(harness.managerOperations[0]).toEqual({
+      operation: 'query',
+      sql: 'SET TRANSACTION READ ONLY',
+    });
+    expect(harness.rawCommands).toEqual(['SET TRANSACTION READ ONLY']);
+    expect(harness.mutationAttempts).toEqual([]);
+  });
+
+  it('reuses the mapper with an existing manager without starting or changing its transaction', async () => {
+    const harness = createCompatibilityInventoryHarness();
+    const repository = harness.repository as unknown as {
+      readCompatibilityInventoryUsingManager(
+        manager: EntityManager,
+        input: { siteId: string; templatePackageId: string },
+      ): ReturnType<
+        ManagedChunkPersistenceRepository['readCompatibilityInventory']
+      >;
+    };
+
+    const inventory = await repository.readCompatibilityInventoryUsingManager(
+      harness.manager as unknown as EntityManager,
+      { siteId: SITE_ID, templatePackageId: PACKAGE_ID },
+    );
+
+    expect(inventory.contracts).not.toHaveLength(0);
+    expect(harness.transactionCalls).toEqual([]);
+    expect(harness.rawCommands).toEqual([]);
+    expect(harness.managerOperations[0]).toEqual({
+      operation: 'findOne',
+      entity: SiteEntity,
+    });
+    expect(harness.mutationAttempts).toEqual([]);
+  });
   it('does not fallback between missing draft and published instance pointers', async () => {
     const harness = createCompatibilityInventoryHarness();
 
@@ -3779,7 +3926,7 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
     },
   );
 
-  it('keeps the inventory read within a bounded batch query budget', async () => {
+  it('uses bounded projected reads without materializing instance or contract JSON payloads', async () => {
     const harness = createCompatibilityInventoryHarness();
 
     await harness.repository.readCompatibilityInventory({
@@ -3787,7 +3934,7 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       templatePackageId: PACKAGE_ID,
     });
 
-    expect(harness.queryCalls.length).toBeLessThanOrEqual(9);
+    expect(harness.queryCalls).toHaveLength(9);
     const inValues = (value: unknown): unknown[] => {
       expect(value).toBeDefined();
       if (value === null || value === undefined || typeof value !== 'object') {
@@ -3798,27 +3945,127 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
       expect(Array.isArray(operator._value)).toBe(true);
       return operator._value as unknown[];
     };
-    const resourceRead = harness.queryCalls.find(
-      (call) =>
-        call.operation === 'find' && call.entity === CmsRevisionResourceEntity,
-    );
-    const revisionRead = harness.queryCalls.find(
-      (call) => call.operation === 'find' && call.entity === CmsRevisionEntity,
-    );
-    const contractRead = harness.queryCalls.find(
-      (call) =>
-        call.operation === 'find' && call.entity === ManagedChunkContractEntity,
-    );
+    const read = (entity: unknown) => {
+      const call = harness.queryCalls.find(
+        (candidate) =>
+          candidate.operation === 'find' && candidate.entity === entity,
+      );
+      expect(call).toBeDefined();
+      return call;
+    };
+    const findOneRead = (entity: unknown) => {
+      const call = harness.queryCalls.find(
+        (candidate) =>
+          candidate.operation === 'findOne' && candidate.entity === entity,
+      );
+      expect(call).toBeDefined();
+      return call;
+    };
+    expect(findOneRead(SiteEntity)?.select).toEqual({ id: true });
+    expect(findOneRead(TemplatePackageEntity)?.select).toEqual({
+      id: true,
+      packageId: true,
+    });
+    expect(read(CmsRevisionResourceEntity)?.select).toEqual({
+      id: true,
+      siteId: true,
+      resourceType: true,
+      entityId: true,
+      draftRevisionId: true,
+      publishedRevisionId: true,
+    });
+    expect(read(ManagedChunkInstanceEntity)?.select).toEqual({
+      id: true,
+      siteId: true,
+      revisionResourceId: true,
+    });
+    expect(read(ManagedChunkLayoutEntity)?.select).toEqual({
+      id: true,
+      siteId: true,
+      revisionResourceId: true,
+      scopeKind: true,
+      pageId: true,
+      surfaceKey: true,
+    });
+    const revisionRead = read(CmsRevisionEntity);
+    expect(revisionRead?.select).toEqual({
+      id: true,
+      resourceId: true,
+      snapshot: true,
+    });
+    expect(inValues(revisionRead?.where?.id)).toEqual([
+      INVENTORY_LAYOUT_DRAFT_ID,
+      INVENTORY_LAYOUT_PUBLISHED_ID,
+      'surface-layout-draft',
+    ]);
+    expect(read(ManagedChunkInstanceRevisionEntity)?.select).toEqual({
+      revisionId: true,
+      revisionResourceId: true,
+      siteId: true,
+      instanceId: true,
+      contractId: true,
+    });
+    const contractRead = read(ManagedChunkContractEntity);
+    expect(contractRead?.select).toEqual({
+      id: true,
+      templatePackageId: true,
+      definitionKey: true,
+      schemaVersion: true,
+      contractDigest: true,
+    });
+    expect(contractRead?.select).not.toHaveProperty('fieldContract');
+    expect(contractRead?.select).not.toHaveProperty('dataSchema');
+    expect(read(ManagedChunkPlacementEntity)?.select).toEqual({
+      siteId: true,
+      layoutId: true,
+      layoutRevisionResourceId: true,
+      layoutRevisionId: true,
+      instanceId: true,
+      slotKey: true,
+      position: true,
+    });
+    const resourceRead = read(CmsRevisionResourceEntity);
     expect(inValues(resourceRead?.where?.resourceType)).toEqual([
       'chunk_instance',
       'chunk_layout',
     ]);
-    expect(inValues(revisionRead?.where?.id)).not.toContain('wrong-type-draft');
     expect(inValues(contractRead?.where?.id)).not.toContain(
       'contract-wrong-resource',
     );
+    const materialized = JSON.stringify(harness.materializedRows);
+    expect(materialized).not.toContain(INSTANCE_PAYLOAD_SENTINEL);
+    expect(materialized).not.toContain(CONTRACT_PAYLOAD_SENTINEL);
   });
 
+  it('returns an empty inventory without issuing empty-set dependent reads', async () => {
+    const harness = createCompatibilityInventoryHarness();
+    harness.state.resources = harness.state.resources.filter(
+      (row) => row.siteId !== SITE_ID,
+    );
+    harness.state.instances = harness.state.instances.filter(
+      (row) => row.siteId !== SITE_ID,
+    );
+    harness.state.layouts = harness.state.layouts.filter(
+      (row) => row.siteId !== SITE_ID,
+    );
+
+    await expect(
+      harness.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      }),
+    ).resolves.toEqual({ contracts: [], placements: [] });
+    expect(
+      harness.queryCalls.filter((call) =>
+        [
+          CmsRevisionEntity,
+          ManagedChunkInstanceRevisionEntity,
+          ManagedChunkContractEntity,
+          ManagedChunkPlacementEntity,
+        ].includes(call.entity as never),
+      ),
+    ).toEqual([]);
+  });
   it.each([null, 'invalid', []])(
     'excludes a layout revision with malformed snapshot %p',
     async (snapshot) => {
@@ -3845,9 +4092,26 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
   );
 
   it.each([
-    ['unknown site', 'unknown-site', PACKAGE_ID],
-    ['cross-package site', SITE_ID, INVENTORY_OTHER_PACKAGE_ID],
-    ['unknown package', SITE_ID, 'unknown-package'],
+    ['malformed site', 'not-a-uuid', PACKAGE_ID],
+    ['malformed package', SITE_ID, 'not-a-uuid'],
+  ])(
+    'normalizes %s before issuing a database read',
+    async (_, siteId, templatePackageId) => {
+      const harness = createCompatibilityInventoryHarness();
+
+      await expect(
+        harness.repository.readCompatibilityInventory({
+          siteId,
+          templatePackageId,
+        }),
+      ).rejects.toThrow('Сайт или пакет не найден');
+      expect(harness.rawCommands).toEqual(['SET TRANSACTION READ ONLY']);
+      expect(harness.queryCalls).toEqual([]);
+    },
+  );
+  it.each([
+    ['unknown site', INVENTORY_UNKNOWN_SITE_ID, PACKAGE_ID],
+    ['unknown package', SITE_ID, INVENTORY_UNKNOWN_PACKAGE_ID],
   ])(
     'normalizes %s inventory identity to the same safe error',
     async (_, siteId, templatePackageId) => {
