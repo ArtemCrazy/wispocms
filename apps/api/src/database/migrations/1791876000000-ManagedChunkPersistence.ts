@@ -334,37 +334,20 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
     `);
 
     await queryRunner.query(`
-      CREATE FUNCTION "protect_managed_chunk_owner_identity"()
+      CREATE FUNCTION "protect_managed_chunk_instance_identity"()
       RETURNS trigger AS $$
       BEGIN
         IF TG_OP = 'DELETE' THEN
-          RAISE EXCEPTION 'Managed chunk owner identities cannot be deleted'
+          RAISE EXCEPTION 'Managed chunk instance identities cannot be deleted'
             USING ERRCODE = '55000';
         END IF;
-        IF TG_TABLE_NAME = 'managed_chunk_layouts'
-          AND (
-            NEW."id" IS DISTINCT FROM OLD."id"
-            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
-            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
-            OR NEW."scope_kind" IS DISTINCT FROM OLD."scope_kind"
-            OR NEW."page_id" IS DISTINCT FROM OLD."page_id"
-            OR NEW."surface_key" IS DISTINCT FROM OLD."surface_key"
-            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
-          )
-        THEN
-          RAISE EXCEPTION 'Managed chunk layout identities are immutable'
-            USING ERRCODE = '55000';
-        END IF;
-        IF TG_TABLE_NAME = 'managed_chunk_instances'
-          AND (
-            NEW."id" IS DISTINCT FROM OLD."id"
-            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
-            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
-            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
-            OR (
-              NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
-              AND NEW."created_by_user_id" IS NOT NULL
-            )
+        IF NEW."id" IS DISTINCT FROM OLD."id"
+          OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+          OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+          OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+          OR (
+            NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
+            AND NEW."created_by_user_id" IS NOT NULL
           )
         THEN
           RAISE EXCEPTION 'Managed chunk instance identity is immutable'
@@ -377,12 +360,36 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
     await queryRunner.query(`
       CREATE TRIGGER "TRG_managed_chunk_instances_protect_identity"
       BEFORE UPDATE OR DELETE ON "managed_chunk_instances"
-      FOR EACH ROW EXECUTE FUNCTION "protect_managed_chunk_owner_identity"()
+      FOR EACH ROW EXECUTE FUNCTION "protect_managed_chunk_instance_identity"()
+    `);
+
+    await queryRunner.query(`
+      CREATE FUNCTION "protect_managed_chunk_layout_identity"()
+      RETURNS trigger AS $$
+      BEGIN
+        IF TG_OP = 'DELETE' THEN
+          RAISE EXCEPTION 'Managed chunk layout identities cannot be deleted'
+            USING ERRCODE = '55000';
+        END IF;
+        IF NEW."id" IS DISTINCT FROM OLD."id"
+          OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+          OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+          OR NEW."scope_kind" IS DISTINCT FROM OLD."scope_kind"
+          OR NEW."page_id" IS DISTINCT FROM OLD."page_id"
+          OR NEW."surface_key" IS DISTINCT FROM OLD."surface_key"
+          OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+        THEN
+          RAISE EXCEPTION 'Managed chunk layout identities are immutable'
+            USING ERRCODE = '55000';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
     `);
     await queryRunner.query(`
       CREATE TRIGGER "TRG_managed_chunk_layouts_protect_identity"
       BEFORE UPDATE OR DELETE ON "managed_chunk_layouts"
-      FOR EACH ROW EXECUTE FUNCTION "protect_managed_chunk_owner_identity"()
+      FOR EACH ROW EXECUTE FUNCTION "protect_managed_chunk_layout_identity"()
     `);
 
     await queryRunner.query(`
@@ -469,7 +476,10 @@ export class ManagedChunkPersistence1791876000000 implements MigrationInterface 
       'DROP TRIGGER "TRG_managed_chunk_instances_protect_identity" ON "managed_chunk_instances"',
     );
     await queryRunner.query(
-      'DROP FUNCTION "protect_managed_chunk_owner_identity"()',
+      'DROP FUNCTION "protect_managed_chunk_layout_identity"()',
+    );
+    await queryRunner.query(
+      'DROP FUNCTION "protect_managed_chunk_instance_identity"()',
     );
     for (const tableName of [
       'managed_chunk_migration_provenance',

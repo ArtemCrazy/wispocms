@@ -106,9 +106,10 @@ revisions, placements, provenance. Exact resource identity instance/layout
 обеспечивают deferred constraint trigger lookup по `revision_resource_id` PK,
 сравнение site/type/entity и reverse resource guard; избыточный unique
 `cms_revision_resources(id, site_id, resource_type, entity_id)` не создаётся.
-Owner trigger запрещает DELETE instance/layout; у instance защищает стабильную
-identity, оставляя организационные поля и actor `SET NULL` изменяемыми; у
-layout null-safe `IS DISTINCT FROM` защищает только
+Две table-specific owner trigger functions запрещают DELETE instance/layout,
+не обращаясь к полям чужого PostgreSQL row descriptor. Instance function
+защищает стабильную identity, оставляя организационные поля и actor `SET NULL`
+изменяемыми; layout function через null-safe `IS DISTINCT FROM` защищает только
 `id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`,
 поэтому no-op и будущие non-identity UPDATE допустимы. `INSERT`/backfill
 отсутствуют.

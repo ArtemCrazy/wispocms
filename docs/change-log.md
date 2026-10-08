@@ -110,6 +110,19 @@
   3 Jest suites / 18 tests, API production build, TypeORM metadata construction
   (40 entities), targeted ESLint/Prettier и `git diff --check` прошли.
   БД/Docker/VDS/Registry/push/merge/deploy не запускались и не затрагивались.
+- Runtime SQL review-fix Task 1: shared owner PL/pgSQL function разделена на
+  `protect_managed_chunk_instance_identity()` и
+  `protect_managed_chunk_layout_identity()`, чтобы PostgreSQL `RECORD NEW/OLD`
+  никогда не разрешал поля чужого row descriptor. Семантика сохранена:
+  instance organizational metadata и actor -> `NULL` разрешены, layout no-op
+  разрешён, DELETE и стабильные identity/target поля защищены. Down удаляет оба
+  triggers перед их точными functions. TDD RED: новые structural assertions
+  дали 2 expected failures на отсутствующих table-specific functions/cleanup,
+  остальные 8 tests прошли; focused GREEN — 10/10. Финальный GREEN:
+  3 Jest suites / 18 tests, API production build, TypeORM metadata construction
+  (40 entities), targeted ESLint/Prettier и `git diff --check` прошли.
+  Миграция к БД не применялась; данные/backfill,
+  Docker/VDS/Registry/push/merge/deploy не затронуты.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

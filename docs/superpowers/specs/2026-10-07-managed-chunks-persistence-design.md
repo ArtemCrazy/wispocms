@@ -135,6 +135,8 @@ Deferred constraint trigger на instance/resource делает lookup ресу�
 `display_name`, `is_archived` и `updated_at` остаются изменяемыми
 организационными метаданными. `created_by_user_id` может стать `NULL` через FK
 `ON DELETE SET NULL`, но не может быть переназначен на другого пользователя.
+Instance owner trigger вызывает отдельную table-specific function, которая не
+обращается к layout-only полям `NEW`/`OLD`.
 
 ### `managed_chunk_instance_revisions`
 
@@ -197,7 +199,8 @@ Exact resource identity проверяется тем же deferred lookup по
 нужен. DELETE layout запрещён. UPDATE отклоняется только при изменении
 `id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`
 через null-safe `IS DISTINCT FROM`; no-op UPDATE и будущие non-identity поля
-допустимы.
+допустимы. Layout owner trigger также использует отдельную table-specific
+function без ссылок на instance-only поля row descriptor.
 
 ### `managed_chunk_placements`
 

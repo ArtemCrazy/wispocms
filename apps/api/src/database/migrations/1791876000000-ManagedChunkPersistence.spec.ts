@@ -688,76 +688,91 @@ describe('ManagedChunkPersistence migration', () => {
     }
   });
 
-  it('protects stable owner identities while allowing instance organization updates', () => {
-    const protector = statementContaining(
+  it('uses table-specific owner functions without cross-table RECORD fields', () => {
+    const instanceProtector = statementContaining(
       upStatements,
-      'CREATE FUNCTION "protect_managed_chunk_owner_identity"',
+      'CREATE FUNCTION "protect_managed_chunk_instance_identity"',
+    );
+    const layoutProtector = statementContaining(
+      upStatements,
+      'CREATE FUNCTION "protect_managed_chunk_layout_identity"',
     );
 
-    for (const tableName of [
-      'managed_chunk_instances',
-      'managed_chunk_layouts',
-    ]) {
-      expect(
-        statementContaining(
-          upStatements,
-          'CREATE TRIGGER "TRG_' + tableName + '_protect_identity"',
-        ),
-      ).toBe(
-        normalizeSql(
-          'CREATE TRIGGER "TRG_' +
-            tableName +
-            '_protect_identity" BEFORE UPDATE OR DELETE ON "' +
-            tableName +
-            '" FOR EACH ROW EXECUTE FUNCTION ' +
-            '"protect_managed_chunk_owner_identity"()',
-        ),
-      );
-    }
-    expectFragment(protector, `IF TG_OP = 'DELETE' THEN`);
-    expectFragment(
-      protector,
-      `
-        IF TG_TABLE_NAME = 'managed_chunk_layouts'
-          AND (
-            NEW."id" IS DISTINCT FROM OLD."id"
-            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
-            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
-            OR NEW."scope_kind" IS DISTINCT FROM OLD."scope_kind"
-            OR NEW."page_id" IS DISTINCT FROM OLD."page_id"
-            OR NEW."surface_key" IS DISTINCT FROM OLD."surface_key"
-            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
-          )
-        THEN
-      `,
-    );
-    expectFragment(
-      protector,
-      `
-        IF TG_TABLE_NAME = 'managed_chunk_instances'
-          AND (
-            NEW."id" IS DISTINCT FROM OLD."id"
-            OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
-            OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
-            OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
-            OR (
-              NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
-              AND NEW."created_by_user_id" IS NOT NULL
-            )
-          )
-        THEN
-      `,
-    );
-    expectFragment(protector, 'RETURN NEW');
-    expect(protector).not.toContain('NEW."display_name" IS DISTINCT');
-    expect(protector).not.toContain('NEW."is_archived" IS DISTINCT');
-    expect(protector).not.toContain('NEW."updated_at" IS DISTINCT');
-    expect(protector).not.toContain('NEW IS DISTINCT FROM OLD');
-    expect(protector).not.toContain("TG_OP = 'UPDATE'");
-    expect(protector).not.toContain(
-      normalizeSql(
-        `IF TG_TABLE_NAME = 'managed_chunk_layouts' THEN RAISE EXCEPTION`,
+    expect(
+      statementContaining(
+        upStatements,
+        'CREATE TRIGGER "TRG_managed_chunk_instances_protect_identity"',
       ),
+    ).toBe(
+      normalizeSql(
+        'CREATE TRIGGER "TRG_managed_chunk_instances_protect_identity" ' +
+          'BEFORE UPDATE OR DELETE ON "managed_chunk_instances" ' +
+          'FOR EACH ROW EXECUTE FUNCTION ' +
+          '"protect_managed_chunk_instance_identity"()',
+      ),
+    );
+    expect(
+      statementContaining(
+        upStatements,
+        'CREATE TRIGGER "TRG_managed_chunk_layouts_protect_identity"',
+      ),
+    ).toBe(
+      normalizeSql(
+        'CREATE TRIGGER "TRG_managed_chunk_layouts_protect_identity" ' +
+          'BEFORE UPDATE OR DELETE ON "managed_chunk_layouts" ' +
+          'FOR EACH ROW EXECUTE FUNCTION ' +
+          '"protect_managed_chunk_layout_identity"()',
+      ),
+    );
+
+    expectFragment(instanceProtector, `IF TG_OP = 'DELETE' THEN`);
+    expectFragment(
+      instanceProtector,
+      `
+        IF NEW."id" IS DISTINCT FROM OLD."id"
+          OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+          OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+          OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+          OR (
+            NEW."created_by_user_id" IS DISTINCT FROM OLD."created_by_user_id"
+            AND NEW."created_by_user_id" IS NOT NULL
+          )
+        THEN
+      `,
+    );
+    expectFragment(instanceProtector, 'RETURN NEW');
+    expect(instanceProtector).not.toContain('scope_kind');
+    expect(instanceProtector).not.toContain('page_id');
+    expect(instanceProtector).not.toContain('surface_key');
+    expect(instanceProtector).not.toContain('display_name');
+    expect(instanceProtector).not.toContain('is_archived');
+    expect(instanceProtector).not.toContain('updated_at');
+    expect(instanceProtector).not.toContain('NEW IS DISTINCT FROM OLD');
+    expect(instanceProtector).not.toContain("TG_OP = 'UPDATE'");
+
+    expectFragment(layoutProtector, `IF TG_OP = 'DELETE' THEN`);
+    expectFragment(
+      layoutProtector,
+      `
+        IF NEW."id" IS DISTINCT FROM OLD."id"
+          OR NEW."site_id" IS DISTINCT FROM OLD."site_id"
+          OR NEW."revision_resource_id" IS DISTINCT FROM OLD."revision_resource_id"
+          OR NEW."scope_kind" IS DISTINCT FROM OLD."scope_kind"
+          OR NEW."page_id" IS DISTINCT FROM OLD."page_id"
+          OR NEW."surface_key" IS DISTINCT FROM OLD."surface_key"
+          OR NEW."created_at" IS DISTINCT FROM OLD."created_at"
+        THEN
+      `,
+    );
+    expectFragment(layoutProtector, 'RETURN NEW');
+    expect(layoutProtector).not.toContain('created_by_user_id');
+    expect(layoutProtector).not.toContain('display_name');
+    expect(layoutProtector).not.toContain('is_archived');
+    expect(layoutProtector).not.toContain('updated_at');
+    expect(layoutProtector).not.toContain('NEW IS DISTINCT FROM OLD');
+    expect(layoutProtector).not.toContain("TG_OP = 'UPDATE'");
+    expect(upStatements.join(' ')).not.toContain(
+      'protect_managed_chunk_owner_identity',
     );
   });
 
@@ -851,15 +866,22 @@ describe('ManagedChunkPersistence migration', () => {
     );
     expectBefore(
       'DROP TRIGGER "TRG_managed_chunk_instances_protect_identity"',
-      'DROP TABLE "managed_chunk_instances"',
+      'DROP FUNCTION "protect_managed_chunk_instance_identity"()',
     );
     expectBefore(
       'DROP TRIGGER "TRG_managed_chunk_layouts_protect_identity"',
-      'DROP TABLE "managed_chunk_layouts"',
+      'DROP FUNCTION "protect_managed_chunk_layout_identity"()',
     );
     expectBefore(
-      'DROP FUNCTION "protect_managed_chunk_owner_identity"()',
+      'DROP FUNCTION "protect_managed_chunk_instance_identity"()',
       'DROP TABLE "managed_chunk_instances"',
+    );
+    expectBefore(
+      'DROP FUNCTION "protect_managed_chunk_layout_identity"()',
+      'DROP TABLE "managed_chunk_layouts"',
+    );
+    expect(downStatements.join(' ')).not.toContain(
+      'protect_managed_chunk_owner_identity',
     );
 
     const resourceRestore = statementContaining(
