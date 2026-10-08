@@ -3236,3 +3236,88 @@
   (`test: track postgres down-race promise immediately`).
   VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая выкладка
   не выполнялись.
+
+### 2026-10-08 · Phase 2 / Task 8: финальная регрессия и scope audit
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Задача: выполнены финальные Phase 1+2 и полные API проверки, статический
+  анализ и аудит diff против актуального `origin/main`. Унаследованный
+  неизменённый lint/format baseline и два Phase 1 non-UI runtime-файла отдельно
+  зафиксированы ниже и по итоговому решению не считаются блокерами Phase 2.
+- Git baseline после свежего `git fetch origin main`: `origin/main`
+  `2f7fab19d7e5b5934ba1777173b50526279d33e6`, проверенный HEAD до этой
+  docs-записи `2bbbcb1c9943271a05709603d2b94a19185fc51d`; диапазон
+  `origin/main...HEAD` — 0 коммитов слева / 54 справа, merge-base совпадает с
+  `origin/main`, `origin/main` является предком HEAD. Не изменяющий worktree
+  `git merge-tree --write-tree origin/main HEAD` завершился с exit 0 и дал tree
+  `fd9ab877f661166f9780a014b283f5efd14fd08a`; конфликтов не выявлено. Аудирован
+  полный ряд из 54 коммитов, от
+  `33a1797113d1ec6609aff5e711c2bec06b330e99` до
+  `2bbbcb1c9943271a05709603d2b94a19185fc51d`; Phase 2-only часть после
+  `fb087ceceaffb1bc1209af26701d8752763f7621` содержит 30 коммитов.
+- Точные свежие проверки без managed DB env: выбранный Phase 1+2 command —
+  7/7 suites, 209/209 tests PASS, 0 snapshots, exit 0, warnings/errors нет.
+  Полный API Jest — 127 suites PASS, 5 suites SKIP; 1091 tests PASS, 101 tests
+  SKIP, 1192 total, 0 snapshots, exit 0. В полном Jest были ожидаемые test-log
+  warnings: 10 от `DeepseekService` (invalid JSON и retry для HTTP/connection/
+  envelope cases) и 2 от `ContentService` (transport check/connection refused);
+  поэтому нулевые warnings не заявляются. `pnpm --dir apps/api build` — exit 0.
+- Full static caveat: точный
+  `pnpm --dir apps/api exec eslint "src/**/*.ts"` — exit 1, 9 errors / 0
+  warnings в четырёх не изменённых этим диапазоном файлах:
+  `ai/json-text-whitespace.spec.ts` (1),
+  `content-center/preparation-budget.spec.ts` (1),
+  `content-center/preparation-verification.spec.ts` (1) и
+  `content-center/public-resource.spec.ts` (6). Точный полный
+  `pnpm --dir apps/api exec prettier --check "src/**/*.ts"` — exit 1, style
+  warnings по 291 неизменённому baseline-файлу. Код не менялся для маскировки
+  результатов. Диагностические ESLint и Prettier checks только всех изменённых
+  Phase 1+2 API TS-файлов оба дали exit 0. `git diff --check` рабочего diff и
+  `git diff --check origin/main...HEAD` оба завершились с exit 0.
+- Scope: cumulative `origin/main...HEAD` меняет 28 файлов. Он включает ранее
+  завершённый Phase 1, поэтому содержит два web-файла
+  `apps/web/src/app/chunk-runtime-catalog.ts` и
+  `apps/web/test/managed-chunk-runtime.test.mjs`; это trusted SDK runtime
+  registry и его test, не rendered UI/controller/route. Phase 2-only diff web
+  не меняет и ограничен 14 файлами: docs/spec/plan/tests,
+  `cms-revisions.service`, repository, entities, одна migration,
+  module/data-source. Production Skinova manifest остаётся v1 и не менялся;
+  controller/DTO/routes, legacy banners/page assignments, delete legacy,
+  seed/backfill, public/preview switch, deploy/scripts, `.codex/`, VDS/Registry
+  не менялись. Production service change — typed manager-only lifecycle и один
+  безопасный access retry: если первый `SiteAccess FOR SHARE` после concurrent
+  delete+reinsert вернул пусто со старым statement snapshot, второй READ
+  COMMITTED lookup выполняется до Site/target locks; права не расширяются.
+- Security audit: реальных credentials/secrets и внешних test URL в diff нет.
+  Единственные credential-like значения — фиксированные disposable
+  `test:test`/`any-user:any-password`, exact `127.0.0.1:55440` и
+  `example.test`/fixture repository URLs внутри fail-closed database spec и
+  synthetic fixture. Guard требует PostgreSQL, exact host/port/database
+  `wispo_managed_chunks_phase2_test`, exact opt-in и запрещает query/hash.
+- БД — схема: относительно актуального `origin/main` production ledger вырос с
+  51 до 52 migrations ровно одной новой последней migration
+  `1791876000000-ManagedChunkPersistence.ts`; номер/имя и managed table names в
+  main отсутствуют. Старый duplicate timestamp `1790107200000` уже был в main
+  у `ContentCenterSourceFiles` и `ProtectCmsRevisionHistory` и с Phase 2 не
+  пересекается. Применённые migrations не редактировались. Одна новая migration
+  создаёт ровно шесть managed tables, семь managed CHECK, 18 FK и девять
+  integrity/immutable triggers, расширяет два существующих CHECK и добавляет
+  tenant-safe `pages(id, site_id)`. `down()` сначала одним batch берёт locks и
+  проверяет пустые managed tables, отсутствие managed resource types и manifest
+  v2; guard расположен до первого DROP.
+- БД — данные/форматы: migration не содержит SQL `INSERT`, data `UPDATE` или
+  `DELETE`; seed, backfill, ручные и пользовательские изменения отсутствуют,
+  migration ни к общей, ни к рабочей БД в Task 8 не применялась. Instance
+  snapshot точно `{ formatVersion: 1, data, sanitizerPolicyVersion }`, layout
+  snapshot точно `{ formatVersion: 1, templateKey, templateVersion }`;
+  placements остаются нормализованными строками exact revision.
+- Task 7 cleanup подтверждён повторно только read-only: exact container
+  `wispo-managed-chunks-phase2-test` отсутствует, listener `127.0.0.1:55440` и
+  оба opt-in env отсутствуют, четыре записанных disposable volume ID отсутствуют.
+  Семь `wispo-cms-local-*` IDs только перечислены и не менялись: mailpit/api/
+  postgres/redis были healthy, bootstrap/dependencies — exited 0, web в момент
+  наблюдения был `Restarting (1)`; исправления Docker не выполнялись.
+- Итог: Phase 2 подтверждена в согласованных границах и локально готова к
+  отдельному решению о push. Push, merge, deploy, VDS/Registry, общая/рабочая
+  БД, `main` и фактическая выкладка не выполнялись и не изменялись.
