@@ -3228,6 +3228,8 @@
   уточнение: `35862046730931843dde39f88785d697da299c61`
   (`test: make postgres lock assertions exact`). Exceptional cleanup fix:
   `71520f1d7f1f5f143c6ba18c2e5cd7203266e9c2`
-  (`test: harden postgres cleanup paths`).
+  (`test: harden postgres cleanup paths`). Residual promise-tracking fix:
+  `59551c6c43c9e1af190601a37924043073dbe896`
+  (`test: track postgres down-race promise immediately`).
   VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая выкладка
   не выполнялись.
