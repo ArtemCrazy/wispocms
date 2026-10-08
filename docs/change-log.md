@@ -207,7 +207,30 @@
   `revision-workflow` и `managed-chunk-schema` — 4 suites / 68 tests; API
   production build, targeted ESLint/Prettier и `git diff --check` прошли.
 - Коммит реализации: `feat: persist typed chunk instance revisions`.
-  Docker/VDS/Registry, push/merge/deploy не запускались и не затрагивались.
+  Docker/VDS/Registry, push/merge/deploy не запускались и не затрагивались.- Quality review Task 3 завершён локально 08.10.2026, статус: **Готово, не
+  выложено**. Generic `saveDraft`/`saveDraftUsingManager` теперь типами и runtime
+  guard закрыты для `chunk_instance`/`chunk_layout`; managed write доступен
+  только через внутренний `saveManagedDraftUsingManager` с обязательным hook.
+- Public generic authorization перенесена внутрь её transaction, оба draft
+  manager-пути читают site/access через переданный `EntityManager`; access read
+  использует `pessimistic_read`. Repository внутри того же manager сначала
+  берёт `pessimistic_read` site lock, затем читает contract и проверяет exact
+  package assignment, исключая commit против устаревшей активации пакета.
+- Test fidelity: instance suite использует реальный `CmsRevisionsService` и
+  stateful transaction fake, доказывая общий rollback resource/revision/
+  instance/link/pointer/event. Task 7 plan дополнен точным two-connection
+  package-activation race: A удерживает site lock, B блокируется; обратная
+  сериализация заставляет A увидеть новый package и безопасно отклонить contract.
+- Изменены только `cms-revisions.service.ts` и spec,
+  `managed-chunk-persistence.repository.ts` и spec, Phase 2 plan и эта запись.
+  Schema/entities/migrations/controllers/API и формат snapshot/link не менялись.
+  Общая/локальная БД, фактические строки, Docker/VDS/Registry не затрагивались.
+- Review TDD RED: targeted 2 failed suites, 18 ожидаемых failures / 41 existing
+  passes. GREEN: targeted 2 suites / 59 tests; regression с `revision-workflow`
+  и `managed-chunk-schema` — 4 suites / 74 tests; API production build,
+  targeted ESLint/Prettier и `git diff --check` прошли.
+- Коммит review-fix: `fix: enforce typed chunk revision boundary`.
+  Push/merge/deploy не выполнялись.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

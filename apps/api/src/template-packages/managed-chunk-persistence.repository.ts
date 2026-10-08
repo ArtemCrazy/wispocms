@@ -104,7 +104,7 @@ export class ManagedChunkPersistenceRepository {
     };
 
     return this.dataSource.transaction(async (db) => {
-      const revision = await this.revisions.saveDraftUsingManager(
+      const revision = await this.revisions.saveManagedDraftUsingManager(
         db,
         {
           siteId,
@@ -115,12 +115,13 @@ export class ManagedChunkPersistenceRepository {
           actor,
         },
         async (hookDb, savedRevision, resource) => {
-          const [contract, site] = await Promise.all([
-            hookDb.findOne(ManagedChunkContractEntity, {
-              where: { id: contractId },
-            }),
-            hookDb.findOne(SiteEntity, { where: { id: siteId } }),
-          ]);
+          const site = await hookDb.findOne(SiteEntity, {
+            where: { id: siteId },
+            lock: { mode: 'pessimistic_read' },
+          });
+          const contract = await hookDb.findOne(ManagedChunkContractEntity, {
+            where: { id: contractId },
+          });
           if (
             !contract ||
             !site ||

@@ -3,7 +3,12 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PlatformRole, SiteRole } from '../database/entities';
+import {
+  PlatformRole,
+  SiteAccessEntity,
+  SiteEntity,
+  SiteRole,
+} from '../database/entities';
 import { CmsRevisionsService } from './cms-revisions.service';
 
 describe('CMS revision storage', () => {
@@ -138,34 +143,118 @@ describe('CMS revision storage', () => {
       sites as never,
       siteAccesses as never,
     );
-    return { service, resources, revisions, events, operations, db };
+    return {
+      service,
+      resources,
+      revisions,
+      events,
+      operations,
+      db,
+      dataSource,
+      sites,
+      siteAccesses,
+    };
   }
 
-  it('uses content editing permission for chunk instance drafts', async () => {
-    const { service, resources, operations } = setup();
+  it.each(['chunk_instance', 'chunk_layout'] as const)(
+    'rejects managed %s drafts through the public generic boundary before writes',
+    async (resourceType) => {
+      const { service, resources, revisions, events, dataSource } = setup();
 
-    await expect(
-      service.saveDraft({
-        siteId: 'site-1',
-        resourceType: 'chunk_instance',
-        entityId: 'instance-1',
-        snapshot: { formatVersion: 1, data: {} },
-        expectedDraftRevisionId: null,
-        actor: manager,
-      }),
-    ).resolves.toMatchObject({ versionNumber: 1 });
+      await expect(
+        service.saveDraft({
+          siteId: 'site-1',
+          resourceType: resourceType as never,
+          entityId: 'managed-1',
+          snapshot: { formatVersion: 1, data: {} },
+          expectedDraftRevisionId: null,
+          actor: manager,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(resources).toContainEqual(
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect({ resources, revisions, events }).toEqual({
+        resources: [],
+        revisions: [],
+        events: [],
+      });
+    },
+  );
+
+  it.each(['chunk_instance', 'chunk_layout'] as const)(
+    'rejects managed %s drafts through the ordinary manager boundary before authorization or writes',
+    async (resourceType) => {
+      const { service, db, resources, revisions, events } = setup();
+
+      await expect(
+        service.saveDraftUsingManager(db as never, {
+          siteId: 'site-1',
+          resourceType: resourceType as never,
+          entityId: 'managed-1',
+          snapshot: { formatVersion: 1, data: {} },
+          expectedDraftRevisionId: null,
+          actor: manager,
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(db.findOne).not.toHaveBeenCalled();
+      expect({ resources, revisions, events }).toEqual({
+        resources: [],
+        revisions: [],
+        events: [],
+      });
+    },
+  );
+
+  it('uses transaction-bound authorization for public generic drafts', async () => {
+    const { service, db, sites, siteAccesses } = setup();
+
+    await service.saveDraft({
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-transaction-auth',
+      snapshot: { title: 'Bound' },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+
+    expect(sites.findOne).not.toHaveBeenCalled();
+    expect(siteAccesses.findOne).not.toHaveBeenCalled();
+    expect(db.findOne.mock.calls[0]).toEqual([
+      SiteEntity,
+      { where: { id: 'site-1' } },
+    ]);
+    expect(db.findOne.mock.calls[1]).toEqual([
+      SiteAccessEntity,
       expect.objectContaining({
-        resourceType: 'chunk_instance',
-        entityId: 'instance-1',
+        where: { userId: manager.userId, siteId: 'site-1' },
+        lock: { mode: 'pessimistic_read' },
       }),
-    );
-    expect(operations).toEqual(['resource', 'revision', 'resource', 'event']);
+    ]);
   });
 
-  it('runs the manager revision hook once after revision persistence and before pointer/event persistence', async () => {
-    const { service, db, operations } = setup();
+  it('uses transaction-bound authorization for ordinary manager drafts', async () => {
+    const { service, db, sites, siteAccesses } = setup();
+
+    await service.saveDraftUsingManager(db as never, {
+      siteId: 'site-1',
+      resourceType: 'article',
+      entityId: 'article-manager-auth',
+      snapshot: { title: 'Bound' },
+      expectedDraftRevisionId: null,
+      actor: manager,
+    });
+
+    expect(sites.findOne).not.toHaveBeenCalled();
+    expect(siteAccesses.findOne).not.toHaveBeenCalled();
+    expect(db.findOne.mock.calls[0][0]).toBe(SiteEntity);
+    expect(db.findOne.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ lock: { mode: 'pessimistic_read' } }),
+    );
+  });
+
+  it('runs the mandatory managed revision hook after revision persistence and before pointer/event persistence', async () => {
+    const { service, db, operations, sites, siteAccesses } = setup();
     const hook = jest.fn(
       (
         hookManager: unknown,
@@ -187,7 +276,7 @@ describe('CMS revision storage', () => {
       },
     );
 
-    await service.saveDraftUsingManager(
+    await service.saveManagedDraftUsingManager(
       db as never,
       {
         siteId: 'site-1',
@@ -200,6 +289,8 @@ describe('CMS revision storage', () => {
       hook,
     );
 
+    expect(sites.findOne).not.toHaveBeenCalled();
+    expect(siteAccesses.findOne).not.toHaveBeenCalled();
     expect(hook).toHaveBeenCalledTimes(1);
     expect(operations).toEqual([
       'resource',
@@ -210,7 +301,31 @@ describe('CMS revision storage', () => {
     ]);
   });
 
-  it('propagates manager hook failures so the surrounding transaction can roll back every draft write', async () => {
+  it('rejects a missing managed hook before authorization or writes', async () => {
+    const { service, db, operations } = setup();
+    const callWithoutHook = service.saveManagedDraftUsingManager.bind(
+      service,
+    ) as unknown as (
+      manager: unknown,
+      input: Record<string, unknown>,
+    ) => Promise<unknown>;
+
+    await expect(
+      callWithoutHook(db, {
+        siteId: 'site-1',
+        resourceType: 'chunk_instance',
+        entityId: 'instance-1',
+        snapshot: { formatVersion: 1, data: {} },
+        expectedDraftRevisionId: null,
+        actor: manager,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(db.findOne).not.toHaveBeenCalled();
+    expect(operations).toEqual([]);
+  });
+
+  it('propagates mandatory managed hook failures so the outer transaction rolls back every draft write', async () => {
     const committed = {
       resources: [] as Record<string, unknown>[],
       revisions: [] as Record<string, unknown>[],
@@ -271,12 +386,13 @@ describe('CMS revision storage', () => {
     const service = new CmsRevisionsService(
       dataSource as never,
       {
-        findOne: jest.fn().mockResolvedValue({ id: 'site-1' }),
+        findOne: jest.fn(() => {
+          throw new Error('Authorization escaped transaction');
+        }),
       } as never,
       {
-        findOne: jest.fn().mockResolvedValue({
-          role: SiteRole.CONTENT_MANAGER,
-          requiresApproval: true,
+        findOne: jest.fn(() => {
+          throw new Error('Authorization escaped transaction');
         }),
       } as never,
     );
@@ -284,7 +400,7 @@ describe('CMS revision storage', () => {
 
     await expect(
       dataSource.transaction((db) =>
-        service.saveDraftUsingManager(
+        service.saveManagedDraftUsingManager(
           db as never,
           {
             siteId: 'site-1',
@@ -300,7 +416,6 @@ describe('CMS revision storage', () => {
     ).rejects.toBe(failure);
     expect(committed).toEqual({ resources: [], revisions: [], events: [] });
   });
-
   it('records owner publication atomically and preserves the prior baseline', async () => {
     const { service, db, revisions, events, resources } = setup();
     const input = {

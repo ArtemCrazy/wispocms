@@ -510,6 +510,22 @@ definitions в противоположном caller order (`[A, B]` и `[B, A]`
 `managed_chunk_contracts` остались ровно те же две semantic rows без
 дубликатов или частичных записей.
 
+Package-activation race acceptance использует ещё два независимых соединения:
+
+1. transaction A начинает создание instance, выполняет manager-bound проверку
+   доступа и получает `pessimistic_read` lock строки `sites` до чтения
+   `managed_chunk_contracts`; контракт совпадает с зафиксированным
+   `template_package_id`, после чего A удерживает site lock до commit;
+2. transaction B пытается активировать другой package/version на той же строке
+   `sites` и подтверждённо блокируется, пока A не commit/rollback;
+3. при commit A instance и typed revision link фиксируются до package switch,
+   затем B продолжает активацию. Если B получила lock первой, A после ожидания
+   читает уже новый package и отклоняет старый contract безопасным `NotFound`.
+
+Ожидаемый инвариант обеих сериализаций: instance никогда не commit-ится против
+устаревшего package assignment; нет orphan resource/revision/link, PostgreSQL
+`40P01` или частично сохранённой транзакции.
+
 Concurrency acceptance использует два независимых соединения к disposable DB:
 
 1. transaction A выполняет первый `down()` batch (`LOCK TABLE ... IN SHARE ROW

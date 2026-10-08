@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -47,10 +48,12 @@ export type CmsResourceType =
   | 'site_privacy'
   | 'site_article_list'
   | 'site_layout_bindings'
-  | 'chunk_instance'
-  | 'chunk_layout'
   | 'media_alt'
   | 'site_variable';
+
+export type ManagedCmsResourceType = 'chunk_instance' | 'chunk_layout';
+
+type RevisionResourceType = CmsResourceType | ManagedCmsResourceType;
 
 export type RevisionActor = { userId: string; platformRole: PlatformRole };
 
@@ -70,11 +73,29 @@ export class CmsRevisionsService {
     private readonly siteAccesses: Repository<SiteAccessEntity>,
   ) {}
 
-  private permission(resourceType: CmsResourceType) {
+  private permission(resourceType: RevisionResourceType) {
     return resourceType === 'site_layout_bindings' ||
       resourceType === 'site_article_list'
       ? SitePermission.MANAGE_STRUCTURE
       : SitePermission.EDIT_CONTENT;
+  }
+
+  private assertGenericResourceType(
+    resourceType: RevisionResourceType,
+  ): asserts resourceType is CmsResourceType {
+    if (resourceType === 'chunk_instance' || resourceType === 'chunk_layout') {
+      throw new BadRequestException(
+        'Управляемый ресурс требует типизированного workflow',
+      );
+    }
+  }
+
+  private assertManagedResourceType(
+    resourceType: RevisionResourceType,
+  ): asserts resourceType is ManagedCmsResourceType {
+    if (resourceType !== 'chunk_instance' && resourceType !== 'chunk_layout') {
+      throw new BadRequestException('Ожидался тип управляемого ресурса');
+    }
   }
 
   private templateAssignmentFields(resourceType: CmsResourceType) {
@@ -234,7 +255,7 @@ export class CmsRevisionsService {
     db: EntityManager,
     input: {
       siteId: string;
-      resourceType: CmsResourceType;
+      resourceType: RevisionResourceType;
       entityId: string;
       snapshot: Record<string, unknown>;
       expectedDraftRevisionId: string | null;
@@ -304,14 +325,16 @@ export class CmsRevisionsService {
     expectedDraftRevisionId: string | null;
     actor: RevisionActor;
   }): Promise<{ id: string; versionNumber: number }> {
-    await this.requireSite(
-      input.siteId,
-      input.actor,
-      this.permission(input.resourceType),
-    );
-    return this.dataSource.transaction((db) =>
-      this.saveDraftInTransaction(db, input),
-    );
+    this.assertGenericResourceType(input.resourceType);
+    return this.dataSource.transaction(async (db) => {
+      await this.requireSite(
+        input.siteId,
+        input.actor,
+        this.permission(input.resourceType),
+        db,
+      );
+      return this.saveDraftInTransaction(db, input);
+    });
   }
 
   async saveDraftUsingManager(
@@ -324,12 +347,40 @@ export class CmsRevisionsService {
       expectedDraftRevisionId: string | null;
       actor: RevisionActor;
     },
-    revisionCreatedHook?: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number }> {
+    this.assertGenericResourceType(input.resourceType);
     await this.requireSite(
       input.siteId,
       input.actor,
       this.permission(input.resourceType),
+      db,
+    );
+    return this.saveDraftInTransaction(db, input);
+  }
+
+  async saveManagedDraftUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      snapshot: Record<string, unknown>;
+      expectedDraftRevisionId: string | null;
+      actor: RevisionActor;
+    },
+    revisionCreatedHook: RevisionCreatedHook,
+  ): Promise<{ id: string; versionNumber: number }> {
+    this.assertManagedResourceType(input.resourceType);
+    if (typeof revisionCreatedHook !== 'function') {
+      throw new BadRequestException(
+        'Управляемый ресурс требует revision-created hook',
+      );
+    }
+    await this.requireSite(
+      input.siteId,
+      input.actor,
+      this.permission(input.resourceType),
+      db,
     );
     return this.saveDraftInTransaction(
       db,

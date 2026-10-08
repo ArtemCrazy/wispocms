@@ -12,9 +12,12 @@ import {
   ManagedChunkInstanceEntity,
   ManagedChunkInstanceRevisionEntity,
   PlatformRole,
+  SiteAccessEntity,
   SiteEntity,
+  SiteRole,
   TemplatePackageVersionEntity,
 } from '../database/entities';
+import { CmsRevisionsService } from '../content/cms-revisions.service';
 import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
 import {
   canonicalManagedChunkContract,
@@ -274,7 +277,7 @@ function createHarness(options?: {
     repository: new ManagedChunkPersistenceRepository(
       dataSource as never,
       {
-        saveDraftUsingManager: jest.fn(() => {
+        saveManagedDraftUsingManager: jest.fn(() => {
           throw new Error('Unexpected revision draft');
         }),
       } as never,
@@ -301,7 +304,7 @@ type InstanceState = {
 function createInstanceHarness(options?: {
   contract?: ManagedChunkContractEntity | null;
   siteTemplatePackageId?: string | null;
-  siteExists?: boolean;
+  siteDisappearsAfterAuthorization?: boolean;
   denyAccess?: boolean;
   failOnSave?: 'instance' | 'link';
   beforeTransaction?: () => Promise<void>;
@@ -321,68 +324,11 @@ function createInstanceHarness(options?: {
         })
       : options.contract;
   const contractLookups: string[] = [];
+  const lookupOperations: Array<{
+    entity: string;
+    lock: unknown;
+  }> = [];
   const saveAttempts: string[] = [];
-  let resourceNumber = 0;
-  let revisionNumber = 0;
-
-  const revisionsService = {
-    saveDraftUsingManager: jest.fn(
-      async (
-        db: EntityManager,
-        input: {
-          siteId: string;
-          resourceType: string;
-          entityId: string;
-          snapshot: Record<string, unknown>;
-          actor: typeof ACTOR;
-        },
-        hook: (
-          manager: EntityManager,
-          revision: CmsRevisionEntity,
-          resource: CmsRevisionResourceEntity,
-        ) => Promise<void>,
-      ) => {
-        if (options?.denyAccess)
-          throw new ForbiddenException('Недостаточно прав для этого сайта');
-        const resource = Object.assign(new CmsRevisionResourceEntity(), {
-          id: `resource-${++resourceNumber}`,
-          siteId: input.siteId,
-          resourceType: input.resourceType,
-          entityId: input.entityId,
-          latestVersionNumber: 0,
-          draftRevisionId: null,
-          approvedRevisionId: null,
-          publishedRevisionId: null,
-          reviewState: 'draft',
-        });
-        await db.save(resource);
-        const revision = Object.assign(new CmsRevisionEntity(), {
-          id: `revision-${++revisionNumber}`,
-          resourceId: resource.id,
-          versionNumber: 1,
-          snapshot: structuredClone(input.snapshot),
-          actorUserId: input.actor.userId,
-        });
-        await db.save(revision);
-        await hook(db, revision, resource);
-        resource.draftRevisionId = revision.id;
-        resource.latestVersionNumber = revision.versionNumber;
-        await db.save(resource);
-        await db.save(
-          Object.assign(new CmsRevisionEventEntity(), {
-            id: `event-${revisionNumber}`,
-            resourceId: resource.id,
-            revisionId: revision.id,
-            eventType: 'draft_saved',
-            actorUserId: input.actor.userId,
-            reason: null,
-          }),
-        );
-        return { id: revision.id, versionNumber: revision.versionNumber };
-      },
-    ),
-  };
-
   const dataSource = {
     transaction: jest.fn(
       async (
@@ -394,11 +340,24 @@ function createInstanceHarness(options?: {
           findOne: jest.fn(
             (
               entity: { name: string },
-              query: { where: Record<string, unknown> },
+              query: {
+                where: Record<string, unknown>;
+                lock?: { mode: string };
+              },
             ) => {
-              if (entity === SiteEntity)
+              if (entity === SiteEntity) {
+                lookupOperations.push({
+                  entity: 'site',
+                  lock: query.lock ?? null,
+                });
+                const siteLookupNumber = lookupOperations.filter(
+                  (operation) => operation.entity === 'site',
+                ).length;
+                const siteVisible =
+                  !options?.siteDisappearsAfterAuthorization ||
+                  siteLookupNumber === 1;
                 return Promise.resolve(
-                  query.where.id === SITE_ID && options?.siteExists !== false
+                  query.where.id === SITE_ID && siteVisible
                     ? {
                         id: SITE_ID,
                         templatePackageId:
@@ -408,7 +367,39 @@ function createInstanceHarness(options?: {
                       }
                     : null,
                 );
+              }
+              if (entity === SiteAccessEntity) {
+                lookupOperations.push({
+                  entity: 'access',
+                  lock: query.lock ?? null,
+                });
+                return Promise.resolve(
+                  options?.denyAccess
+                    ? null
+                    : {
+                        role: SiteRole.CONTENT_MANAGER,
+                        requiresApproval: true,
+                      },
+                );
+              }
+              if (entity === CmsRevisionResourceEntity) {
+                lookupOperations.push({
+                  entity: 'resource',
+                  lock: query.lock ?? null,
+                });
+                return Promise.resolve(
+                  working.resources.find((row) =>
+                    Object.entries(query.where).every(
+                      ([key, value]) => row[key] === value,
+                    ),
+                  ) ?? null,
+                );
+              }
               if (entity === ManagedChunkContractEntity) {
+                lookupOperations.push({
+                  entity: 'contract',
+                  lock: query.lock ?? null,
+                });
                 contractLookups.push(String(query.where.id));
                 return Promise.resolve(
                   contract?.id === query.where.id ? contract : null,
@@ -465,9 +456,22 @@ function createInstanceHarness(options?: {
       },
     ),
   };
+  const revisionsService = new CmsRevisionsService(
+    dataSource as never,
+    {
+      findOne: jest.fn(() => {
+        throw new Error('Site authorization escaped the transaction');
+      }),
+    } as never,
+    {
+      findOne: jest.fn(() => {
+        throw new Error('Access authorization escaped the transaction');
+      }),
+    } as never,
+  );
   const repository = new ManagedChunkPersistenceRepository(
     dataSource as never,
-    revisionsService as never,
+    revisionsService,
   );
 
   return {
@@ -475,6 +479,7 @@ function createInstanceHarness(options?: {
     dataSource,
     revisionsService,
     contractLookups,
+    lookupOperations,
     saveAttempts,
     get state() {
       return committed;
@@ -967,9 +972,14 @@ describe('ManagedChunkPersistenceRepository', () => {
         }),
       ]);
       expect(harness.state.events).toHaveLength(1);
-      expect(
-        harness.revisionsService.saveDraftUsingManager,
-      ).toHaveBeenCalledTimes(1);
+      expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(harness.lookupOperations).toEqual([
+        { entity: 'site', lock: null },
+        { entity: 'access', lock: { mode: 'pessimistic_read' } },
+        { entity: 'resource', lock: { mode: 'pessimistic_write' } },
+        { entity: 'site', lock: { mode: 'pessimistic_read' } },
+        { entity: 'contract', lock: null },
+      ]);
     });
 
     it.each([
@@ -980,7 +990,10 @@ describe('ManagedChunkPersistenceRepository', () => {
           siteTemplatePackageId: '66666666-6666-4666-8666-666666666666',
         },
       ],
-      ['a site missing after authorization', { siteExists: false }],
+      [
+        'a site missing after authorization',
+        { siteDisappearsAfterAuthorization: true },
+      ],
     ])('uses the same safe not-found for %s', async (_case, options) => {
       const harness = createInstanceHarness(options);
 
