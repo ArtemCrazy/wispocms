@@ -40,8 +40,31 @@
   `docs/superpowers/specs/2026-10-07-managed-chunks-persistence-design.md`
   подтверждена владельцем 07.10.2026; отдельный TDD-план создан в
   `docs/superpowers/plans/2026-10-07-managed-chunks-persistence-phase2.md` и
-  ожидает подтверждения. До него код, схема/данные БД, миграции и формат
-  сохраняемых значений не меняются; общая БД, VDS и Registry не затрагиваются.
+  подтверждён владельцем 08.10.2026; начат Task 1: migration contract и
+  TypeORM metadata. На старте схема и данные фактически не применялись;
+  общая БД, VDS и Registry не затрагивались. Baseline перед
+  реализацией: Jest API — 124 suites / 931 tests PASS, 5 suites / 81 tests
+  SKIP без opt-in.
+- Task 1 Phase 2 завершён локально: добавлена schema-only миграция
+  `1791876000000-ManagedChunkPersistence` и TypeORM metadata для шести пустых
+  managed-chunk таблиц; разрешены manifest v1/v2 и resource types
+  `chunk_instance`/`chunk_layout`, добавлены tenant-safe unique/FK,
+  exact-resource constraint triggers, immutable-history triggers и безопасный
+  pre-drop guard для `down()`. Изменены
+  `apps/api/src/database/entities.ts`,
+  `apps/api/src/database/data-source.ts`,
+  `apps/api/src/database/data-source.spec.ts`; добавлены
+  `apps/api/src/database/migrations/1791876000000-ManagedChunkPersistence.ts`
+  и
+  `apps/api/src/database/migrations/1791876000000-ManagedChunkPersistence.spec.ts`;
+  продолжена эта запись `docs/change-log.md`.
+- БД Task 1 — схема: описана новой миграцией, но ни к одной БД не применялась.
+  Данные, существующие строки и формат уже сохраняемых значений не менялись;
+  `INSERT`, backfill и ручные изменения данных отсутствуют. TDD RED:
+  отсутствующий migration module и 51 вместо ожидаемых 52 migrations. GREEN:
+  3 Jest suites / 12 tests, API production build, targeted ESLint, Prettier и
+  `git diff --check` прошли. Общая/локальная рабочая БД, Docker, VDS, Registry,
+  push, merge и выкладка не затрагивались; изменение не выпущено.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
