@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -10,6 +11,9 @@ import {
   ManagedChunkContractEntity,
   ManagedChunkInstanceEntity,
   ManagedChunkInstanceRevisionEntity,
+  ManagedChunkLayoutEntity,
+  ManagedChunkPlacementEntity,
+  PageEntity,
   SiteEntity,
   TemplatePackageVersionEntity,
 } from '../database/entities';
@@ -79,6 +83,160 @@ export class ManagedChunkPersistenceRepository {
     private readonly dataSource: DataSource,
     private readonly revisions: CmsRevisionsService,
   ) {}
+
+  async saveLayoutDraft(input: {
+    siteId: string;
+    target:
+      | { kind: 'page'; pageId: string }
+      | { kind: 'site_surface'; surfaceKey: string };
+    templateKey: string;
+    templateVersion: string;
+    expectedDraftRevisionId: string | null;
+    placements: readonly {
+      slotKey: string;
+      position: number;
+      instanceId: string;
+    }[];
+    actor: RevisionActor;
+  }): Promise<{
+    layoutId: string;
+    revisionId: string;
+    versionNumber: number;
+  }> {
+    const siteId = String(input.siteId);
+    const target =
+      input.target.kind === 'page'
+        ? ({ kind: 'page', pageId: String(input.target.pageId) } as const)
+        : ({
+            kind: 'site_surface',
+            surfaceKey: String(input.target.surfaceKey),
+          } as const);
+    const actor = { ...input.actor };
+    const expectedDraftRevisionId = input.expectedDraftRevisionId;
+    const snapshot = {
+      formatVersion: 1,
+      templateKey: String(input.templateKey),
+      templateVersion: String(input.templateVersion),
+    };
+    const positions = new Set<string>();
+    const placements = input.placements.map((placement) => {
+      const cloned = {
+        slotKey: String(placement.slotKey),
+        position: placement.position,
+        instanceId: String(placement.instanceId),
+      };
+      if (!Number.isSafeInteger(cloned.position) || cloned.position < 0) {
+        throw new BadRequestException(
+          'Позиция чанка должна быть безопасным неотрицательным целым числом',
+        );
+      }
+      const positionKey = JSON.stringify([cloned.slotKey, cloned.position]);
+      if (positions.has(positionKey)) {
+        throw new BadRequestException(
+          'Позиция чанка в слоте должна быть уникальной',
+        );
+      }
+      positions.add(positionKey);
+      return cloned;
+    });
+
+    return this.dataSource.transaction(async (db) => {
+      const site = await db.findOne(SiteEntity, {
+        where: { id: siteId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!site) throw new NotFoundException('Сайт не найден');
+
+      if (target.kind === 'page') {
+        const page = await db.findOne(PageEntity, {
+          where: { id: target.pageId, siteId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!page) throw new NotFoundException('Цель раскладки не найдена');
+      }
+
+      const layoutWhere =
+        target.kind === 'page'
+          ? {
+              siteId,
+              scopeKind: 'page' as const,
+              pageId: target.pageId,
+            }
+          : {
+              siteId,
+              scopeKind: 'site_surface' as const,
+              surfaceKey: target.surfaceKey,
+            };
+      const layout = await db.findOne(ManagedChunkLayoutEntity, {
+        where: layoutWhere,
+        lock: { mode: 'pessimistic_write' },
+      });
+      const layoutId = layout?.id ?? randomUUID();
+      const instanceIds = [
+        ...new Set(placements.map((row) => row.instanceId)),
+      ].sort();
+
+      const revision = await this.revisions.saveManagedDraftUsingManager(
+        db,
+        {
+          siteId,
+          resourceType: 'chunk_layout',
+          entityId: layoutId,
+          snapshot,
+          expectedDraftRevisionId,
+          actor,
+        },
+        async (hookDb, savedRevision, resource) => {
+          for (const instanceId of instanceIds) {
+            const instance = await hookDb.findOne(ManagedChunkInstanceEntity, {
+              where: { id: instanceId, siteId },
+              lock: { mode: 'pessimistic_read' },
+            });
+            if (!instance) {
+              throw new NotFoundException('Экземпляр чанка не найден');
+            }
+          }
+
+          if (!layout) {
+            await hookDb.save(
+              Object.assign(new ManagedChunkLayoutEntity(), {
+                id: layoutId,
+                siteId,
+                revisionResourceId: resource.id,
+                scopeKind: target.kind,
+                pageId: target.kind === 'page' ? target.pageId : null,
+                surfaceKey:
+                  target.kind === 'site_surface' ? target.surfaceKey : null,
+              }),
+            );
+          }
+
+          if (placements.length > 0) {
+            await hookDb.save(
+              placements.map((placement) =>
+                Object.assign(new ManagedChunkPlacementEntity(), {
+                  id: randomUUID(),
+                  siteId,
+                  layoutId,
+                  layoutRevisionResourceId: resource.id,
+                  layoutRevisionId: savedRevision.id,
+                  instanceId: placement.instanceId,
+                  slotKey: placement.slotKey,
+                  position: placement.position,
+                }),
+              ),
+            );
+          }
+        },
+      );
+
+      return {
+        layoutId,
+        revisionId: revision.id,
+        versionNumber: revision.versionNumber,
+      };
+    });
+  }
 
   async createInstanceDraft(input: {
     siteId: string;

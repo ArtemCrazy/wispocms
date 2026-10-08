@@ -526,6 +526,15 @@ definitions в противоположном caller order (`[A, B]` и `[B, A]`
 `managed_chunk_contracts` остались ровно те же две semantic rows без
 дубликатов или частичных записей.
 
+Layout same-target creation acceptance использует два независимых соединения
+для каждой target-формы (`page` и `site_surface`). Обе операции одновременно
+вызывают `saveLayoutDraft` для одного target при ещё отсутствующей layout
+identity. Проверка подтверждает блокировку второй операции на target lock,
+завершение обеих без unique violation или PostgreSQL `40P01`, одну стабильную
+строку `managed_chunk_layouts`, один `chunk_layout` resource и две полные
+ревизии со своими placement sets; ни одна операция не оставляет orphan или
+частичный набор строк.
+
 Package-activation race acceptance использует ещё два независимых соединения:
 
 1. transaction A начинает создание instance, выполняет manager-bound проверку

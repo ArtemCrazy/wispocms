@@ -2927,3 +2927,31 @@
 
 Работу над независимым интерфейсом можно продолжать. Изменения общей схемы,
 конфликтующих данных и параллельную выкладку необходимо согласовывать.
+
+### 2026-10-08 · Phase 2 / Task 4: атомарные версии layout и placements
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализовано: typed repository boundary `saveLayoutDraft` одной внешней
+  транзакцией создаёт или переиспользует стабильную identity page/site-surface
+  layout, сохраняет metadata-only CMS revision и полный immutable placements
+  set этой версии, включая пустой набор. Частичного placement API нет.
+- Конкурентность и tenant safety: site/page/layout/instance читаются и
+  блокируются через transaction manager в детерминированном порядке; page и
+  каждый instance проверяются в том же site. Реальный двухсоединенческий тест
+  одновременного создания одного target добавлен в план Task 7.
+- Изменено: `apps/api/src/template-packages/managed-chunk-persistence.repository.ts`,
+  его spec, `docs/superpowers/plans/2026-10-07-managed-chunks-persistence-phase2.md`
+  и эта запись журнала.
+- БД — схема: не менялась. Новых или отредактированных миграций нет.
+- БД — данные и формат: существующие данные не менялись. Layout snapshot имеет
+  только `{ formatVersion, templateKey, templateVersion }`; placements остаются
+  нормализованными строками точной revision согласно уже принятой схеме.
+- TDD: RED подтверждён ошибкой `saveLayoutDraft is not a function` при 28
+  прошедших прежних тестах; GREEN — repository suite 45/45. Regression:
+  repository + revision service 76/76; API `nest build`; адресный ESLint двух
+  изменённых TS-файлов; Prettier и `git diff --check`.
+- Коммит реализации: `feat: persist atomic managed chunk layouts` (эта запись
+  передаётся тем же коммитом).
+- Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, `main`, push/merge и
+  deploy не затрагивались.

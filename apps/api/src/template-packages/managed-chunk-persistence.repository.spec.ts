@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -11,6 +12,9 @@ import {
   ManagedChunkContractEntity,
   ManagedChunkInstanceEntity,
   ManagedChunkInstanceRevisionEntity,
+  ManagedChunkLayoutEntity,
+  ManagedChunkPlacementEntity,
+  PageEntity,
   PlatformRole,
   SiteAccessEntity,
   SiteEntity,
@@ -30,6 +34,9 @@ const PACKAGE_ID = '11111111-1111-4111-8111-111111111111';
 const VERSION_ID = '22222222-2222-4222-8222-222222222222';
 const SITE_ID = '33333333-3333-4333-8333-333333333333';
 const CONTRACT_ID = '44444444-4444-4444-8444-444444444444';
+const PAGE_ID = '66666666-6666-4666-8666-666666666666';
+const HERO_INSTANCE_ID = '77777777-7777-4777-8777-777777777777';
+const PROMO_INSTANCE_ID = '88888888-8888-4888-8888-888888888888';
 const ACTOR = {
   userId: '55555555-5555-4555-8555-555555555555',
   platformRole: PlatformRole.EMPLOYEE,
@@ -479,6 +486,207 @@ function createInstanceHarness(options?: {
     dataSource,
     revisionsService,
     contractLookups,
+    lookupOperations,
+    saveAttempts,
+    get state() {
+      return committed;
+    },
+  };
+}
+type LayoutState = {
+  resources: Record<string, unknown>[];
+  revisions: Record<string, unknown>[];
+  layouts: Record<string, unknown>[];
+  placements: Record<string, unknown>[];
+  events: Record<string, unknown>[];
+};
+
+function createLayoutHarness(options?: {
+  pages?: Array<{ id: string; siteId: string }>;
+  instances?: Array<{ id: string; siteId: string }>;
+  failOnSave?: 'layout' | 'placement';
+  denyAccess?: boolean;
+  beforeTransaction?: () => Promise<void>;
+}) {
+  let committed: LayoutState = {
+    resources: [],
+    revisions: [],
+    layouts: [],
+    placements: [],
+    events: [],
+  };
+  const pages = options?.pages ?? [{ id: PAGE_ID, siteId: SITE_ID }];
+  const instances = options?.instances ?? [
+    { id: HERO_INSTANCE_ID, siteId: SITE_ID },
+  ];
+  const lookupOperations: Array<{
+    entity: string;
+    where: Record<string, unknown>;
+    lock: unknown;
+  }> = [];
+  const saveAttempts: string[] = [];
+  const dataSource = {
+    transaction: jest.fn(
+      async (
+        callback: (manager: EntityManager) => Promise<unknown>,
+      ): Promise<unknown> => {
+        await options?.beforeTransaction?.();
+        const working = structuredClone(committed);
+        const manager = {
+          findOne: jest.fn(
+            (
+              entity: { name: string },
+              query: {
+                where: Record<string, unknown>;
+                lock?: { mode: string };
+              },
+            ) => {
+              const entityName =
+                entity === SiteEntity
+                  ? 'site'
+                  : entity === SiteAccessEntity
+                    ? 'access'
+                    : entity === PageEntity
+                      ? 'page'
+                      : entity === ManagedChunkLayoutEntity
+                        ? 'layout'
+                        : entity === ManagedChunkInstanceEntity
+                          ? 'instance'
+                          : entity === CmsRevisionResourceEntity
+                            ? 'resource'
+                            : 'unknown';
+              lookupOperations.push({
+                entity: entityName,
+                where: { ...query.where },
+                lock: query.lock ?? null,
+              });
+              if (entity === SiteEntity) {
+                return Promise.resolve(
+                  query.where.id === SITE_ID
+                    ? { id: SITE_ID, templatePackageId: PACKAGE_ID }
+                    : null,
+                );
+              }
+              if (entity === SiteAccessEntity) {
+                return Promise.resolve(
+                  options?.denyAccess
+                    ? null
+                    : {
+                        role: SiteRole.CONTENT_MANAGER,
+                        requiresApproval: true,
+                      },
+                );
+              }
+              if (entity === PageEntity) {
+                return Promise.resolve(
+                  pages.find((row) =>
+                    Object.entries(query.where).every(
+                      ([key, value]) => row[key as keyof typeof row] === value,
+                    ),
+                  ) ?? null,
+                );
+              }
+              if (entity === ManagedChunkLayoutEntity) {
+                return Promise.resolve(
+                  working.layouts.find((row) =>
+                    Object.entries(query.where).every(
+                      ([key, value]) => row[key] === value,
+                    ),
+                  ) ?? null,
+                );
+              }
+              if (entity === ManagedChunkInstanceEntity) {
+                return Promise.resolve(
+                  instances.find((row) =>
+                    Object.entries(query.where).every(
+                      ([key, value]) => row[key as keyof typeof row] === value,
+                    ),
+                  ) ?? null,
+                );
+              }
+              if (entity === CmsRevisionResourceEntity) {
+                const stored = working.resources.find((row) =>
+                  Object.entries(query.where).every(
+                    ([key, value]) => row[key] === value,
+                  ),
+                );
+                return Promise.resolve(
+                  stored
+                    ? Object.assign(
+                        new CmsRevisionResourceEntity(),
+                        structuredClone(stored),
+                      )
+                    : null,
+                );
+              }
+              throw new Error('Unexpected lookup: ' + entity.name);
+            },
+          ),
+          save: jest.fn((value: object | object[]) => {
+            const values = Array.isArray(value) ? value : [value];
+            for (const item of values) {
+              const kind =
+                item instanceof CmsRevisionResourceEntity
+                  ? 'resource'
+                  : item instanceof CmsRevisionEntity
+                    ? 'revision'
+                    : item instanceof ManagedChunkLayoutEntity
+                      ? 'layout'
+                      : item instanceof ManagedChunkPlacementEntity
+                        ? 'placement'
+                        : item instanceof CmsRevisionEventEntity
+                          ? 'event'
+                          : 'unknown';
+              saveAttempts.push(kind);
+              if (options?.failOnSave === kind)
+                throw new Error(kind + '-save-failed');
+              const rows =
+                kind === 'resource'
+                  ? working.resources
+                  : kind === 'revision'
+                    ? working.revisions
+                    : kind === 'layout'
+                      ? working.layouts
+                      : kind === 'placement'
+                        ? working.placements
+                        : kind === 'event'
+                          ? working.events
+                          : null;
+              if (!rows) throw new Error('Unexpected save entity');
+              const record = item as Record<string, unknown>;
+              const existing = rows.findIndex((row) => row.id === record.id);
+              if (existing >= 0) rows[existing] = structuredClone(record);
+              else rows.push(structuredClone(record));
+            }
+            return Promise.resolve(value);
+          }),
+        } as unknown as EntityManager;
+        const result = await callback(manager);
+        committed = working;
+        return result;
+      },
+    ),
+  };
+  const revisionsService = new CmsRevisionsService(
+    dataSource as never,
+    {
+      findOne: jest.fn(() => {
+        throw new Error('Site authorization escaped the transaction');
+      }),
+    } as never,
+    {
+      findOne: jest.fn(() => {
+        throw new Error('Access authorization escaped the transaction');
+      }),
+    } as never,
+  );
+
+  return {
+    repository: new ManagedChunkPersistenceRepository(
+      dataSource as never,
+      revisionsService,
+    ),
+    dataSource,
     lookupOperations,
     saveAttempts,
     get state() {
@@ -1119,6 +1327,422 @@ describe('ManagedChunkPersistenceRepository', () => {
         data,
         sanitizerPolicyVersion: null,
       });
+    });
+  });
+
+  describe('saveLayoutDraft', () => {
+    const savePageLayout = (
+      repository: ManagedChunkPersistenceRepository,
+      overrides: Partial<{
+        target: { kind: 'page'; pageId: string };
+        expectedDraftRevisionId: string | null;
+        placements: Array<{
+          slotKey: string;
+          position: number;
+          instanceId: string;
+        }>;
+      }> = {},
+    ) =>
+      repository.saveLayoutDraft({
+        siteId: SITE_ID,
+        target: { kind: 'page', pageId: PAGE_ID },
+        templateKey: 'skinova-home',
+        templateVersion: '1',
+        expectedDraftRevisionId: null,
+        placements: [
+          {
+            slotKey: 'hero',
+            position: 0,
+            instanceId: HERO_INSTANCE_ID,
+          },
+        ],
+        actor: ACTOR,
+        ...overrides,
+      });
+
+    it('atomically saves metadata and the complete placement set for one exact page revision', async () => {
+      const harness = createLayoutHarness({
+        instances: [
+          { id: HERO_INSTANCE_ID, siteId: SITE_ID },
+          { id: PROMO_INSTANCE_ID, siteId: SITE_ID },
+        ],
+      });
+
+      const result = await savePageLayout(harness.repository, {
+        placements: [
+          {
+            slotKey: 'hero',
+            position: 0,
+            instanceId: HERO_INSTANCE_ID,
+          },
+          {
+            slotKey: 'promo',
+            position: 0,
+            instanceId: PROMO_INSTANCE_ID,
+          },
+        ],
+      });
+
+      expect(result).toEqual({
+        layoutId: harness.state.layouts[0].id,
+        revisionId: harness.state.revisions[0].id,
+        versionNumber: 1,
+      });
+      expect(harness.state.layouts).toEqual([
+        expect.objectContaining({
+          id: result.layoutId,
+          siteId: SITE_ID,
+          revisionResourceId: harness.state.resources[0].id,
+          scopeKind: 'page',
+          pageId: PAGE_ID,
+          surfaceKey: null,
+        }),
+      ]);
+      expect(harness.state.revisions).toEqual([
+        expect.objectContaining({
+          id: result.revisionId,
+          snapshot: {
+            formatVersion: 1,
+            templateKey: 'skinova-home',
+            templateVersion: '1',
+          },
+        }),
+      ]);
+      expect(harness.state.revisions[0].snapshot).not.toHaveProperty(
+        'placements',
+      );
+      expect(harness.state.placements).toEqual([
+        expect.objectContaining({
+          siteId: SITE_ID,
+          layoutId: result.layoutId,
+          layoutRevisionResourceId: harness.state.resources[0].id,
+          layoutRevisionId: result.revisionId,
+          slotKey: 'hero',
+          position: 0,
+          instanceId: HERO_INSTANCE_ID,
+        }),
+        expect.objectContaining({
+          siteId: SITE_ID,
+          layoutId: result.layoutId,
+          layoutRevisionResourceId: harness.state.resources[0].id,
+          layoutRevisionId: result.revisionId,
+          slotKey: 'promo',
+          position: 0,
+          instanceId: PROMO_INSTANCE_ID,
+        }),
+      ]);
+      expect(harness.state.resources).toEqual([
+        expect.objectContaining({
+          entityId: result.layoutId,
+          resourceType: 'chunk_layout',
+          draftRevisionId: result.revisionId,
+          latestVersionNumber: 1,
+        }),
+      ]);
+      expect(harness.state.events).toHaveLength(1);
+      expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(harness.lookupOperations.slice(0, 3)).toEqual([
+        {
+          entity: 'site',
+          where: { id: SITE_ID },
+          lock: { mode: 'pessimistic_write' },
+        },
+        {
+          entity: 'page',
+          where: { id: PAGE_ID, siteId: SITE_ID },
+          lock: { mode: 'pessimistic_write' },
+        },
+        {
+          entity: 'layout',
+          where: {
+            siteId: SITE_ID,
+            scopeKind: 'page',
+            pageId: PAGE_ID,
+          },
+          lock: { mode: 'pessimistic_write' },
+        },
+      ]);
+    });
+
+    it('reuses the stable page target identity and treats an empty array as a complete empty revision', async () => {
+      const harness = createLayoutHarness();
+      const first = await savePageLayout(harness.repository);
+      const second = await savePageLayout(harness.repository, {
+        expectedDraftRevisionId: first.revisionId,
+        placements: [],
+      });
+
+      expect(second).toEqual({
+        layoutId: first.layoutId,
+        revisionId: harness.state.revisions[1].id,
+        versionNumber: 2,
+      });
+      expect(harness.state.layouts).toHaveLength(1);
+      expect(harness.state.resources).toHaveLength(1);
+      expect(harness.state.revisions).toHaveLength(2);
+      expect(
+        harness.state.placements.filter(
+          (row) => row.layoutRevisionId === second.revisionId,
+        ),
+      ).toEqual([]);
+      expect(harness.state.placements).toHaveLength(1);
+    });
+
+    it('reuses one stable site-surface identity across revisions', async () => {
+      const harness = createLayoutHarness();
+      const first = await harness.repository.saveLayoutDraft({
+        siteId: SITE_ID,
+        target: { kind: 'site_surface', surfaceKey: 'header' },
+        templateKey: 'skinova-header',
+        templateVersion: '1',
+        expectedDraftRevisionId: null,
+        placements: [],
+        actor: ACTOR,
+      });
+      const second = await harness.repository.saveLayoutDraft({
+        siteId: SITE_ID,
+        target: { kind: 'site_surface', surfaceKey: 'header' },
+        templateKey: 'skinova-header',
+        templateVersion: '2',
+        expectedDraftRevisionId: first.revisionId,
+        placements: [],
+        actor: ACTOR,
+      });
+
+      expect(second.layoutId).toBe(first.layoutId);
+      expect(second.versionNumber).toBe(2);
+      expect(harness.state.layouts).toEqual([
+        expect.objectContaining({
+          scopeKind: 'site_surface',
+          pageId: null,
+          surfaceKey: 'header',
+        }),
+      ]);
+      expect(
+        harness.lookupOperations.filter(
+          (operation) => operation.entity === 'page',
+        ),
+      ).toEqual([]);
+    });
+
+    it.each([
+      [
+        'duplicate slot positions',
+        [
+          {
+            slotKey: 'hero',
+            position: 0,
+            instanceId: HERO_INSTANCE_ID,
+          },
+          {
+            slotKey: 'hero',
+            position: 0,
+            instanceId: PROMO_INSTANCE_ID,
+          },
+        ],
+      ],
+      [
+        'negative positions',
+        [
+          {
+            slotKey: 'hero',
+            position: -1,
+            instanceId: HERO_INSTANCE_ID,
+          },
+        ],
+      ],
+      [
+        'non-integer positions',
+        [
+          {
+            slotKey: 'hero',
+            position: 0.5,
+            instanceId: HERO_INSTANCE_ID,
+          },
+        ],
+      ],
+      [
+        'unsafe integer positions',
+        [
+          {
+            slotKey: 'hero',
+            position: Number.MAX_SAFE_INTEGER + 1,
+            instanceId: HERO_INSTANCE_ID,
+          },
+        ],
+      ],
+    ])('rejects %s before opening a transaction', async (_case, placements) => {
+      const harness = createLayoutHarness();
+
+      await expect(
+        savePageLayout(harness.repository, { placements }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(harness.dataSource.transaction).not.toHaveBeenCalled();
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        layouts: [],
+        placements: [],
+        events: [],
+      });
+    });
+
+    it.each([
+      ['an unknown page', []],
+      [
+        'a page owned by another site',
+        [
+          {
+            id: PAGE_ID,
+            siteId: '99999999-9999-4999-8999-999999999999',
+          },
+        ],
+      ],
+    ])('uses the same safe not-found for %s', async (_case, pages) => {
+      const harness = createLayoutHarness({ pages });
+
+      await expect(savePageLayout(harness.repository)).rejects.toEqual(
+        new NotFoundException('Цель раскладки не найдена'),
+      );
+
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        layouts: [],
+        placements: [],
+        events: [],
+      });
+    });
+
+    it.each([
+      ['an unknown instance', []],
+      [
+        'an instance owned by another site',
+        [
+          {
+            id: HERO_INSTANCE_ID,
+            siteId: '99999999-9999-4999-8999-999999999999',
+          },
+        ],
+      ],
+    ])('uses the same safe not-found for %s', async (_case, instances) => {
+      const harness = createLayoutHarness({ instances });
+
+      await expect(savePageLayout(harness.repository)).rejects.toEqual(
+        new NotFoundException('Экземпляр чанка не найден'),
+      );
+
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        layouts: [],
+        placements: [],
+        events: [],
+      });
+    });
+
+    it('rolls back a new identity and every revision row for a stale expected pointer', async () => {
+      const harness = createLayoutHarness();
+
+      await expect(
+        savePageLayout(harness.repository, {
+          expectedDraftRevisionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        layouts: [],
+        placements: [],
+        events: [],
+      });
+    });
+
+    it.each(['layout', 'placement'] as const)(
+      'rolls back every row when the %s hook save fails',
+      async (failOnSave) => {
+        const harness = createLayoutHarness({ failOnSave });
+
+        await expect(savePageLayout(harness.repository)).rejects.toThrow(
+          failOnSave + '-save-failed',
+        );
+
+        expect(harness.state).toEqual({
+          resources: [],
+          revisions: [],
+          layouts: [],
+          placements: [],
+          events: [],
+        });
+      },
+    );
+
+    it('captures target and placement inputs before the first await', async () => {
+      const transactionGate = deferred();
+      const harness = createLayoutHarness({
+        beforeTransaction: () => transactionGate.promise,
+      });
+      const target = { kind: 'page' as const, pageId: PAGE_ID };
+      const placements = [
+        {
+          slotKey: 'hero',
+          position: 0,
+          instanceId: HERO_INSTANCE_ID,
+        },
+      ];
+
+      const saving = harness.repository.saveLayoutDraft({
+        siteId: SITE_ID,
+        target,
+        templateKey: 'skinova-home',
+        templateVersion: '1',
+        expectedDraftRevisionId: null,
+        placements,
+        actor: ACTOR,
+      });
+      target.pageId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      placements[0].slotKey = 'mutated';
+      placements.push({
+        slotKey: 'late',
+        position: 1,
+        instanceId: HERO_INSTANCE_ID,
+      });
+      transactionGate.release();
+      await saving;
+
+      expect(harness.state.layouts[0]).toEqual(
+        expect.objectContaining({ pageId: PAGE_ID }),
+      );
+      expect(harness.state.placements).toEqual([
+        expect.objectContaining({ slotKey: 'hero', position: 0 }),
+      ]);
+    });
+
+    it('denies access without committing layout workflow rows', async () => {
+      const harness = createLayoutHarness({ denyAccess: true });
+
+      await expect(savePageLayout(harness.repository)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        layouts: [],
+        placements: [],
+        events: [],
+      });
+    });
+
+    it('does not expose a partial placement write API', () => {
+      const harness = createLayoutHarness();
+
+      expect(
+        (harness.repository as unknown as { savePlacement?: unknown })
+          .savePlacement,
+      ).toBeUndefined();
     });
   });
 });
