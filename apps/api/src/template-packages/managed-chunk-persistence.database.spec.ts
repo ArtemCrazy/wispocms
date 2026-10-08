@@ -8,7 +8,7 @@
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 import {
   CmsRevisionEntity,
   CmsRevisionEventEntity,
@@ -102,6 +102,67 @@ describe('managed chunk disposable PostgreSQL guard', () => {
       expect(parsed.pathname).toBe('/' + EXPECTED_DATABASE);
     },
   );
+
+  it('preserves the primary failure while cleaning blockers, pending work, runners, and sources in order', async () => {
+    const order: string[] = [];
+    const primary = new Error('injected assertion failure');
+    const cleanupFailure = new Error('injected destroy failure');
+    let releasePending: (() => void) | undefined;
+    const pending = new Promise<void>((resolve) => {
+      releasePending = () => {
+        order.push('pending');
+        resolve();
+      };
+    });
+    const runner = {
+      isReleased: false,
+      isTransactionActive: true,
+      rollbackTransaction: jest.fn(() => {
+        order.push('rollback');
+        return Promise.resolve();
+      }),
+      release: jest.fn(() => {
+        order.push('release-runner');
+        return Promise.resolve();
+      }),
+    } as unknown as QueryRunner;
+    const source = {
+      isInitialized: true,
+      destroy: jest.fn(() => {
+        order.push('destroy-source');
+        return Promise.reject(cleanupFailure);
+      }),
+    } as unknown as DataSource;
+
+    let caught: unknown;
+    try {
+      await withDatabaseTestCleanup((cleanup) => {
+        cleanup.ownRunner(runner);
+        cleanup.ownSource(source);
+        void cleanup.track(pending);
+        cleanup.releaseBlocker(() => {
+          order.push('release-blocker');
+          releasePending?.();
+          return Promise.resolve();
+        });
+        return Promise.reject(primary);
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(primary);
+    expect(order).toEqual([
+      'release-blocker',
+      'pending',
+      'rollback',
+      'release-runner',
+      'destroy-source',
+    ]);
+    expect((primary as CleanupErrorCarrier).cleanupErrors).toEqual([
+      cleanupFailure,
+    ]);
+  });
 });
 
 const integrationEnvironmentPresent =
@@ -174,19 +235,193 @@ const servicesFor = (dataSource: DataSource) => {
   };
 };
 
+type CleanupAction = () => Promise<unknown>;
+type CleanupErrorCarrier = { cleanupErrors?: unknown[] };
+
+const cleanupFailure = (errors: unknown[]): Error =>
+  Object.assign(new Error('Database test cleanup failed'), {
+    cleanupErrors: errors,
+  });
+
+const attachCleanupErrors = (
+  primaryError: unknown,
+  cleanupErrors: unknown[],
+): void => {
+  if (
+    primaryError &&
+    (typeof primaryError === 'object' || typeof primaryError === 'function')
+  ) {
+    try {
+      Object.defineProperty(primaryError, 'cleanupErrors', {
+        configurable: true,
+        value: cleanupErrors,
+      });
+    } catch {
+      // The original error remains authoritative even when it is not extensible.
+    }
+  }
+};
+
+const runCleanupGroups = async (
+  groups: readonly (readonly CleanupAction[])[],
+  primaryError?: unknown,
+): Promise<void> => {
+  const cleanupErrors: unknown[] = [];
+  for (const group of groups) {
+    const results = await Promise.allSettled(
+      group.map(async (action) => action()),
+    );
+    for (const result of results) {
+      if (result.status === 'rejected') cleanupErrors.push(result.reason);
+    }
+  }
+  if (cleanupErrors.length === 0) return;
+  if (primaryError !== undefined) {
+    attachCleanupErrors(primaryError, cleanupErrors);
+    return;
+  }
+  throw cleanupFailure(cleanupErrors);
+};
+
+const destroySource = async (source: DataSource | undefined): Promise<void> => {
+  if (source?.isInitialized) await source.destroy();
+};
+
+const cleanupRunner = async (
+  runner: QueryRunner | undefined,
+): Promise<void> => {
+  if (!runner || runner.isReleased) return;
+  const cleanupErrors: unknown[] = [];
+  if (runner.isTransactionActive) {
+    try {
+      await runner.rollbackTransaction();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  try {
+    await runner.release();
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+  if (cleanupErrors.length > 0) throw cleanupFailure(cleanupErrors);
+};
+
+const initializeDataSourceSafely = async (
+  source: DataSource,
+  setup: (initialized: DataSource) => Promise<void>,
+): Promise<DataSource> => {
+  try {
+    await source.initialize();
+    await setup(source);
+    return source;
+  } catch (error) {
+    await runCleanupGroups([[() => destroySource(source)]], error);
+    throw error;
+  }
+};
+
 const createIndependentSource = async (
   databaseUrl: string,
-): Promise<DataSource> => {
-  const source = new DataSource({
-    ...createDataSourceOptions(),
-    url: databaseUrl,
-    migrationsRun: false,
-    logging: false,
-    extra: { max: 1 },
-  });
-  await source.initialize();
-  await source.query("SET statement_timeout = '15s'");
-  return source;
+  setup: (initialized: DataSource) => Promise<void> = async (initialized) => {
+    await initialized.query("SET statement_timeout = '15s'");
+  },
+): Promise<DataSource> =>
+  initializeDataSourceSafely(
+    new DataSource({
+      ...createDataSourceOptions(),
+      url: databaseUrl,
+      migrationsRun: false,
+      logging: false,
+      extra: { max: 1 },
+    }),
+    setup,
+  );
+
+class DatabaseTestCleanup {
+  private readonly sources: DataSource[] = [];
+  private readonly runners: QueryRunner[] = [];
+  private readonly pending: Promise<unknown>[] = [];
+  private readonly blockerReleases: CleanupAction[] = [];
+  private readonly afterPendingActions: CleanupAction[] = [];
+
+  async source(databaseUrl: string): Promise<DataSource> {
+    const source = await createIndependentSource(databaseUrl);
+    this.sources.push(source);
+    return source;
+  }
+
+  ownSource(source: DataSource): DataSource {
+    this.sources.push(source);
+    return source;
+  }
+
+  ownRunner(runner: QueryRunner): QueryRunner {
+    this.runners.push(runner);
+    return runner;
+  }
+
+  async runner(
+    source: DataSource,
+    isolation?: 'READ COMMITTED' | 'REPEATABLE READ',
+  ): Promise<QueryRunner> {
+    const runner = source.createQueryRunner();
+    this.runners.push(runner);
+    try {
+      await runner.connect();
+      await runner.startTransaction(isolation);
+      return runner;
+    } catch (error) {
+      await runCleanupGroups([[() => cleanupRunner(runner)]], error);
+      throw error;
+    }
+  }
+
+  track<T>(operation: Promise<T>): Promise<T> {
+    this.pending.push(operation);
+    void operation.catch(() => undefined);
+    return operation;
+  }
+
+  releaseBlocker(action: CleanupAction): void {
+    this.blockerReleases.push(action);
+  }
+
+  afterPending(action: CleanupAction): void {
+    this.afterPendingActions.push(action);
+  }
+
+  async cleanup(primaryError?: unknown): Promise<void> {
+    await runCleanupGroups(
+      [
+        this.blockerReleases,
+        [async () => void (await Promise.allSettled(this.pending))],
+        this.afterPendingActions,
+        [...this.runners]
+          .reverse()
+          .map((runner) => () => cleanupRunner(runner)),
+        [...this.sources]
+          .reverse()
+          .map((source) => () => destroySource(source)),
+      ],
+      primaryError,
+    );
+  }
+}
+
+const withDatabaseTestCleanup = async <T>(
+  work: (cleanup: DatabaseTestCleanup) => Promise<T>,
+): Promise<T> => {
+  const cleanup = new DatabaseTestCleanup();
+  let primaryError: unknown;
+  try {
+    return await work(cleanup);
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    await cleanup.cleanup(primaryError);
+  }
 };
 
 const seedAcceptanceFixture = async (
@@ -397,23 +632,25 @@ const applyFullLedgerToDatabase = async (
   const phase = async (
     selectedMigrations: typeof migrations,
     after?: (phaseSource: DataSource) => Promise<void>,
-  ) => {
-    const phaseSource = new DataSource({
-      ...options,
-      url: databaseUrl,
-      migrations: selectedMigrations,
-      migrationsRun: false,
-      logging: false,
-    });
-    await phaseSource.initialize();
-    try {
-      await phaseSource.query("SET statement_timeout = '20s'");
+  ) =>
+    withDatabaseTestCleanup(async (cleanup) => {
+      const phaseSource = cleanup.ownSource(
+        await initializeDataSourceSafely(
+          new DataSource({
+            ...options,
+            url: databaseUrl,
+            migrations: selectedMigrations,
+            migrationsRun: false,
+            logging: false,
+          }),
+          async (initialized) => {
+            await initialized.query("SET statement_timeout = '20s'");
+          },
+        ),
+      );
       await phaseSource.runMigrations({ transaction: 'all' });
       await after?.(phaseSource);
-    } finally {
-      await phaseSource.destroy();
-    }
-  };
+    });
   await phase(migrations.slice(0, seedBoundary), async (phaseSource) => {
     await phaseSource.query(
       `INSERT INTO workspaces (name, slug)
@@ -428,16 +665,23 @@ const applyFullLedgerToDatabase = async (
        WHERE status = 'draft'`,
     );
   });
-  const result = new DataSource({
-    ...options,
-    url: databaseUrl,
-    migrationsRun: false,
-    logging: false,
-  });
-  await result.initialize();
-  await result.query("SET statement_timeout = '20s'");
-  await result.runMigrations({ transaction: 'all' });
-  return result;
+  let result: DataSource | undefined;
+  try {
+    result = new DataSource({
+      ...options,
+      url: databaseUrl,
+      migrationsRun: false,
+      logging: false,
+    });
+    await initializeDataSourceSafely(result, async (initialized) => {
+      await initialized.query("SET statement_timeout = '20s'");
+    });
+    await result.runMigrations({ transaction: 'all' });
+    return result;
+  } catch (error) {
+    await runCleanupGroups([[() => destroySource(result)]], error);
+    throw error;
+  }
 };
 
 const disposableDatabaseUrl = (
@@ -474,16 +718,21 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     if (seedBoundary < 0)
       throw new Error('Armaturex ledger boundary is missing');
 
-    const bootstrap = new DataSource({
-      ...options,
-      url: databaseUrl.href,
-      migrations: migrations.slice(0, seedBoundary),
-      migrationsRun: false,
-      logging: false,
-    });
-    await bootstrap.initialize();
-    try {
-      await bootstrap.query("SET statement_timeout = '20s'");
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const bootstrap = cleanup.ownSource(
+        await initializeDataSourceSafely(
+          new DataSource({
+            ...options,
+            url: databaseUrl.href,
+            migrations: migrations.slice(0, seedBoundary),
+            migrationsRun: false,
+            logging: false,
+          }),
+          async (initialized) => {
+            await initialized.query("SET statement_timeout = '20s'");
+          },
+        ),
+      );
       const applied = await bootstrap.runMigrations({ transaction: 'all' });
       firstMigrationCount += applied.length;
       await bootstrap.query(
@@ -491,9 +740,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
          VALUES ('Disposable acceptance', 'crazy-studio')
          ON CONFLICT (slug) DO NOTHING`,
       );
-    } finally {
-      await bootstrap.destroy();
-    }
+    });
 
     const skinovaBoundary = migrations.findIndex(
       (migration) =>
@@ -502,16 +749,21 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     );
     if (skinovaBoundary < 0)
       throw new Error('Skinova ledger boundary is missing');
-    const legalBootstrap = new DataSource({
-      ...options,
-      url: databaseUrl.href,
-      migrations: migrations.slice(0, skinovaBoundary),
-      migrationsRun: false,
-      logging: false,
-    });
-    await legalBootstrap.initialize();
-    try {
-      await legalBootstrap.query("SET statement_timeout = '20s'");
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const legalBootstrap = cleanup.ownSource(
+        await initializeDataSourceSafely(
+          new DataSource({
+            ...options,
+            url: databaseUrl.href,
+            migrations: migrations.slice(0, skinovaBoundary),
+            migrationsRun: false,
+            logging: false,
+          }),
+          async (initialized) => {
+            await initialized.query("SET statement_timeout = '20s'");
+          },
+        ),
+      );
       const applied = await legalBootstrap.runMigrations({
         transaction: 'all',
       });
@@ -521,24 +773,28 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
          SET status = 'approved', approved_at = COALESCE(approved_at, now())
          WHERE status = 'draft'`,
       );
-    } finally {
-      await legalBootstrap.destroy();
-    }
-
-    source = new DataSource({
-      ...options,
-      url: databaseUrl.href,
-      migrationsRun: false,
-      logging: false,
     });
-    await source.initialize();
-    await source.query("SET statement_timeout = '20s'");
-    const applied = await source.runMigrations({ transaction: 'all' });
-    firstMigrationCount += applied.length;
+
+    try {
+      source = new DataSource({
+        ...options,
+        url: databaseUrl.href,
+        migrationsRun: false,
+        logging: false,
+      });
+      await initializeDataSourceSafely(source, async (initialized) => {
+        await initialized.query("SET statement_timeout = '20s'");
+      });
+      const applied = await source.runMigrations({ transaction: 'all' });
+      firstMigrationCount += applied.length;
+    } catch (error) {
+      await runCleanupGroups([[() => destroySource(source)]], error);
+      throw error;
+    }
   }, 120_000);
 
   afterAll(async () => {
-    if (source?.isInitialized) await source.destroy();
+    await runCleanupGroups([[() => destroySource(source)]]);
   });
 
   it('applies the complete ledger and makes a second migration run a no-op', async () => {
@@ -552,6 +808,28 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       'SELECT count(*)::int AS count FROM migrations',
     );
     expect(count).toBe(expectedLedgerCount);
+  });
+  it('destroys an initialized source when setup fails and leaves no backend', async () => {
+    const injected = new Error('injected source setup failure');
+    let failedPid: number | undefined;
+    await expect(
+      createIndependentSource(
+        process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
+        async (initialized) => {
+          await initialized.query("SET statement_timeout = '15s'");
+          [{ pg_backend_pid: failedPid }] = await initialized.query(
+            'SELECT pg_backend_pid()',
+          );
+          throw injected;
+        },
+      ),
+    ).rejects.toBe(injected);
+    expect(failedPid).toEqual(expect.any(Number));
+    expect(
+      await source.query(`SELECT pid FROM pg_stat_activity WHERE pid = $1`, [
+        failedPid,
+      ]),
+    ).toEqual([]);
   });
   it('keeps v1/v2 checks and rejects unsafe package/contract identities', async () => {
     const fixture = await seedAcceptanceFixture(source, 'checks');
@@ -627,28 +905,47 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
   it('registers opposite-order batches with observed overlapping lock waits and no partial rows', async () => {
     const fixture = await seedAcceptanceFixture(source, 'contracts-race');
     const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
-    const leftSource = await createIndependentSource(url);
-    const rightSource = await createIndependentSource(url);
-    const blocker = await createIndependentSource(url);
     const advisoryKey = 187600101;
     const triggerName = 'test_pause_contract_' + randomUUID().replace(/-/g, '');
     const functionName = triggerName + '_fn';
-    await source.query(
-      `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
-       BEGIN
-         IF NEW.template_package_id = '${fixture.packageId}'::uuid THEN
-           PERFORM pg_advisory_xact_lock(${advisoryKey});
-         END IF;
-         RETURN NEW;
-       END;
-       $$ LANGUAGE plpgsql`,
-    );
-    await source.query(
-      `CREATE TRIGGER ${triggerName}
-       BEFORE INSERT ON managed_chunk_contracts
-       FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
-    );
-    try {
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const leftSource = await cleanup.source(url);
+      const rightSource = await cleanup.source(url);
+      const blocker = await cleanup.source(url);
+      cleanup.releaseBlocker(async () => {
+        await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+      });
+      cleanup.afterPending(async () => {
+        await runCleanupGroups([
+          [
+            async () => {
+              await source.query(
+                `DROP TRIGGER IF EXISTS ${triggerName} ON managed_chunk_contracts`,
+              );
+            },
+          ],
+          [
+            async () => {
+              await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+            },
+          ],
+        ]);
+      });
+      await source.query(
+        `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+         BEGIN
+           IF NEW.template_package_id = '${fixture.packageId}'::uuid THEN
+             PERFORM pg_advisory_xact_lock(${advisoryKey});
+           END IF;
+           RETURN NEW;
+         END;
+         $$ LANGUAGE plpgsql`,
+      );
+      await source.query(
+        `CREATE TRIGGER ${triggerName}
+         BEFORE INSERT ON managed_chunk_contracts
+         FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
+      );
       await blocker.query('SELECT pg_advisory_lock($1)', [advisoryKey]);
       const [{ pg_backend_pid: leftPid }] = await leftSource.query(
         'SELECT pg_backend_pid()',
@@ -660,16 +957,20 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       const right = servicesFor(rightSource).repository;
       const a = managedDefinition('race-a');
       const b = managedDefinition('race-b');
-      const leftRegistration = left.registerContracts({
-        templatePackageId: fixture.packageId,
-        templatePackageVersionId: fixture.packageVersionId,
-        definitions: [a, b],
-      });
-      const rightRegistration = right.registerContracts({
-        templatePackageId: fixture.packageId,
-        templatePackageVersionId: fixture.packageVersionId,
-        definitions: [b, a],
-      });
+      const leftRegistration = cleanup.track(
+        left.registerContracts({
+          templatePackageId: fixture.packageId,
+          templatePackageVersionId: fixture.packageVersionId,
+          definitions: [a, b],
+        }),
+      );
+      const rightRegistration = cleanup.track(
+        right.registerContracts({
+          templatePackageId: fixture.packageId,
+          templatePackageVersionId: fixture.packageVersionId,
+          definitions: [b, a],
+        }),
+      );
       const leftWait = await observeLockWait(
         source,
         leftPid,
@@ -705,18 +1006,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         { definition_key: 'race-a', count: 1 },
         { definition_key: 'race-b', count: 1 },
       ]);
-    } finally {
-      await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
-      await source.query(
-        `DROP TRIGGER IF EXISTS ${triggerName} ON managed_chunk_contracts`,
-      );
-      await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
-      await Promise.all([
-        blocker.isInitialized ? blocker.destroy() : Promise.resolve(),
-        leftSource.isInitialized ? leftSource.destroy() : Promise.resolve(),
-        rightSource.isInitialized ? rightSource.destroy() : Promise.resolve(),
-      ]);
-    }
+    });
   }, 30_000);
   it('enforces tenant targets, atomic layout rollback, and draft/published inventory', async () => {
     const fixture = await seedAcceptanceFixture(source, 'tenant-layout');
@@ -901,15 +1191,35 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         actor: adminActor(fixture),
       });
       const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
-      const firstSource = await createIndependentSource(url);
-      const secondSource = await createIndependentSource(url);
-      const blocker = await createIndependentSource(url);
       const advisoryKey = kind === 'page' ? 187600102 : 187600103;
       const triggerName =
         'test_pause_layout_resource_' + randomUUID().replace(/-/g, '');
       const functionName = triggerName + '_fn';
-      await source.query(
-        `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+      await withDatabaseTestCleanup(async (cleanup) => {
+        const firstSource = await cleanup.source(url);
+        const secondSource = await cleanup.source(url);
+        const blocker = await cleanup.source(url);
+        cleanup.releaseBlocker(async () => {
+          await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+        });
+        cleanup.afterPending(async () => {
+          await runCleanupGroups([
+            [
+              async () => {
+                await source.query(
+                  `DROP TRIGGER IF EXISTS ${triggerName} ON cms_revision_resources`,
+                );
+              },
+            ],
+            [
+              async () => {
+                await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+              },
+            ],
+          ]);
+        });
+        await source.query(
+          `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
          BEGIN
            IF NEW.resource_type = 'chunk_layout'
              AND NEW.site_id = '${fixture.siteId}'::uuid THEN
@@ -918,13 +1228,12 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
            RETURN NEW;
          END;
          $$ LANGUAGE plpgsql`,
-      );
-      await source.query(
-        `CREATE TRIGGER ${triggerName}
+        );
+        await source.query(
+          `CREATE TRIGGER ${triggerName}
          BEFORE INSERT ON cms_revision_resources
          FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
-      );
-      try {
+        );
         await blocker.query('SELECT pg_advisory_lock($1)', [advisoryKey]);
         const [{ pg_backend_pid: firstPid }] = await firstSource.query(
           'SELECT pg_backend_pid()',
@@ -950,8 +1259,9 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           ],
           actor: adminActor(fixture),
         };
-        const firstSave =
-          servicesFor(firstSource).repository.saveLayoutDraft(input);
+        const firstSave = cleanup.track(
+          servicesFor(firstSource).repository.saveLayoutDraft(input),
+        );
         const firstWait = await observeLockWait(
           source,
           firstPid,
@@ -960,8 +1270,9 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         expect(firstWait.waitingLocks).toContain('advisory:ExclusiveLock');
         expect(firstWait.heldRelations).toContain('sites');
 
-        const secondSave =
-          servicesFor(secondSource).repository.saveLayoutDraft(input);
+        const secondSave = cleanup.track(
+          servicesFor(secondSource).repository.saveLayoutDraft(input),
+        );
         const secondWait = await observeLockWait(source, secondPid, '');
         expect(secondWait.heldRelations).toContain('sites');
         await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
@@ -1006,20 +1317,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           placements: 2,
           orphans: 0,
         });
-      } finally {
-        await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
-        await source.query(
-          `DROP TRIGGER IF EXISTS ${triggerName} ON cms_revision_resources`,
-        );
-        await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
-        await Promise.all([
-          blocker.isInitialized ? blocker.destroy() : Promise.resolve(),
-          firstSource.isInitialized ? firstSource.destroy() : Promise.resolve(),
-          secondSource.isInitialized
-            ? secondSource.destroy()
-            : Promise.resolve(),
-        ]);
-      }
+      });
     },
     30_000,
   );
@@ -1032,12 +1330,14 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       definitions: [managedDefinition('access-banner')],
     });
     const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
-    const assignmentSource = await createIndependentSource(url);
-    const writerSource = await createIndependentSource(url);
-    const assignment = assignmentSource.createQueryRunner();
-    await assignment.connect();
-    await assignment.startTransaction();
-    try {
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const assignmentSource = await cleanup.source(url);
+      const writerSource = await cleanup.source(url);
+      const assignment = await cleanup.runner(assignmentSource);
+      cleanup.releaseBlocker(async () => {
+        if (assignment.isTransactionActive)
+          await assignment.rollbackTransaction();
+      });
       await assignment.query("SET LOCAL statement_timeout = '15s'");
       await assignment.query(
         `DELETE FROM site_accesses WHERE user_id = $1 AND site_id = $2`,
@@ -1051,14 +1351,16 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       const [{ pg_backend_pid: writerPid }] = await writerSource.query(
         'SELECT pg_backend_pid()',
       );
-      const write = servicesFor(writerSource).repository.createInstanceDraft({
-        siteId: fixture.siteId,
-        displayName: 'After reassignment',
-        contractId: contract.id,
-        data: { headline: 'Allowed' },
-        sanitizerPolicyVersion: null,
-        actor: employeeActor(fixture),
-      });
+      const write = cleanup.track(
+        servicesFor(writerSource).repository.createInstanceDraft({
+          siteId: fixture.siteId,
+          displayName: 'After reassignment',
+          contractId: contract.id,
+          data: { headline: 'Allowed' },
+          sanitizerPolicyVersion: null,
+          actor: employeeActor(fixture),
+        }),
+      );
       const accessWait = await observeLockWait(
         source,
         writerPid,
@@ -1085,17 +1387,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           siteId: fixture.siteId,
         }),
       ).toBe(1);
-    } finally {
-      if (assignment.isTransactionActive)
-        await assignment.rollbackTransaction();
-      await assignment.release();
-      await Promise.all([
-        assignmentSource.isInitialized
-          ? assignmentSource.destroy()
-          : Promise.resolve(),
-        writerSource.isInitialized ? writerSource.destroy() : Promise.resolve(),
-      ]);
-    }
+    });
 
     const deniedFixture = await seedAcceptanceFixture(source, 'access-denied');
     const [deniedContract] = await servicesFor(
@@ -1105,12 +1397,14 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       templatePackageVersionId: deniedFixture.packageVersionId,
       definitions: [managedDefinition('denied-banner')],
     });
-    const denySource = await createIndependentSource(url);
-    const deniedWriter = await createIndependentSource(url);
-    const denyRunner = denySource.createQueryRunner();
-    await denyRunner.connect();
-    await denyRunner.startTransaction();
-    try {
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const denySource = await cleanup.source(url);
+      const deniedWriter = await cleanup.source(url);
+      const denyRunner = await cleanup.runner(denySource);
+      cleanup.releaseBlocker(async () => {
+        if (denyRunner.isTransactionActive)
+          await denyRunner.rollbackTransaction();
+      });
       await denyRunner.query(
         `DELETE FROM site_accesses WHERE user_id = $1 AND site_id = $2`,
         [deniedFixture.userId, deniedFixture.siteId],
@@ -1124,14 +1418,16 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           siteId: deniedFixture.siteId,
           resourceType: 'chunk_instance',
         });
-      const denied = servicesFor(deniedWriter).repository.createInstanceDraft({
-        siteId: deniedFixture.siteId,
-        displayName: 'Denied',
-        contractId: deniedContract.id,
-        data: { headline: 'Denied' },
-        sanitizerPolicyVersion: null,
-        actor: employeeActor(deniedFixture),
-      });
+      const denied = cleanup.track(
+        servicesFor(deniedWriter).repository.createInstanceDraft({
+          siteId: deniedFixture.siteId,
+          displayName: 'Denied',
+          contractId: deniedContract.id,
+          data: { headline: 'Denied' },
+          sanitizerPolicyVersion: null,
+          actor: employeeActor(deniedFixture),
+        }),
+      );
       await waitForLockWait(source, deniedPid);
       await denyRunner.commitTransaction();
       await expect(denied).rejects.toBeInstanceOf(ForbiddenException);
@@ -1141,17 +1437,8 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           resourceType: 'chunk_instance',
         }),
       ).toBe(before);
-    } finally {
-      if (denyRunner.isTransactionActive)
-        await denyRunner.rollbackTransaction();
-      await denyRunner.release();
-      await Promise.all([
-        denySource.isInitialized ? denySource.destroy() : Promise.resolve(),
-        deniedWriter.isInitialized ? deniedWriter.destroy() : Promise.resolve(),
-      ]);
-    }
+    });
   }, 30_000);
-
   it('serializes package activation with instance creation in both lock orders', async () => {
     const fixture = await seedAcceptanceFixture(source, 'package-race');
     const [contract] = await servicesFor(source).repository.registerContracts({
@@ -1160,53 +1447,74 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       definitions: [managedDefinition('package-banner')],
     });
     const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
-    const blocker = await createIndependentSource(url);
-    const creatorSource = await createIndependentSource(url);
-    const activationSource = await createIndependentSource(url);
     const advisoryKey = 187600001;
     const triggerName =
       'test_pause_chunk_instance_' + randomUUID().replace(/-/g, '');
     const functionName = triggerName + '_fn';
-    await source.query(
-      `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
-       BEGIN
-         IF NEW.resource_type = 'chunk_instance' AND NEW.site_id = '${fixture.siteId}'::uuid THEN
-           PERFORM pg_advisory_xact_lock(${advisoryKey});
-         END IF;
-         RETURN NEW;
-       END;
-       $$ LANGUAGE plpgsql`,
-    );
-    await source.query(
-      `CREATE TRIGGER ${triggerName}
-       BEFORE INSERT ON cms_revision_resources
-       FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
-    );
-    try {
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const blocker = await cleanup.source(url);
+      const creatorSource = await cleanup.source(url);
+      const activationSource = await cleanup.source(url);
+      cleanup.releaseBlocker(async () => {
+        await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+      });
+      cleanup.afterPending(async () => {
+        await runCleanupGroups([
+          [
+            async () => {
+              await source.query(
+                `DROP TRIGGER IF EXISTS ${triggerName} ON cms_revision_resources`,
+              );
+            },
+          ],
+          [
+            async () => {
+              await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
+            },
+          ],
+        ]);
+      });
+      await source.query(
+        `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+         BEGIN
+           IF NEW.resource_type = 'chunk_instance' AND NEW.site_id = '${fixture.siteId}'::uuid THEN
+             PERFORM pg_advisory_xact_lock(${advisoryKey});
+           END IF;
+           RETURN NEW;
+         END;
+         $$ LANGUAGE plpgsql`,
+      );
+      await source.query(
+        `CREATE TRIGGER ${triggerName}
+         BEFORE INSERT ON cms_revision_resources
+         FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
+      );
       await blocker.query('SELECT pg_advisory_lock($1)', [advisoryKey]);
       const [{ pg_backend_pid: creatorPid }] = await creatorSource.query(
         'SELECT pg_backend_pid()',
       );
-      const creation = servicesFor(
-        creatorSource,
-      ).repository.createInstanceDraft({
-        siteId: fixture.siteId,
-        displayName: 'Before switch',
-        contractId: contract.id,
-        data: { headline: 'Before' },
-        sanitizerPolicyVersion: null,
-        actor: adminActor(fixture),
-      });
+      const creation = cleanup.track(
+        servicesFor(creatorSource).repository.createInstanceDraft({
+          siteId: fixture.siteId,
+          displayName: 'Before switch',
+          contractId: contract.id,
+          data: { headline: 'Before' },
+          sanitizerPolicyVersion: null,
+          actor: adminActor(fixture),
+        }),
+      );
       await waitForLockWait(source, creatorPid);
 
-      const activation = activationSource.createQueryRunner();
-      await activation.connect();
-      await activation.startTransaction();
-      try {
-        const [{ pg_backend_pid: activationPid }] = (await activation.query(
-          'SELECT pg_backend_pid()',
-        )) as Array<{ pg_backend_pid: number }>;
-        const switchPackage = activation.query(
+      const activation = await cleanup.runner(activationSource);
+      cleanup.releaseBlocker(async () => {
+        if (activation.isTransactionActive)
+          await activation.rollbackTransaction();
+      });
+      const [{ pg_backend_pid: activationPid }] = (await activation.query(
+        'SELECT pg_backend_pid()',
+      )) as Array<{ pg_backend_pid: number }>;
+      const switchPackage = cleanup.track(
+        activation.query(
           `UPDATE sites
            SET template_package_id = $1, current_template_package_version_id = $2
            WHERE id = $3`,
@@ -1215,25 +1523,20 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
             fixture.otherPackageVersionId,
             fixture.siteId,
           ],
-        );
-        await waitForLockWait(source, activationPid);
-        await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
-        const created = await creation;
-        await switchPackage;
-        await activation.commitTransaction();
-        expect(
-          await source
-            .getRepository(ManagedChunkInstanceRevisionEntity)
-            .countBy({
-              instanceId: created.instanceId,
-              contractId: contract.id,
-            }),
-        ).toBe(1);
-      } finally {
-        if (activation.isTransactionActive)
-          await activation.rollbackTransaction();
-        await activation.release();
-      }
+        ),
+      );
+      await waitForLockWait(source, activationPid);
+      await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+      const created = await creation;
+      await switchPackage;
+      await activation.commitTransaction();
+      expect(
+        await source.getRepository(ManagedChunkInstanceRevisionEntity).countBy({
+          instanceId: created.instanceId,
+          contractId: contract.id,
+        }),
+      ).toBe(1);
+      await cleanupRunner(activation);
 
       await source.query(
         `UPDATE sites
@@ -1241,69 +1544,44 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
          WHERE id = $3`,
         [fixture.packageId, fixture.packageVersionId, fixture.siteId],
       );
-      const switchFirst = activationSource.createQueryRunner();
-      await switchFirst.connect();
-      await switchFirst.startTransaction();
-      try {
-        await switchFirst.query(
-          `UPDATE sites
-           SET template_package_id = $1, current_template_package_version_id = $2
-           WHERE id = $3`,
-          [
-            fixture.otherPackageId,
-            fixture.otherPackageVersionId,
-            fixture.siteId,
-          ],
-        );
-        const [{ pg_backend_pid: secondCreatorPid }] =
-          await creatorSource.query('SELECT pg_backend_pid()');
-        const beforeResources = await source
-          .getRepository(CmsRevisionResourceEntity)
-          .countBy({ siteId: fixture.siteId, resourceType: 'chunk_instance' });
-        const rejectedCreation = servicesFor(
-          creatorSource,
-        ).repository.createInstanceDraft({
+      const switchFirst = await cleanup.runner(activationSource);
+      cleanup.releaseBlocker(async () => {
+        if (switchFirst.isTransactionActive)
+          await switchFirst.rollbackTransaction();
+      });
+      await switchFirst.query(
+        `UPDATE sites
+         SET template_package_id = $1, current_template_package_version_id = $2
+         WHERE id = $3`,
+        [fixture.otherPackageId, fixture.otherPackageVersionId, fixture.siteId],
+      );
+      const [{ pg_backend_pid: secondCreatorPid }] = await creatorSource.query(
+        'SELECT pg_backend_pid()',
+      );
+      const beforeResources = await source
+        .getRepository(CmsRevisionResourceEntity)
+        .countBy({ siteId: fixture.siteId, resourceType: 'chunk_instance' });
+      const rejectedCreation = cleanup.track(
+        servicesFor(creatorSource).repository.createInstanceDraft({
           siteId: fixture.siteId,
           displayName: 'After switch',
           contractId: contract.id,
           data: { headline: 'After' },
           sanitizerPolicyVersion: null,
           actor: adminActor(fixture),
-        });
-        await waitForLockWait(source, secondCreatorPid);
-        await switchFirst.commitTransaction();
-        await expect(rejectedCreation).rejects.toBeInstanceOf(
-          NotFoundException,
-        );
-        expect(
-          await source.getRepository(CmsRevisionResourceEntity).countBy({
-            siteId: fixture.siteId,
-            resourceType: 'chunk_instance',
-          }),
-        ).toBe(beforeResources);
-      } finally {
-        if (switchFirst.isTransactionActive)
-          await switchFirst.rollbackTransaction();
-        await switchFirst.release();
-      }
-    } finally {
-      await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
-      await source.query(
-        `DROP TRIGGER IF EXISTS ${triggerName} ON cms_revision_resources`,
+        }),
       );
-      await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
-      await Promise.all([
-        blocker.isInitialized ? blocker.destroy() : Promise.resolve(),
-        creatorSource.isInitialized
-          ? creatorSource.destroy()
-          : Promise.resolve(),
-        activationSource.isInitialized
-          ? activationSource.destroy()
-          : Promise.resolve(),
-      ]);
-    }
+      await waitForLockWait(source, secondCreatorPid);
+      await switchFirst.commitTransaction();
+      await expect(rejectedCreation).rejects.toBeInstanceOf(NotFoundException);
+      expect(
+        await source.getRepository(CmsRevisionResourceEntity).countBy({
+          siteId: fixture.siteId,
+          resourceType: 'chunk_instance',
+        }),
+      ).toBe(beforeResources);
+    });
   }, 30_000);
-
   it('rolls back invalid managed lifecycle prepares and injected restore copies', async () => {
     const fixture = await seedAcceptanceFixture(source, 'lifecycle-invalid');
     const { repository, revisions } = servicesFor(source);
@@ -1760,13 +2038,14 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         }),
       };
       const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
-      const leftSource = await createIndependentSource(url);
-      const rightSource = await createIndependentSource(url);
-      const blockerSource = await createIndependentSource(url);
-      const blocker = blockerSource.createQueryRunner();
-      await blocker.connect();
-      await blocker.startTransaction();
-      try {
+      await withDatabaseTestCleanup(async (cleanup) => {
+        const leftSource = await cleanup.source(url);
+        const rightSource = await cleanup.source(url);
+        const blockerSource = await cleanup.source(url);
+        const blocker = await cleanup.runner(blockerSource);
+        cleanup.releaseBlocker(async () => {
+          if (blocker.isTransactionActive) await blocker.rollbackTransaction();
+        });
         await blocker.query(
           `SELECT id FROM cms_revision_resources WHERE id = $1 FOR UPDATE`,
           [resource.id],
@@ -1789,8 +2068,8 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
             ? candidate.approveInstanceRevision(input)
             : candidate.publishInstanceRevision(input);
         };
-        const leftTransition = invoke(leftSource);
-        const rightTransition = invoke(rightSource);
+        const leftTransition = cleanup.track(invoke(leftSource));
+        const rightTransition = cleanup.track(invoke(rightSource));
         const leftWait = await observeLockWait(
           source,
           leftPid,
@@ -1859,17 +2138,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           ...stateBefore,
           events: stateBefore.events + 1,
         });
-      } finally {
-        if (blocker.isTransactionActive) await blocker.rollbackTransaction();
-        await blocker.release();
-        await Promise.all([
-          blockerSource.isInitialized
-            ? blockerSource.destroy()
-            : Promise.resolve(),
-          leftSource.isInitialized ? leftSource.destroy() : Promise.resolve(),
-          rightSource.isInitialized ? rightSource.destroy() : Promise.resolve(),
-        ]);
-      }
+      });
     },
     30_000,
   );
@@ -1890,12 +2159,14 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       actor: adminActor(fixture),
     });
     const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
-    const assignmentSource = await createIndependentSource(url);
-    const layoutSource = await createIndependentSource(url);
-    const assignment = assignmentSource.createQueryRunner();
-    await assignment.connect();
-    await assignment.startTransaction();
-    try {
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const assignmentSource = await cleanup.source(url);
+      const layoutSource = await cleanup.source(url);
+      const assignment = await cleanup.runner(assignmentSource);
+      cleanup.releaseBlocker(async () => {
+        if (assignment.isTransactionActive)
+          await assignment.rollbackTransaction();
+      });
       await assignment.query(
         `DELETE FROM site_accesses WHERE user_id = $1 AND site_id = $2`,
         [fixture.userId, fixture.siteId],
@@ -1908,17 +2179,19 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       const [{ pg_backend_pid: layoutPid }] = await layoutSource.query(
         'SELECT pg_backend_pid()',
       );
-      const save = servicesFor(layoutSource).repository.saveLayoutDraft({
-        siteId: fixture.siteId,
-        target: { kind: 'page', pageId: fixture.pageId },
-        templateKey: 'home',
-        templateVersion: '1',
-        expectedDraftRevisionId: null,
-        placements: [
-          { slotKey: 'hero', position: 0, instanceId: instance.instanceId },
-        ],
-        actor: employeeActor(fixture),
-      });
+      const save = cleanup.track(
+        servicesFor(layoutSource).repository.saveLayoutDraft({
+          siteId: fixture.siteId,
+          target: { kind: 'page', pageId: fixture.pageId },
+          templateKey: 'home',
+          templateVersion: '1',
+          expectedDraftRevisionId: null,
+          placements: [
+            { slotKey: 'hero', position: 0, instanceId: instance.instanceId },
+          ],
+          actor: employeeActor(fixture),
+        }),
+      );
       const accessWait = await observeLockWait(
         source,
         layoutPid,
@@ -1945,17 +2218,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       await assignment.commitTransaction();
       const layout = await save;
       expect(layout.versionNumber).toBe(1);
-    } finally {
-      if (assignment.isTransactionActive)
-        await assignment.rollbackTransaction();
-      await assignment.release();
-      await Promise.all([
-        assignmentSource.isInitialized
-          ? assignmentSource.destroy()
-          : Promise.resolve(),
-        layoutSource.isInitialized ? layoutSource.destroy() : Promise.resolve(),
-      ]);
-    }
+    });
   }, 30_000);
 
   it.each(['instance', 'layout'] as const)(
@@ -2016,63 +2279,59 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           resourceType,
           entityId,
         });
-      const blockers = [] as ReturnType<DataSource['createQueryRunner']>[];
-      const block = async (sql: string, parameters: unknown[] = []) => {
-        const runner = source.createQueryRunner();
-        blockers.push(runner);
-        await runner.connect();
-        await runner.startTransaction();
-        await runner.query("SET LOCAL statement_timeout = '15s'");
-        await runner.query(sql, parameters);
-        return runner;
-      };
-      const release = async (
-        runner: ReturnType<DataSource['createQueryRunner']>,
-      ) => {
-        if (runner.isTransactionActive) await runner.rollbackTransaction();
-      };
+      await withDatabaseTestCleanup(async (cleanup) => {
+        const block = async (sql: string, parameters: unknown[] = []) => {
+          const runner = await cleanup.runner(source);
+          cleanup.releaseBlocker(async () => {
+            if (runner.isTransactionActive) await runner.rollbackTransaction();
+          });
+          await runner.query("SET LOCAL statement_timeout = '15s'");
+          await runner.query(sql, parameters);
+          return runner;
+        };
+        const release = async (runner: QueryRunner) => {
+          if (runner.isTransactionActive) await runner.rollbackTransaction();
+        };
 
-      const accessBlocker = await block(
-        `SELECT id FROM site_accesses
+        const accessBlocker = await block(
+          `SELECT id FROM site_accesses
          WHERE user_id = $1 AND site_id = $2 FOR UPDATE`,
-        [fixture.userId, fixture.siteId],
-      );
-      const siteBlocker = await block(
-        `SELECT id FROM sites WHERE id = $1 FOR UPDATE`,
-        [fixture.siteId],
-      );
-      const ownerBlocker = await block(
-        `SELECT id FROM ${ownerTable} WHERE id = $1 FOR UPDATE`,
-        [entityId],
-      );
-      const resourceBlocker = await block(
-        `SELECT id FROM cms_revision_resources WHERE id = $1 FOR UPDATE`,
-        [resource.id],
-      );
-      const revisionBlocker = await block(
-        `SELECT id FROM cms_revisions WHERE id = $1 FOR UPDATE`,
-        [revisionId],
-      );
-      const typedBlocker =
-        kind === 'instance'
-          ? await block(
-              `SELECT revision_id FROM managed_chunk_instance_revisions
+          [fixture.userId, fixture.siteId],
+        );
+        const siteBlocker = await block(
+          `SELECT id FROM sites WHERE id = $1 FOR UPDATE`,
+          [fixture.siteId],
+        );
+        const ownerBlocker = await block(
+          `SELECT id FROM ${ownerTable} WHERE id = $1 FOR UPDATE`,
+          [entityId],
+        );
+        const resourceBlocker = await block(
+          `SELECT id FROM cms_revision_resources WHERE id = $1 FOR UPDATE`,
+          [resource.id],
+        );
+        const revisionBlocker = await block(
+          `SELECT id FROM cms_revisions WHERE id = $1 FOR UPDATE`,
+          [revisionId],
+        );
+        const typedBlocker =
+          kind === 'instance'
+            ? await block(
+                `SELECT revision_id FROM managed_chunk_instance_revisions
                WHERE revision_id = $1 FOR UPDATE`,
-              [revisionId],
-            )
-          : await block(
-              `LOCK TABLE managed_chunk_placements IN ACCESS EXCLUSIVE MODE`,
-            );
-      const writerSource = await createIndependentSource(
-        process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
-      );
-      let restore: Promise<{ id: string; versionNumber: number }> | undefined;
-      try {
+                [revisionId],
+              )
+            : await block(
+                `LOCK TABLE managed_chunk_placements IN ACCESS EXCLUSIVE MODE`,
+              );
+        const writerSource = await cleanup.source(
+          process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
+        );
         const [{ pg_backend_pid: writerPid }] = await writerSource.query(
           'SELECT pg_backend_pid()',
         );
         const writerRepository = servicesFor(writerSource).repository;
-        restore =
+        const restore = cleanup.track(
           kind === 'instance'
             ? writerRepository.restoreInstanceRevision({
                 siteId: fixture.siteId,
@@ -2087,7 +2346,8 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
                 sourceRevisionId: layout.revisionId,
                 expectedDraftRevisionId: layout.revisionId,
                 actor: employeeActor(fixture),
-              });
+              }),
+        );
 
         const accessWait = await observeLockWait(
           source,
@@ -2222,14 +2482,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
             },
           ]);
         }
-      } finally {
-        for (const runner of blockers.reverse()) {
-          if (runner.isTransactionActive) await runner.rollbackTransaction();
-          if (!runner.isReleased) await runner.release();
-        }
-        await restore?.catch(() => undefined);
-        if (writerSource.isInitialized) await writerSource.destroy();
-      }
+      });
     },
     45_000,
   );
@@ -2286,17 +2539,15 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         work: (manager: EntityManager) => Promise<T>,
       ): Promise<T> => {
         expect(isolation).toBe('REPEATABLE READ');
-        const runner = source.createQueryRunner();
-        await runner.connect();
-        await runner.startTransaction('REPEATABLE READ');
-        const originalQuery = runner.manager.query.bind(runner.manager);
-        runner.manager.query = async (
-          ...args: Parameters<EntityManager['query']>
-        ) => {
-          if (!firstManagerCommand) firstManagerCommand = String(args[0]);
-          return originalQuery(...args);
-        };
-        try {
+        return withDatabaseTestCleanup(async (cleanup) => {
+          const runner = await cleanup.runner(source, 'REPEATABLE READ');
+          const originalQuery = runner.manager.query.bind(runner.manager);
+          runner.manager.query = async (
+            ...args: Parameters<EntityManager['query']>
+          ) => {
+            if (!firstManagerCommand) firstManagerCommand = String(args[0]);
+            return originalQuery(...args);
+          };
           const value = await work(runner.manager);
           try {
             await originalQuery(`UPDATE sites SET name = name WHERE id = $1`, [
@@ -2307,10 +2558,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           }
           await runner.rollbackTransaction();
           return value;
-        } finally {
-          if (runner.isTransactionActive) await runner.rollbackTransaction();
-          await runner.release();
-        }
+        });
       },
     } as unknown as DataSource;
     const readOnlyRepository = new ManagedChunkPersistenceRepository(
@@ -2326,16 +2574,17 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     expect(readOnlySqlState).toBe('25006');
     expect(readOnlyInventory.placements).toHaveLength(2);
 
-    const repeatableSource = await createIndependentSource(
-      process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
-    );
-    const writerSource = await createIndependentSource(
-      process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
-    );
-    const snapshotRunner = repeatableSource.createQueryRunner();
-    await snapshotRunner.connect();
-    await snapshotRunner.startTransaction('REPEATABLE READ');
-    try {
+    await withDatabaseTestCleanup(async (cleanup) => {
+      const repeatableSource = await cleanup.source(
+        process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
+      );
+      const writerSource = await cleanup.source(
+        process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
+      );
+      const snapshotRunner = await cleanup.runner(
+        repeatableSource,
+        'REPEATABLE READ',
+      );
       await snapshotRunner.query(`SELECT id FROM sites WHERE id = $1`, [
         fixture.siteId,
       ]);
@@ -2466,17 +2715,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           templateVersion: '1',
         }),
       ]);
-    } finally {
-      if (snapshotRunner.isTransactionActive)
-        await snapshotRunner.rollbackTransaction();
-      await snapshotRunner.release();
-      await Promise.all([
-        repeatableSource.isInitialized
-          ? repeatableSource.destroy()
-          : Promise.resolve(),
-        writerSource.isInitialized ? writerSource.destroy() : Promise.resolve(),
-      ]);
-    }
+    });
 
     const originalName = (
       await source
@@ -2853,14 +3092,21 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     const baseUrl = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
     const adminUrl = new URL(baseUrl);
     adminUrl.pathname = '/postgres';
-    const admin = await createIndependentSource(adminUrl.href);
     const safeName =
       'wispo_managed_chunks_phase2_test_safe_' +
       randomUUID().replace(/-/g, '').slice(0, 12);
     const guardedName =
       'wispo_managed_chunks_phase2_test_guard_' +
       randomUUID().replace(/-/g, '').slice(0, 12);
+    let admin: DataSource | undefined;
+    let safeSource: DataSource | undefined;
+    let guardedSource: DataSource | undefined;
+    let guardWriter: DataSource | undefined;
+    let locker: QueryRunner | undefined;
+    let insertV2: Promise<unknown> | undefined;
+    let primaryError: unknown;
     const cleanupDatabase = async (databaseName: string) => {
+      if (!admin?.isInitialized) return;
       await admin.query(
         `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
          WHERE datname = $1 AND pid <> pg_backend_pid()`,
@@ -2868,10 +3114,8 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       );
       await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
     };
-    let safeSource: DataSource | undefined;
-    let guardedSource: DataSource | undefined;
-    let guardWriter: DataSource | undefined;
     try {
+      admin = await createIndependentSource(adminUrl.href);
       await admin.query(`CREATE DATABASE "${safeName}"`);
       safeSource = await applyFullLedgerToDatabase(
         disposableDatabaseUrl(baseUrl, safeName),
@@ -2924,12 +3168,16 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
          VALUES ($1, $2, 'Down guard', 'media', 'https://example.test/down.git')`,
         [packageId, 'down-' + randomUUID().slice(0, 8)],
       );
-      const locker = guardedSource.createQueryRunner();
-      await locker.connect();
-      await locker.startTransaction();
+      locker = guardedSource.createQueryRunner();
       try {
-        await locker.query(
-          `LOCK TABLE
+        await locker.connect();
+        await locker.startTransaction();
+      } catch (error) {
+        await runCleanupGroups([[() => cleanupRunner(locker)]], error);
+        throw error;
+      }
+      await locker.query(
+        `LOCK TABLE
             template_package_versions,
             cms_revision_resources,
             managed_chunk_contracts,
@@ -2953,30 +3201,26 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
              THEN RAISE EXCEPTION 'unexpected populated guard';
              END IF;
            END $$`,
-        );
-        guardWriter = await createIndependentSource(
-          disposableDatabaseUrl(baseUrl, guardedName),
-        );
-        const [{ pg_backend_pid: writerPid }] = await guardWriter.query(
-          'SELECT pg_backend_pid()',
-        );
-        const insertV2 = guardWriter.query(
-          `INSERT INTO template_package_versions
+      );
+      guardWriter = await createIndependentSource(
+        disposableDatabaseUrl(baseUrl, guardedName),
+      );
+      const [{ pg_backend_pid: writerPid }] = await guardWriter.query(
+        'SELECT pg_backend_pid()',
+      );
+      insertV2 = guardWriter.query(
+        `INSERT INTO template_package_versions
             (template_package_id, package_version, source_revision,
              release_digest, artifact_digest, manifest_digest,
              manifest_version, manifest, cms_api_min_schema_version,
              cms_api_max_schema_version, built_at, runtime_mode, runtime_url)
            VALUES ($1, '2', 'x', 'x', NULL, 'x', 2, '{}'::jsonb,
              '1', NULL, now(), 'embedded-next', NULL)`,
-          [packageId],
-        );
-        await waitForLockWait(source, writerPid);
-        await locker.rollbackTransaction();
-        await insertV2;
-      } finally {
-        if (locker.isTransactionActive) await locker.rollbackTransaction();
-        await locker.release();
-      }
+        [packageId],
+      );
+      await waitForLockWait(source, writerPid);
+      await locker.rollbackTransaction();
+      await insertV2;
       await expect(
         guardedSource.undoLastMigration({ transaction: 'all' }),
       ).rejects.toThrow(
@@ -3060,13 +3304,34 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       expect(triggers.map(({ tgname }) => tgname)).toEqual(
         [...requiredTriggers].sort(),
       );
+    } catch (error) {
+      primaryError = error;
+      throw error;
     } finally {
-      if (guardWriter?.isInitialized) await guardWriter.destroy();
-      if (safeSource?.isInitialized) await safeSource.destroy();
-      if (guardedSource?.isInitialized) await guardedSource.destroy();
-      await cleanupDatabase(safeName);
-      await cleanupDatabase(guardedName);
-      await admin.destroy();
+      await runCleanupGroups(
+        [
+          [
+            async () => {
+              if (locker?.isTransactionActive)
+                await locker.rollbackTransaction();
+            },
+          ],
+          [
+            async () => {
+              if (insertV2) await Promise.allSettled([insertV2]);
+            },
+          ],
+          [() => cleanupRunner(locker)],
+          [
+            () => destroySource(guardWriter),
+            () => destroySource(safeSource),
+            () => destroySource(guardedSource),
+          ],
+          [() => cleanupDatabase(safeName), () => cleanupDatabase(guardedName)],
+          [() => destroySource(admin)],
+        ],
+        primaryError,
+      );
     }
   }, 120_000);
 });

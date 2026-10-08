@@ -3116,8 +3116,8 @@
 
 ### 2026-10-08 · Phase 2 / Task 7: disposable PostgreSQL acceptance
 
-- Статус: **Готово, не выложено; остаётся cleanup-замечание по четырём
-  anonymous Docker volumes**. Владелец: Роман / Codex; ветка
+- Статус: **Готово к проверке после exceptional-path cleanup review; остаётся
+  cleanup-замечание по четырём ранее созданным anonymous Docker volumes**. Владелец: Роман / Codex; ветка
   `codex/managed-chunks-sdk-v1`.
 - Задача: добавлен fail-closed real-PostgreSQL acceptance suite полного migration
   ledger и tenant/FK/trigger/rollback/lock/concurrency контрактов managed chunks.
@@ -3127,8 +3127,8 @@
   unit specs repository/service, `apps/api/src/content/cms-revisions.service.ts`
   и эта запись. Применённые migrations, entities и repository не менялись.
 - Guard TDD: исходный RED — 1 suite, 10 ожидаемых failures на отсутствующей
-  проверке. Финальный прогон без env — 1 suite, 11 tests PASS и 19 integration
-  cases SKIP. Guard принимает только `postgres`/`postgresql`, exact
+  проверке. Финальный прогон без env с --detectOpenHandles — 1 suite, 12 tests
+  PASS и 20 integration cases SKIP. Guard принимает только `postgres`/`postgresql`, exact
   `127.0.0.1:55440`, pathname и opt-in
   `wispo_managed_chunks_phase2_test`, без query/hash; небезопасно заполненный env
   падает, а не пропускает suite.
@@ -3140,7 +3140,17 @@
   продолжают работу. Старые unit expectations сначала дали RED: 3 failures / 206
   passed, затем зафиксировали два одинаковых access lookup до любых target/write;
   focused GREEN — 7 suites / 209 tests.
-- БД — схема/данные/формат: полный ledger из 52 migrations применялся только к
+- Exceptional-path cleanup review: source initialization и session `SET` теперь
+  находятся в одном защитном `try`; setup/bootstrap/migration failure уничтожает
+  уже инициализированный source до rethrow. Все scenario-local DataSource,
+  QueryRunner и background promises регистрируются внутри общего cleanup scope.
+  Cleanup последовательно освобождает blocker/advisory locks, дожидается через
+  `Promise.allSettled` всех запущенных операций, затем независимо rollback/release
+  runners и destroy sources; cleanup errors прикрепляются к исходной ошибке и не
+  маскируют её. Unit instrumentation с injected assertion/destroy failure
+  подтверждает порядок `blocker → pending → rollback → runner → source` и
+  сохранение исходной ошибки; real PostgreSQL injected setup failure подтверждает
+  отсутствие backend по сохранённому PID.- БД — схема/данные/формат: полный ledger из 52 migrations применялся только к
   временной БД `wispo_managed_chunks_phase2_test` в exact container
   `wispo-managed-chunks-phase2-test`; исторические seed prerequisites
   (`crazy-studio` workspace и approved privacy model) создавались только
@@ -3149,7 +3159,8 @@
   временными; общая/рабочая БД, production schema, формат сохраняемых значений,
   backfill и ручные данные не менялись.
 - Real PostgreSQL acceptance: два финальных последовательных прогона текущего
-  дерева на одной disposable БД — каждый 1 suite / 30 tests PASS (30/30).
+  дерева после последнего cleanup-изменения на одной disposable БД — каждый
+  1 suite / 32 tests PASS (32/32).
   Проверены полный ledger и повторный no-op; v1/v2 checks; idempotent/conflicting
   contracts; opposite-order registration с advisory barrier и одновременно
   наблюдаемыми `pg_locks` waits без `40P01`, duplicates или partials; прямой
@@ -3184,17 +3195,19 @@
   таблицы, exact v2/type/managed checks, identity и immutable triggers. Owner
   identity SQLSTATE `55000`, разрешённые mutable поля и actor `ON DELETE SET NULL`
   также проверены.
-- Финальная проверка: no-env guard — 11 PASS / 19 SKIP; PostgreSQL suite дважды
-  подряд — 30/30 PASS; focused Phase 1–2 — 7 suites / 209 tests PASS; API
+- Финальная проверка: no-env guard с --detectOpenHandles — 12 PASS / 20 SKIP;
+  PostgreSQL suite дважды подряд после последнего изменения — 32/32 PASS;
+  focused Phase 1–2 — 7 suites / 209 tests PASS; API
   production build PASS; targeted ESLint и Prettier PASS; `git diff --check`
   PASS. Statement/test timeouts были failure, не skip; DataSource/query runners
   закрывались в `finally`.
 - Cleanup выполнен до закрытия записи: в финальном цикле exact container
-  `5e36cfd2e186…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
-  `127.0.0.1:55440`; затем удалён только
-  `wispo-managed-chunks-phase2-test`. После удаления exact container отсутствует,
-  порт `55440` свободен, оба opt-in env отсутствуют. Рабочие
-  `wispo-cms-local-*` containers read-only сверены по тем же ID и не менялись.
+  `f742bcbf9e89…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
+  `127.0.0.1:55440`, с `tmpfs:/var/lib/postgresql` и без volume mounts; затем
+  удалён только `wispo-managed-chunks-phase2-test`. После удаления exact container
+  отсутствует, порт `55440` свободен, оба opt-in env отсутствуют. Все семь
+  `wispo-cms-local-*` container ID/name read-only сверены и не менялись. Набор
+  Docker volumes при tmpfs-прогоне не менялся, новый anonymous volume не создан.
   Anonymous volumes
   `6353b59d0c5ba9ab17c4d01abb2f153397227d1976a35e67ba54c5ba2ae3872a`,
   `bde1d673395eb7f8dcb84bad994c86a2826e178950bd7a9d89deb5fb69bdc8f1`,
