@@ -3116,8 +3116,8 @@
 
 ### 2026-10-08 · Phase 2 / Task 7: disposable PostgreSQL acceptance
 
-- Статус: **Готово, не выложено; остаётся cleanup-замечание по двум anonymous
-  Docker volumes**. Владелец: Роман / Codex; ветка
+- Статус: **Готово, не выложено; остаётся cleanup-замечание по четырём
+  anonymous Docker volumes**. Владелец: Роман / Codex; ветка
   `codex/managed-chunks-sdk-v1`.
 - Задача: добавлен fail-closed real-PostgreSQL acceptance suite полного migration
   ledger и tenant/FK/trigger/rollback/lock/concurrency контрактов managed chunks.
@@ -3157,11 +3157,16 @@
   atomic layout rollback.
 - Page/site-surface initial races используют barrier и наблюдаемые waits: один v1,
   Conflict loser, retry v2, одна identity и нет orphans. Access reassignment для
-  instance/layout наблюдает блокировку именно на `site_accesses`, при этом writer
-  не держит Site/page/layout target locks; сохранённое permission обязательно
-  приводит к успешной записи. Package activation сериализуется в обоих порядках.
-- Real lifecycle: unlinked instance отклонён для approve и publish; layout
-  owner/resource/revision mismatch отклонён для обоих переходов. No-op,
+  instance/layout наблюдает блокировку именно на `site_accesses` и exact waited
+  lock `transactionid:ShareLock`. Для каждой forbidden relation отдельно
+  проверено отсутствие раннего Site/page/instance/layout/resource/revision lock,
+  поэтому добавление любой одной такой блокировки ломает тест; сохранённое
+  permission обязательно приводит к успешной записи. Package activation
+  сериализуется в обоих порядках.
+- Real lifecycle: unlinked instance отклонён для approve и publish; до/после
+  обоих вызовов совпадают pointers, events, общий `cms_revisions` count и exact
+  zero typed-link count. Layout owner/resource/revision mismatch отклонён для
+  обоих переходов. No-op,
   wrong-contract, missing/extra/changed и FK-invalid copies полностью откатывают
   draft/approved/published pointers, review state, revisions, typed rows,
   placements и events. Exact instance/layout restore, включая empty placements,
@@ -3184,19 +3189,23 @@
   production build PASS; targeted ESLint и Prettier PASS; `git diff --check`
   PASS. Statement/test timeouts были failure, не skip; DataSource/query runners
   закрывались в `finally`.
-- Cleanup выполнен до закрытия записи: предварительно exact container
-  `2cb9b64faace…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
+- Cleanup выполнен до закрытия записи: в финальном цикле exact container
+  `5e36cfd2e186…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
   `127.0.0.1:55440`; затем удалён только
   `wispo-managed-chunks-phase2-test`. После удаления exact container отсутствует,
   порт `55440` свободен, оба opt-in env отсутствуют. Рабочие
   `wispo-cms-local-*` containers read-only сверены по тем же ID и не менялись.
   Anonymous volumes
-  `6353b59d0c5ba9ab17c4d01abb2f153397227d1976a35e67ba54c5ba2ae3872a` и
-  `bde1d673395eb7f8dcb84bad994c86a2826e178950bd7a9d89deb5fb69bdc8f1`
+  `6353b59d0c5ba9ab17c4d01abb2f153397227d1976a35e67ba54c5ba2ae3872a`,
+  `bde1d673395eb7f8dcb84bad994c86a2826e178950bd7a9d89deb5fb69bdc8f1`,
+  `cbe75d1c2996ef20f09007018fc7bad9b4708b3a2cdee1d15f287bffe28ede2d` и
+  `587d1e6a8659bb4c551307913357fe70d0cbe5e8628b4a0e5e769b5f2682f1bf`
   остаются unmounted/нетронутыми по прямому запрету; named volumes/networks не
   создавались, `wispo-cms-local` network не использовалась.
 - Первичный коммит: `7689b3be05e70a5b7b9d6626ce2f371d731551b6`
-  (`test: verify managed chunk persistence in postgres`). Spec-review fix:
-  `test: harden postgres concurrency acceptance` (этот commit). VDS/Registry,
-  внешний сервер, `main`, push/merge/deploy и фактическая выкладка не
-  выполнялись.
+  (`test: verify managed chunk persistence in postgres`). Первый spec-review fix:
+  `44b128186ce2b8af35352f4f3ab2e277cac357eb`
+  (`test: harden postgres concurrency acceptance`). Финальное test-only
+  уточнение: `test: make postgres lock assertions exact` (этот commit).
+  VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая выкладка
+  не выполнялись.

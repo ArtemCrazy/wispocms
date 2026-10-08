@@ -1065,9 +1065,17 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         'site_accesses',
       );
       expect(accessWait.heldRelations).toContain('site_accesses');
-      expect(accessWait.heldRelations).not.toEqual(
-        expect.arrayContaining(['sites', 'pages', 'managed_chunk_layouts']),
-      );
+      expect(accessWait.waitingLocks).toEqual(['transactionid:ShareLock']);
+      for (const forbiddenRelation of [
+        'sites',
+        'pages',
+        'managed_chunk_instances',
+        'managed_chunk_layouts',
+        'cms_revision_resources',
+        'cms_revisions',
+      ]) {
+        expect(accessWait.heldRelations).not.toContain(forbiddenRelation);
+      }
       await assignment.commitTransaction();
       const created = await write;
       expect(created.versionNumber).toBe(1);
@@ -1358,7 +1366,10 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     const unlinkedBefore = (
       await source.query(
         `SELECT draft_revision_id, approved_revision_id, published_revision_id,
-        (SELECT count(*)::int FROM cms_revision_events WHERE resource_id = $1) AS events
+        (SELECT count(*)::int FROM cms_revision_events WHERE resource_id = $1) AS events,
+        (SELECT count(*)::int FROM cms_revisions WHERE resource_id = $1) AS revisions,
+        (SELECT count(*)::int FROM managed_chunk_instance_revisions
+          WHERE revision_resource_id = $1) AS links
        FROM cms_revision_resources WHERE id = $1`,
         [unlinkedResourceId],
       )
@@ -1395,7 +1406,10 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         (
           await source.query(
             `SELECT draft_revision_id, approved_revision_id, published_revision_id,
-            (SELECT count(*)::int FROM cms_revision_events WHERE resource_id = $1) AS events
+            (SELECT count(*)::int FROM cms_revision_events WHERE resource_id = $1) AS events,
+            (SELECT count(*)::int FROM cms_revisions WHERE resource_id = $1) AS revisions,
+            (SELECT count(*)::int FROM managed_chunk_instance_revisions
+              WHERE revision_resource_id = $1) AS links
            FROM cms_revision_resources WHERE id = $1`,
             [unlinkedResourceId],
           )
@@ -1911,9 +1925,17 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         'site_accesses',
       );
       expect(accessWait.heldRelations).toContain('site_accesses');
-      expect(accessWait.heldRelations).not.toEqual(
-        expect.arrayContaining(['sites', 'pages', 'managed_chunk_layouts']),
-      );
+      expect(accessWait.waitingLocks).toEqual(['transactionid:ShareLock']);
+      for (const forbiddenRelation of [
+        'sites',
+        'pages',
+        'managed_chunk_instances',
+        'managed_chunk_layouts',
+        'cms_revision_resources',
+        'cms_revisions',
+      ]) {
+        expect(accessWait.heldRelations).not.toContain(forbiddenRelation);
+      }
       expect(
         await source.getRepository(CmsRevisionResourceEntity).countBy({
           siteId: fixture.siteId,
@@ -2073,15 +2095,18 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           'site_accesses',
         );
         expect(accessWait.heldRelations).toContain('site_accesses');
-        expect(accessWait.heldRelations).not.toEqual(
-          expect.arrayContaining([
-            'sites',
-            ownerTable,
-            'cms_revision_resources',
-            'cms_revisions',
-            finalTable,
-          ]),
-        );
+        expect(accessWait.waitingLocks).toEqual(['transactionid:ShareLock']);
+        for (const forbiddenRelation of [
+          'sites',
+          'pages',
+          'managed_chunk_instances',
+          'managed_chunk_layouts',
+          'cms_revision_resources',
+          'cms_revisions',
+          finalTable,
+        ]) {
+          expect(accessWait.heldRelations).not.toContain(forbiddenRelation);
+        }
         await release(accessBlocker);
 
         const siteWait = await observeLockWait(
