@@ -2098,4 +2098,168 @@ describe('CMS managed lifecycle fail-closed boundary', () => {
       expect(harness.state).toEqual(before);
     },
   );
+  it.each([
+    [
+      'instance',
+      'chunk_instance',
+      'instanceId',
+      'instanceResourceId',
+      'instanceRevisionId',
+    ],
+    [
+      'layout',
+      'chunk_layout',
+      'layoutId',
+      'layoutResourceId',
+      'layoutRevisionId',
+    ],
+  ] as const)(
+    'rejects sequential duplicate approve for a managed %s after one event',
+    async (_, resourceType, entityKey, resourceKey, revisionKey) => {
+      const harness = createFailClosedManagedHarness();
+      const entityId = harness.ids[entityKey];
+      const resourceId = harness.ids[resourceKey];
+      const revisionId = harness.ids[revisionKey];
+      harness.state.resources.find(
+        (row) => row.id === resourceId,
+      )!.reviewState = 'in_review';
+      const input = {
+        siteId: harness.ids.siteId,
+        resourceType,
+        entityId,
+        revisionId,
+        actor: harness.admin,
+      };
+      const approve = () =>
+        harness.dataSource.transaction((db: EntityManager) =>
+          harness.service.approveManagedRevisionUsingManager(db, input, () =>
+            Promise.resolve(harness.context(resourceId, revisionId)),
+          ),
+        );
+
+      await approve();
+      const afterFirst = harness.snapshot();
+      expect(
+        afterFirst.events.filter(
+          (event) =>
+            event.revisionId === revisionId && event.eventType === 'approved',
+        ),
+      ).toHaveLength(1);
+
+      await expect(approve()).rejects.toBeInstanceOf(ConflictException);
+      expect(harness.state).toEqual(afterFirst);
+    },
+  );
+
+  it.each([
+    [
+      'instance',
+      'chunk_instance',
+      'instanceId',
+      'instanceResourceId',
+      'instanceRevisionId',
+    ],
+    [
+      'layout',
+      'chunk_layout',
+      'layoutId',
+      'layoutResourceId',
+      'layoutRevisionId',
+    ],
+  ] as const)(
+    'rejects sequential duplicate publish for a managed %s after one event',
+    async (_, resourceType, entityKey, resourceKey, revisionKey) => {
+      const harness = createFailClosedManagedHarness();
+      const entityId = harness.ids[entityKey];
+      const resourceId = harness.ids[resourceKey];
+      const revisionId = harness.ids[revisionKey];
+      const input = {
+        siteId: harness.ids.siteId,
+        resourceType,
+        entityId,
+        revisionId,
+        actor: harness.admin,
+      };
+      const publish = () =>
+        harness.dataSource.transaction((db: EntityManager) =>
+          harness.service.publishManagedRevisionUsingManager(db, input, () =>
+            Promise.resolve(harness.context(resourceId, revisionId)),
+          ),
+        );
+
+      await publish();
+      const afterFirst = harness.snapshot();
+      expect(
+        afterFirst.events.filter(
+          (event) =>
+            event.revisionId === revisionId && event.eventType === 'published',
+        ),
+      ).toHaveLength(1);
+
+      await expect(publish()).rejects.toBeInstanceOf(ConflictException);
+      expect(harness.state).toEqual(afterFirst);
+    },
+  );
+
+  it.each([
+    [
+      'instance',
+      'chunk_instance',
+      'instanceId',
+      'instanceResourceId',
+      'instanceRevisionId',
+    ],
+    [
+      'layout',
+      'chunk_layout',
+      'layoutId',
+      'layoutResourceId',
+      'layoutRevisionId',
+    ],
+  ] as const)(
+    'rejects approve for an already-published managed %s with the same approved pointer',
+    async (_, resourceType, entityKey, resourceKey, revisionKey) => {
+      const harness = createFailClosedManagedHarness();
+      const entityId = harness.ids[entityKey];
+      const resourceId = harness.ids[resourceKey];
+      const revisionId = harness.ids[revisionKey];
+      const input = {
+        siteId: harness.ids.siteId,
+        resourceType,
+        entityId,
+        revisionId,
+        actor: harness.admin,
+      };
+      const prepare = () =>
+        Promise.resolve(harness.context(resourceId, revisionId));
+
+      await harness.dataSource.transaction((db: EntityManager) =>
+        harness.service.publishManagedRevisionUsingManager(db, input, prepare),
+      );
+      const afterPublish = harness.snapshot();
+
+      await expect(
+        harness.dataSource.transaction((db: EntityManager) =>
+          harness.service.approveManagedRevisionUsingManager(
+            db,
+            input,
+            prepare,
+          ),
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(harness.state).toEqual(afterPublish);
+      expect(
+        harness.state.events.filter(
+          (event) =>
+            event.revisionId === revisionId && event.eventType === 'published',
+        ),
+      ).toHaveLength(1);
+      expect(
+        harness.state.events.filter(
+          (event) =>
+            event.revisionId === revisionId && event.eventType === 'approved',
+        ),
+      ).toHaveLength(0);
+    },
+  );
 });

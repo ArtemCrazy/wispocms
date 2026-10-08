@@ -563,10 +563,11 @@ repository wrappers на disposable PostgreSQL, а не mock-only callbacks:
    source contract link либо полного placement multiset, включая empty set.
    Инъецированный no-op/wrong-contract/missing/extra/changed placement hook и
    реальная FK-ошибка copy откатывают новую revision, typed rows, pointer и event.
-3. Два независимых соединения одновременно approve, затем publish одну и ту же
-   revision. `cms_revision_resources FOR UPDATE` сериализует операции; suite
-   фиксирует ровно один допустимый pointer transition/event, а loser получает
-   штатный `Conflict` без duplicate event или частичных записей.
+3. Для approve и publish отдельно два независимых соединения одновременно
+   выполняют один и тот же переход одной revision. `cms_revision_resources`
+   `FOR UPDATE` сериализует операции; каждый сценарий фиксирует ровно один
+   допустимый pointer transition/event, а проигравшая транзакция получает
+   штатный `ConflictException` без duplicate event или частичных записей.
 4. Для instance и layout отдельно проверяется фактический lock order
    Access `FOR SHARE` → Site/typed owner `FOR SHARE` → resource `FOR UPDATE` →
    revision/instance link `FOR SHARE`; immutable placement set читается целиком

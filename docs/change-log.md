@@ -3024,5 +3024,18 @@
   расширенная Phase 1+2 регрессия 8 suites / 186 tests; API `nest build`,
   адресные ESLint и Prettier, `git diff --check` прошли. Коммиты Task 5:
   `ce2ffe6` и последующий quality-fix commit этой записи.
+- Повторный review: managed approve/publish теперь имеют single-transition
+  semantics после canonical typed re-read заблокированного resource. Если exact
+  revision уже стоит в approved/published pointer, сервис до mutation/event
+  возвращает `ConflictException`; generic article/category lifecycle не менялся.
+  Already-published revision также нельзя повторно approve.
+- Повторный review TDD RED: 128 прежних service/repository тестов прошли, 10
+  новых упали — duplicate approve возвращал `BadRequestException`, duplicate
+  publish повторно записывал event. GREEN — focused service/repository 138/138;
+  расширенная Phase 1+2 регрессия 8 suites / 196 tests, API `nest build`,
+  адресные ESLint/Prettier и `git diff --check` прошли. Task 7 сохраняет
+  отдельные real-PostgreSQL two-connection approve/publish сценарии с
+  `ConflictException` для loser. Последующий single-transition quality-fix
+  commit входит в эту запись.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, внешний сервер,
   `main`, push/merge и deploy не затрагивались.

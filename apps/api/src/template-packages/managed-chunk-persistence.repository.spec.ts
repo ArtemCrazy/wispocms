@@ -2636,6 +2636,69 @@ describe('ManagedChunkPersistenceRepository typed lifecycle success paths', () =
   });
 });
 
+describe('ManagedChunkPersistenceRepository single-transition lifecycle', () => {
+  it.each([
+    ['instance', 'approve'],
+    ['instance', 'publish'],
+    ['layout', 'approve'],
+    ['layout', 'publish'],
+  ] as const)(
+    'rejects a duplicate managed %s %s without changing pointers or adding an event',
+    async (resourceType, operation) => {
+      const harness = createManagedLifecycleHarness();
+      const isInstance = resourceType === 'instance';
+      const resourceId = isInstance ? INSTANCE_RESOURCE_ID : LAYOUT_RESOURCE_ID;
+      const revisionId = isInstance ? INSTANCE_REVISION_ID : LAYOUT_REVISION_ID;
+      const resource = harness.state.resources.find(
+        (row) => row.id === resourceId,
+      )!;
+      if (operation === 'approve') resource.reviewState = 'in_review';
+      const invoke = () => {
+        if (isInstance) {
+          return operation === 'approve'
+            ? harness.repository.approveInstanceRevision({
+                siteId: SITE_ID,
+                instanceId: INSTANCE_ID,
+                revisionId,
+                actor: ADMIN_ACTOR,
+              })
+            : harness.repository.publishInstanceRevision({
+                siteId: SITE_ID,
+                instanceId: INSTANCE_ID,
+                revisionId,
+                actor: ADMIN_ACTOR,
+              });
+        }
+        return operation === 'approve'
+          ? harness.repository.approveLayoutRevision({
+              siteId: SITE_ID,
+              layoutId: LAYOUT_ID,
+              revisionId,
+              actor: ADMIN_ACTOR,
+            })
+          : harness.repository.publishLayoutRevision({
+              siteId: SITE_ID,
+              layoutId: LAYOUT_ID,
+              revisionId,
+              actor: ADMIN_ACTOR,
+            });
+      };
+
+      await invoke();
+      const afterFirst = harness.snapshot();
+      const eventType = operation === 'approve' ? 'approved' : 'published';
+      expect(
+        afterFirst.events.filter(
+          (event) =>
+            event.revisionId === revisionId && event.eventType === eventType,
+        ),
+      ).toHaveLength(1);
+
+      await expect(invoke()).rejects.toBeInstanceOf(ConflictException);
+      expect(harness.state).toEqual(afterFirst);
+    },
+  );
+});
 describe('ManagedChunkPersistenceRepository lifecycle lock contract', () => {
   it.each(['approve', 'publish', 'restore'] as const)(
     'uses Access→Site→instance→resource→revision→link locks for instance %s',

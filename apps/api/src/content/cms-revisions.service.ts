@@ -821,6 +821,9 @@ export class CmsRevisionsService {
       input,
       prepared,
     );
+    if (context.resource.approvedRevisionId === input.revisionId) {
+      throw new ConflictException('Управляемая версия уже одобрена');
+    }
     Object.assign(
       context.resource,
       approveRevision(this.pointers(context.resource), input.revisionId),
@@ -865,6 +868,9 @@ export class CmsRevisionsService {
       input,
       prepared,
     );
+    if (context.resource.publishedRevisionId === input.revisionId) {
+      throw new ConflictException('Управляемая версия уже опубликована');
+    }
     const next = publishRevision(
       this.pointers(context.resource),
       input.revisionId,
