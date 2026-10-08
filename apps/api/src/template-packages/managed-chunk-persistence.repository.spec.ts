@@ -2862,6 +2862,9 @@ const DIGEST_A = `sha256:${'a'.repeat(64)}`;
 const DIGEST_B = `sha256:${'b'.repeat(64)}`;
 const DIGEST_C = `sha256:${'c'.repeat(64)}`;
 
+const DIGEST_D = 'sha256:' + 'd'.repeat(64);
+const DIGEST_E = 'sha256:' + 'e'.repeat(64);
+
 const DATABASE_UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -2879,6 +2882,20 @@ function compatibilityInventoryState(): CompatibilityInventoryState {
       { id: INVENTORY_OTHER_PACKAGE_ID, packageId: 'other-package' },
     ],
     contracts: [
+      {
+        id: 'contract-draft-only',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'draft-only',
+        schemaVersion: '1',
+        contractDigest: DIGEST_D,
+      },
+      {
+        id: 'contract-published-only',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'published-only',
+        schemaVersion: '1',
+        contractDigest: DIGEST_E,
+      },
       {
         id: 'contract-shared-v1',
         templatePackageId: PACKAGE_ID,
@@ -3172,14 +3189,14 @@ function compatibilityInventoryState(): CompatibilityInventoryState {
         revisionResourceId: 'resource-published-only',
         siteId: SITE_ID,
         instanceId: PUBLISHED_ONLY_INSTANCE_ID,
-        contractId: 'contract-shared-v1',
+        contractId: 'contract-published-only',
       },
       {
         revisionId: 'draft-only-draft',
         revisionResourceId: 'resource-draft-only',
         siteId: SITE_ID,
         instanceId: DRAFT_ONLY_INSTANCE_ID,
-        contractId: 'contract-shared-v1',
+        contractId: 'contract-draft-only',
       },
       {
         revisionId: 'foreign-draft',
@@ -3433,6 +3450,87 @@ function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
   };
 }
 
+function exactSourceCandidate(
+  source: 'draft' | 'published',
+): ManagedChunkCompatibilityCandidate {
+  if (source === 'draft') {
+    return {
+      packageId: INVENTORY_PACKAGE_KEY,
+      definitions: [
+        {
+          definitionKey: 'draft-only',
+          schemaVersion: '1',
+          contractDigest: DIGEST_D,
+          rendererKey: 'single-source-renderer',
+        },
+        {
+          definitionKey: 'shared',
+          schemaVersion: '1',
+          contractDigest: DIGEST_A,
+          rendererKey: 'shared-renderer',
+        },
+        {
+          definitionKey: 'switching',
+          schemaVersion: '2',
+          contractDigest: DIGEST_C,
+          rendererKey: 'switching-renderer',
+        },
+      ],
+      slots: [
+        {
+          templateKey: 'home',
+          templateVersion: '2',
+          slotKey: 'hero',
+          maxItems: 1,
+          allowedChunks: [{ definitionKey: 'switching', schemaVersion: '2' }],
+        },
+        {
+          templateKey: 'shell',
+          templateVersion: '1',
+          slotKey: 'header',
+          maxItems: 1,
+          allowedChunks: [{ definitionKey: 'shared', schemaVersion: '1' }],
+        },
+      ],
+    };
+  }
+  return {
+    packageId: INVENTORY_PACKAGE_KEY,
+    definitions: [
+      {
+        definitionKey: 'published-only',
+        schemaVersion: '1',
+        contractDigest: DIGEST_E,
+        rendererKey: 'single-source-renderer',
+      },
+      {
+        definitionKey: 'shared',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+        rendererKey: 'shared-renderer',
+      },
+      {
+        definitionKey: 'switching',
+        schemaVersion: '1',
+        contractDigest: DIGEST_B,
+        rendererKey: 'switching-renderer',
+      },
+    ],
+    slots: [
+      {
+        templateKey: 'home',
+        templateVersion: '1',
+        slotKey: 'hero',
+        maxItems: 2,
+        allowedChunks: [
+          { definitionKey: 'shared', schemaVersion: '1' },
+          { definitionKey: 'switching', schemaVersion: '1' },
+        ],
+      },
+    ],
+  };
+}
+
 describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
   it('reads draft and published independently and aggregates exact contracts', async () => {
     const harness = createCompatibilityInventoryHarness();
@@ -3443,6 +3541,20 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
     });
 
     expect(inventory.contracts).toEqual([
+      {
+        packageId: INVENTORY_PACKAGE_KEY,
+        definitionKey: 'draft-only',
+        schemaVersion: '1',
+        contractDigest: DIGEST_D,
+        sources: ['draft'],
+      },
+      {
+        packageId: INVENTORY_PACKAGE_KEY,
+        definitionKey: 'published-only',
+        schemaVersion: '1',
+        contractDigest: DIGEST_E,
+        sources: ['published'],
+      },
       {
         packageId: INVENTORY_PACKAGE_KEY,
         definitionKey: 'shared',
@@ -3533,7 +3645,52 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
     expect(inventory.placements).not.toContainEqual(
       expect.objectContaining({ source: 'published', slotKey: 'footer' }),
     );
+    const publishedOnlyRequirement = inventory.contracts.find(
+      (requirement) => requirement.definitionKey === 'published-only',
+    );
+    const draftOnlyRequirement = inventory.contracts.find(
+      (requirement) => requirement.definitionKey === 'draft-only',
+    );
+    expect(publishedOnlyRequirement?.sources).toEqual(['published']);
+    expect(draftOnlyRequirement?.sources).toEqual(['draft']);
   });
+
+  it.each([
+    ['draft', 'published-only'],
+    ['published', 'draft-only'],
+  ] as const)(
+    'does not fabricate a %s contract requirement through source fallback',
+    async (source, oppositeOnlyDefinition) => {
+      const harness = createCompatibilityInventoryHarness();
+      const inventory = await harness.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      });
+      const requirements = inventory.contracts
+        .filter((requirement) => requirement.sources.includes(source))
+        .map((requirement) => ({ ...requirement, sources: [source] }));
+      const placements = inventory.placements.filter(
+        (placement) => placement.source === source,
+      );
+      const result = checkManagedChunkContractCompatibility(
+        exactSourceCandidate(source),
+        new Set([
+          'shared-renderer',
+          'single-source-renderer',
+          'switching-renderer',
+        ]),
+        requirements,
+        placements,
+      );
+
+      expect(result).toEqual({ compatible: true, reasons: [] });
+      expect(
+        requirements.find(
+          (requirement) => requirement.definitionKey === oppositeOnlyDefinition,
+        ),
+      ).toBeUndefined();
+    },
+  );
 
   it('is stable across storage order and caller mutation without writing state', async () => {
     const forward = createCompatibilityInventoryHarness();
@@ -3721,6 +3878,18 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
           rendererKey: 'shared-renderer',
         },
         {
+          definitionKey: 'draft-only',
+          schemaVersion: '1',
+          contractDigest: DIGEST_D,
+          rendererKey: 'single-source-renderer',
+        },
+        {
+          definitionKey: 'published-only',
+          schemaVersion: '1',
+          contractDigest: DIGEST_E,
+          rendererKey: 'single-source-renderer',
+        },
+        {
           definitionKey: 'switching',
           schemaVersion: '1',
           contractDigest: DIGEST_B,
@@ -3763,7 +3932,11 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
 
     const publishedOnly = checkManagedChunkContractCompatibility(
       candidate,
-      new Set(['shared-renderer', 'switching-renderer']),
+      new Set([
+        'shared-renderer',
+        'single-source-renderer',
+        'switching-renderer',
+      ]),
       inventory.contracts
         .filter((requirement) => requirement.sources.includes('published'))
         .map((requirement) => ({ ...requirement, sources: ['published'] })),
@@ -3773,12 +3946,17 @@ describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
     );
     const allSources = checkManagedChunkContractCompatibility(
       candidate,
-      new Set(['shared-renderer', 'switching-renderer']),
+      new Set([
+        'shared-renderer',
+        'single-source-renderer',
+        'switching-renderer',
+      ]),
       inventory.contracts,
       inventory.placements,
     );
 
     expect(publishedOnly).toEqual({ compatible: true, reasons: [] });
+
     expect(allSources.reasons).toContainEqual(
       expect.objectContaining({
         code: 'contract_digest_mismatch',

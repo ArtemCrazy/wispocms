@@ -3077,6 +3077,19 @@
   ESLint, Prettier и `git diff --check` прошли.
 - Независимый итоговый code review: Critical 0, Important 0, Minor 0, verdict
   READY. Коммит реализации:
-  `feat: expose managed chunk compatibility inventory` (этот commit).
+  `96dd3e4f1eefa68d5f224931e22628f6f6e53ddd`
+  (`feat: expose managed chunk compatibility inventory`).
+- По итогам spec-review усилены test-only доказательства no-fallback:
+  draft-only и published-only instances используют уникальные contract
+  identities/digests, а реальные source-specific вызовы
+  `checkManagedChunkContractCompatibility` отдельно подтверждают отсутствие
+  ложного requirement/block в обе стороны. Controlled symmetric fallback
+  mutation дала RED: 5 failures / 100 passed, включая `missing_definition` и
+  `slot_missing` для обоих источников; после восстановления production mapper
+  focused GREEN — 2 suites / 105 tests, широкая регрессия — 8 suites / 204
+  tests. API build, targeted ESLint, Prettier и `git diff --check` прошли;
+  production code не менялся. Повторный независимый review: Critical 0,
+  Important 0, Minor 0, READY. Test-only commit:
+  `test: prove compatibility inventory source isolation` (этот commit).
 - Docker/VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая
   выкладка не затрагивались.
