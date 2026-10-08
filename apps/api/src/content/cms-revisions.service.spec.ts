@@ -295,14 +295,16 @@ describe('CMS revision storage', () => {
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
 
+    const expectedAccessLookup = [
+      SiteAccessEntity,
+      expect.objectContaining({
+        where: { userId: outsider.userId, siteId: 'site-1' },
+        lock: { mode: 'pessimistic_read' },
+      }),
+    ];
     expect(db.findOne.mock.calls).toEqual([
-      [
-        SiteAccessEntity,
-        expect.objectContaining({
-          where: { userId: outsider.userId, siteId: 'site-1' },
-          lock: { mode: 'pessimistic_read' },
-        }),
-      ],
+      expectedAccessLookup,
+      expectedAccessLookup,
     ]);
   });
   it('runs the mandatory managed revision hook after revision persistence and before pointer/event persistence', async () => {

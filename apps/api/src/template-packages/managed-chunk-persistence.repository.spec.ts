@@ -1246,6 +1246,7 @@ describe('ManagedChunkPersistenceRepository', () => {
       expect(harness.contractLookups).toEqual([]);
       expect(harness.lookupOperations).toEqual([
         { entity: 'access', lock: { mode: 'pessimistic_read' } },
+        { entity: 'access', lock: { mode: 'pessimistic_read' } },
       ]);
       expect(harness.state).toEqual({
         resources: [],
@@ -1816,6 +1817,11 @@ describe('ManagedChunkPersistenceRepository', () => {
       );
 
       expect(harness.lookupOperations).toEqual([
+        {
+          entity: 'access',
+          where: { userId: ACTOR.userId, siteId: SITE_ID },
+          lock: { mode: 'pessimistic_read' },
+        },
         {
           entity: 'access',
           where: { userId: ACTOR.userId, siteId: SITE_ID },

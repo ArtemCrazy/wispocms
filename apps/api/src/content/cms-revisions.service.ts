@@ -244,14 +244,23 @@ export class CmsRevisionsService {
     if (input.actor.platformRole === PlatformRole.WISPO_ADMIN) return null;
     // Match access reassignment order: never hold a site/target lock while
     // waiting for the actor's access row.
-    const access = await db.findOne(SiteAccessEntity, {
+    const accessOptions = {
       select: {
         role: true,
         requiresApproval: true,
       },
       where: { userId: input.actor.userId, siteId: input.siteId },
-      lock: { mode: 'pessimistic_read' },
-    });
+      lock: { mode: 'pessimistic_read' as const },
+    };
+    let access = await db.findOne(SiteAccessEntity, accessOptions);
+    // A concurrent assignment transaction may delete and recreate the same
+    // grant. PostgreSQL can resume the blocked SELECT with its original
+    // statement snapshot and return no row even though the replacement grant
+    // committed. A second READ COMMITTED statement sees the final assignment
+    // before any site or managed-target lock is acquired.
+    if (!access) {
+      access = await db.findOne(SiteAccessEntity, accessOptions);
+    }
     if (
       !access ||
       !hasSitePermission(input.actor.platformRole, access, permission)

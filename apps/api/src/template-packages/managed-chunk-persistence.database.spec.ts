@@ -316,6 +316,66 @@ const waitForLockWait = async (
   }
   throw new Error('Expected backend ' + pid + ' to wait on a PostgreSQL lock');
 };
+type ObservedLockWait = {
+  query: string;
+  waitEvent: string;
+  waitingLocks: string[];
+  heldRelations: string[];
+};
+
+const observeLockWait = async (
+  observer: DataSource,
+  pid: number,
+  queryToken: string,
+): Promise<ObservedLockWait> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows: ObservedLockWait[] = await observer.query(
+      `SELECT a.query,
+        COALESCE(a.wait_event, '') AS "waitEvent",
+        ARRAY(
+          SELECT l.locktype || ':' || l.mode
+          FROM pg_locks l
+          WHERE l.pid = a.pid AND NOT l.granted
+          ORDER BY l.locktype, l.mode
+        ) AS "waitingLocks",
+        ARRAY(
+          SELECT DISTINCT c.relname
+          FROM pg_locks l
+          JOIN pg_class c ON c.oid = l.relation
+          WHERE l.pid = a.pid AND l.granted
+          ORDER BY c.relname
+        ) AS "heldRelations"
+       FROM pg_stat_activity a
+       WHERE a.pid = $1 AND a.wait_event_type = 'Lock'`,
+      [pid],
+    );
+    const observed = rows[0];
+    if (observed && observed.query.includes(queryToken)) {
+      const parseArray = (value: string[] | string): string[] =>
+        Array.isArray(value)
+          ? value
+          : value === '{}'
+            ? []
+            : value.slice(1, -1).split(',');
+      const normalized = {
+        ...observed,
+        waitingLocks: parseArray(observed.waitingLocks),
+        heldRelations: parseArray(observed.heldRelations),
+      };
+      expect(normalized.waitingLocks.length).toBeGreaterThan(0);
+      return normalized;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const activity = await observer.query(
+    `SELECT query, state, wait_event_type, wait_event
+     FROM pg_stat_activity WHERE pid = $1`,
+    [pid],
+  );
+  throw new Error(
+    `Expected backend ${pid} to wait on a PostgreSQL lock in ${queryToken}: ${JSON.stringify(activity)}`,
+  );
+};
 const applyFullLedgerToDatabase = async (
   databaseUrl: string,
 ): Promise<DataSource> => {
@@ -564,27 +624,68 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('registers opposite-order batches concurrently without deadlock or partial rows', async () => {
+  it('registers opposite-order batches with observed overlapping lock waits and no partial rows', async () => {
     const fixture = await seedAcceptanceFixture(source, 'contracts-race');
     const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
     const leftSource = await createIndependentSource(url);
     const rightSource = await createIndependentSource(url);
+    const blocker = await createIndependentSource(url);
+    const advisoryKey = 187600101;
+    const triggerName = 'test_pause_contract_' + randomUUID().replace(/-/g, '');
+    const functionName = triggerName + '_fn';
+    await source.query(
+      `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+       BEGIN
+         IF NEW.template_package_id = '${fixture.packageId}'::uuid THEN
+           PERFORM pg_advisory_xact_lock(${advisoryKey});
+         END IF;
+         RETURN NEW;
+       END;
+       $$ LANGUAGE plpgsql`,
+    );
+    await source.query(
+      `CREATE TRIGGER ${triggerName}
+       BEFORE INSERT ON managed_chunk_contracts
+       FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
+    );
     try {
+      await blocker.query('SELECT pg_advisory_lock($1)', [advisoryKey]);
+      const [{ pg_backend_pid: leftPid }] = await leftSource.query(
+        'SELECT pg_backend_pid()',
+      );
+      const [{ pg_backend_pid: rightPid }] = await rightSource.query(
+        'SELECT pg_backend_pid()',
+      );
       const left = servicesFor(leftSource).repository;
       const right = servicesFor(rightSource).repository;
       const a = managedDefinition('race-a');
       const b = managedDefinition('race-b');
+      const leftRegistration = left.registerContracts({
+        templatePackageId: fixture.packageId,
+        templatePackageVersionId: fixture.packageVersionId,
+        definitions: [a, b],
+      });
+      const rightRegistration = right.registerContracts({
+        templatePackageId: fixture.packageId,
+        templatePackageVersionId: fixture.packageVersionId,
+        definitions: [b, a],
+      });
+      const leftWait = await observeLockWait(
+        source,
+        leftPid,
+        'managed_chunk_contracts',
+      );
+      const rightWait = await observeLockWait(
+        source,
+        rightPid,
+        'managed_chunk_contracts',
+      );
+      expect(leftWait.waitingLocks).toContain('advisory:ExclusiveLock');
+      expect(rightWait.waitingLocks).toContain('advisory:ExclusiveLock');
+      await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
       const results = await Promise.allSettled([
-        left.registerContracts({
-          templatePackageId: fixture.packageId,
-          templatePackageVersionId: fixture.packageVersionId,
-          definitions: [a, b],
-        }),
-        right.registerContracts({
-          templatePackageId: fixture.packageId,
-          templatePackageVersionId: fixture.packageVersionId,
-          definitions: [b, a],
-        }),
+        leftRegistration,
+        rightRegistration,
       ]);
       for (const result of results) {
         if (result.status === 'rejected') {
@@ -605,13 +706,18 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         { definition_key: 'race-b', count: 1 },
       ]);
     } finally {
+      await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+      await source.query(
+        `DROP TRIGGER IF EXISTS ${triggerName} ON managed_chunk_contracts`,
+      );
+      await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
       await Promise.all([
+        blocker.isInitialized ? blocker.destroy() : Promise.resolve(),
         leftSource.isInitialized ? leftSource.destroy() : Promise.resolve(),
         rightSource.isInitialized ? rightSource.destroy() : Promise.resolve(),
       ]);
     }
   }, 30_000);
-
   it('enforces tenant targets, atomic layout rollback, and draft/published inventory', async () => {
     const fixture = await seedAcceptanceFixture(source, 'tenant-layout');
     const { repository } = servicesFor(source);
@@ -711,6 +817,27 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       ],
       actor: adminActor(fixture),
     });
+    const placementCountBeforeDuplicate = await source
+      .getRepository(ManagedChunkPlacementEntity)
+      .countBy({ layoutRevisionId: layout.revisionId });
+    await expectSqlState(
+      source.query(
+        `INSERT INTO managed_chunk_placements
+          (site_id, layout_id, layout_revision_resource_id,
+           layout_revision_id, instance_id, slot_key, position)
+         SELECT site_id, layout_id, layout_revision_resource_id,
+           layout_revision_id, instance_id, slot_key, position
+         FROM managed_chunk_placements
+         WHERE layout_revision_id = $1 AND slot_key = 'hero' AND position = 0`,
+        [layout.revisionId],
+      ),
+      '23505',
+    );
+    expect(
+      await source
+        .getRepository(ManagedChunkPlacementEntity)
+        .countBy({ layoutRevisionId: layout.revisionId }),
+    ).toBe(placementCountBeforeDuplicate);
     const draftInventory = await repository.readCompatibilityInventory({
       siteId: fixture.siteId,
       templatePackageId: fixture.packageId,
@@ -753,7 +880,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
   }, 30_000);
 
   it.each(['page', 'site_surface'] as const)(
-    'serializes concurrent initial %s layout creation and permits a v2 retry',
+    'serializes concurrent initial %s layout creation with observed contention and a v2 retry',
     async (kind) => {
       const fixture = await seedAcceptanceFixture(
         source,
@@ -776,7 +903,35 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
       const firstSource = await createIndependentSource(url);
       const secondSource = await createIndependentSource(url);
+      const blocker = await createIndependentSource(url);
+      const advisoryKey = kind === 'page' ? 187600102 : 187600103;
+      const triggerName =
+        'test_pause_layout_resource_' + randomUUID().replace(/-/g, '');
+      const functionName = triggerName + '_fn';
+      await source.query(
+        `CREATE FUNCTION ${functionName}() RETURNS trigger AS $$
+         BEGIN
+           IF NEW.resource_type = 'chunk_layout'
+             AND NEW.site_id = '${fixture.siteId}'::uuid THEN
+             PERFORM pg_advisory_xact_lock(${advisoryKey});
+           END IF;
+           RETURN NEW;
+         END;
+         $$ LANGUAGE plpgsql`,
+      );
+      await source.query(
+        `CREATE TRIGGER ${triggerName}
+         BEFORE INSERT ON cms_revision_resources
+         FOR EACH ROW EXECUTE FUNCTION ${functionName}()`,
+      );
       try {
+        await blocker.query('SELECT pg_advisory_lock($1)', [advisoryKey]);
+        const [{ pg_backend_pid: firstPid }] = await firstSource.query(
+          'SELECT pg_backend_pid()',
+        );
+        const [{ pg_backend_pid: secondPid }] = await secondSource.query(
+          'SELECT pg_backend_pid()',
+        );
         const target =
           kind === 'page'
             ? ({ kind: 'page', pageId: fixture.pageId } as const)
@@ -795,37 +950,40 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           ],
           actor: adminActor(fixture),
         };
-        const results = await Promise.allSettled([
-          servicesFor(firstSource).repository.saveLayoutDraft(input),
-          servicesFor(secondSource).repository.saveLayoutDraft(input),
-        ]);
-        const winners = results.filter(
-          (
-            result,
-          ): result is PromiseFulfilledResult<{
-            layoutId: string;
-            revisionId: string;
-            versionNumber: number;
-          }> => result.status === 'fulfilled',
+        const firstSave =
+          servicesFor(firstSource).repository.saveLayoutDraft(input);
+        const firstWait = await observeLockWait(
+          source,
+          firstPid,
+          'cms_revision_resources',
         );
-        const losers = results.filter(
-          (result): result is PromiseRejectedResult =>
-            result.status === 'rejected',
-        );
-        expect(winners).toHaveLength(1);
-        expect(losers).toHaveLength(1);
-        expect(winners[0].value.versionNumber).toBe(1);
-        expect(losers[0].reason).toBeInstanceOf(ConflictException);
-        expect(sqlState(losers[0].reason)).not.toBe('40P01');
+        expect(firstWait.waitingLocks).toContain('advisory:ExclusiveLock');
+        expect(firstWait.heldRelations).toContain('sites');
+
+        const secondSave =
+          servicesFor(secondSource).repository.saveLayoutDraft(input);
+        const secondWait = await observeLockWait(source, secondPid, '');
+        expect(secondWait.heldRelations).toContain('sites');
+        await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+        const results = await Promise.allSettled([firstSave, secondSave]);
+        expect(results[0].status).toBe('fulfilled');
+        expect(results[1].status).toBe('rejected');
+        if (results[0].status !== 'fulfilled') throw results[0].reason;
+        if (results[1].status !== 'rejected') {
+          throw new Error('Second initial layout save unexpectedly succeeded');
+        }
+        expect(results[0].value.versionNumber).toBe(1);
+        expect(results[1].reason).toBeInstanceOf(ConflictException);
+        expect(sqlState(results[1].reason)).not.toBe('40P01');
 
         const retried = await servicesFor(
           secondSource,
         ).repository.saveLayoutDraft({
           ...input,
-          expectedDraftRevisionId: winners[0].value.revisionId,
+          expectedDraftRevisionId: results[0].value.revisionId,
         });
         expect(retried.versionNumber).toBe(2);
-        expect(retried.layoutId).toBe(winners[0].value.layoutId);
+        expect(retried.layoutId).toBe(results[0].value.layoutId);
         const [{ layouts, resources, revisions, placements, orphans }] =
           await source.query(
             `SELECT
@@ -839,7 +997,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
               (SELECT count(*)::int FROM managed_chunk_placements p
                 LEFT JOIN cms_revisions r ON r.id = p.layout_revision_id
                 WHERE p.layout_id = $1 AND r.id IS NULL) AS orphans`,
-            [winners[0].value.layoutId, fixture.siteId],
+            [results[0].value.layoutId, fixture.siteId],
           );
         expect({ layouts, resources, revisions, placements, orphans }).toEqual({
           layouts: 1,
@@ -849,7 +1007,13 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           orphans: 0,
         });
       } finally {
+        await blocker.query('SELECT pg_advisory_unlock($1)', [advisoryKey]);
+        await source.query(
+          `DROP TRIGGER IF EXISTS ${triggerName} ON cms_revision_resources`,
+        );
+        await source.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
         await Promise.all([
+          blocker.isInitialized ? blocker.destroy() : Promise.resolve(),
           firstSource.isInitialized ? firstSource.destroy() : Promise.resolve(),
           secondSource.isInitialized
             ? secondSource.destroy()
@@ -895,26 +1059,24 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         sanitizerPolicyVersion: null,
         actor: employeeActor(fixture),
       });
-      await waitForLockWait(source, writerPid);
+      const accessWait = await observeLockWait(
+        source,
+        writerPid,
+        'site_accesses',
+      );
+      expect(accessWait.heldRelations).toContain('site_accesses');
+      expect(accessWait.heldRelations).not.toEqual(
+        expect.arrayContaining(['sites', 'pages', 'managed_chunk_layouts']),
+      );
       await assignment.commitTransaction();
-      const outcome = await Promise.allSettled([write]);
-      if (outcome[0].status === 'fulfilled') {
-        expect(outcome[0].value.versionNumber).toBe(1);
-        expect(
-          await source.getRepository(ManagedChunkInstanceEntity).countBy({
-            id: outcome[0].value.instanceId,
-            siteId: fixture.siteId,
-          }),
-        ).toBe(1);
-      } else {
-        expect(outcome[0].reason).toBeInstanceOf(ForbiddenException);
-        expect(
-          await source.getRepository(CmsRevisionResourceEntity).countBy({
-            siteId: fixture.siteId,
-            resourceType: 'chunk_instance',
-          }),
-        ).toBe(0);
-      }
+      const created = await write;
+      expect(created.versionNumber).toBe(1);
+      expect(
+        await source.getRepository(ManagedChunkInstanceEntity).countBy({
+          id: created.instanceId,
+          siteId: fixture.siteId,
+        }),
+      ).toBe(1);
     } finally {
       if (assignment.isTransactionActive)
         await assignment.rollbackTransaction();
@@ -1201,41 +1363,45 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         [unlinkedResourceId],
       )
     )[0] as Record<string, unknown>;
-    await expect(
-      source.transaction((db) =>
-        revisions.approveManagedRevisionUsingManager(
-          db,
-          {
-            siteId: fixture.siteId,
-            resourceType: 'chunk_instance',
-            entityId: unlinkedEntityId,
-            revisionId: unlinkedRevisionId,
-            actor: adminActor(fixture),
-          },
-          async (prepareDb) => ({
-            resource: await prepareDb.findOneByOrFail(
-              CmsRevisionResourceEntity,
-              {
-                id: unlinkedResourceId,
-              },
-            ),
-            revision: await prepareDb.findOneByOrFail(CmsRevisionEntity, {
-              id: unlinkedRevisionId,
+    for (const operation of ['approve', 'publish'] as const) {
+      const transition =
+        operation === 'approve'
+          ? revisions.approveManagedRevisionUsingManager.bind(revisions)
+          : revisions.publishManagedRevisionUsingManager.bind(revisions);
+      await expect(
+        source.transaction((db) =>
+          transition(
+            db,
+            {
+              siteId: fixture.siteId,
+              resourceType: 'chunk_instance',
+              entityId: unlinkedEntityId,
+              revisionId: unlinkedRevisionId,
+              actor: adminActor(fixture),
+            },
+            async (prepareDb) => ({
+              resource: await prepareDb.findOneByOrFail(
+                CmsRevisionResourceEntity,
+                { id: unlinkedResourceId },
+              ),
+              revision: await prepareDb.findOneByOrFail(CmsRevisionEntity, {
+                id: unlinkedRevisionId,
+              }),
             }),
-          }),
+          ),
         ),
-      ),
-    ).rejects.toBeInstanceOf(NotFoundException);
-    expect(
-      (
-        await source.query(
-          `SELECT draft_revision_id, approved_revision_id, published_revision_id,
-          (SELECT count(*)::int FROM cms_revision_events WHERE resource_id = $1) AS events
-         FROM cms_revision_resources WHERE id = $1`,
-          [unlinkedResourceId],
-        )
-      )[0],
-    ).toEqual(unlinkedBefore);
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(
+        (
+          await source.query(
+            `SELECT draft_revision_id, approved_revision_id, published_revision_id,
+            (SELECT count(*)::int FROM cms_revision_events WHERE resource_id = $1) AS events
+           FROM cms_revision_resources WHERE id = $1`,
+            [unlinkedResourceId],
+          )
+        )[0],
+      ).toEqual(unlinkedBefore);
+    }
 
     const resource = await source
       .getRepository(CmsRevisionResourceEntity)
@@ -1310,9 +1476,79 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         resourceType: 'chunk_layout',
         entityId: layout.layoutId,
       });
-    const layoutRevisionCount = await source
+    const layoutState = async () => {
+      const current = await source
+        .getRepository(CmsRevisionResourceEntity)
+        .findOneByOrFail({ id: layoutResource.id });
+      return {
+        draft: current.draftRevisionId,
+        approved: current.approvedRevisionId,
+        published: current.publishedRevisionId,
+        reviewState: current.reviewState,
+        revisions: await source.getRepository(CmsRevisionEntity).countBy({
+          resourceId: layoutResource.id,
+        }),
+        placements: await source
+          .getRepository(ManagedChunkPlacementEntity)
+          .countBy({ layoutId: layout.layoutId }),
+        events: await source.getRepository(CmsRevisionEventEntity).countBy({
+          resourceId: layoutResource.id,
+        }),
+      };
+    };
+    const layoutBeforeInvalid = await layoutState();
+    const instanceRevision = await source
       .getRepository(CmsRevisionEntity)
-      .countBy({ resourceId: layoutResource.id });
+      .findOneByOrFail({ id: instance.revisionId });
+    for (const operation of ['approve', 'publish'] as const) {
+      const transition =
+        operation === 'approve'
+          ? revisions.approveManagedRevisionUsingManager.bind(revisions)
+          : revisions.publishManagedRevisionUsingManager.bind(revisions);
+      const mismatches = [
+        {
+          entityId: randomUUID(),
+          resource: layoutResource,
+          revision: await source
+            .getRepository(CmsRevisionEntity)
+            .findOneByOrFail({ id: layout.revisionId }),
+        },
+        {
+          entityId: layout.layoutId,
+          resource,
+          revision: instanceRevision,
+        },
+        {
+          entityId: layout.layoutId,
+          resource: layoutResource,
+          revision: instanceRevision,
+        },
+      ];
+      for (const mismatch of mismatches) {
+        await expect(
+          source.transaction((db) =>
+            transition(
+              db,
+              {
+                siteId: fixture.siteId,
+                resourceType: 'chunk_layout',
+                entityId: mismatch.entityId,
+                revisionId: layout.revisionId,
+                actor: adminActor(fixture),
+              },
+              () =>
+                Promise.resolve({
+                  resource: mismatch.resource,
+                  revision: mismatch.revision,
+                }),
+            ),
+          ),
+        ).rejects.toBeInstanceOf(NotFoundException);
+        expect(await layoutState()).toEqual(layoutBeforeInvalid);
+      }
+    }
+
+    const layoutRevisionCount = layoutBeforeInvalid.revisions;
     let fkState: string | undefined;
     try {
       await source.transaction((db) =>
@@ -1358,18 +1594,8 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
       fkState = sqlState(error);
     }
     expect(fkState).toBe('23503');
-    expect(
-      await source.getRepository(CmsRevisionEntity).countBy({
-        resourceId: layoutResource.id,
-      }),
-    ).toBe(layoutRevisionCount);
-    expect(
-      (
-        await source.getRepository(CmsRevisionResourceEntity).findOneByOrFail({
-          id: layoutResource.id,
-        })
-      ).draftRevisionId,
-    ).toBe(layout.revisionId);
+    expect(layoutRevisionCount).toBe(layoutBeforeInvalid.revisions);
+    expect(await layoutState()).toEqual(layoutBeforeInvalid);
   }, 30_000);
 
   it('restores exact instance/layout copies including empty placements', async () => {
@@ -1474,7 +1700,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
   }, 30_000);
 
   it.each(['approve', 'publish'] as const)(
-    'serializes concurrent managed %s with one event and a Conflict loser',
+    'serializes concurrent managed %s with observed resource contention, one event, and exact state',
     async (operation) => {
       const fixture = await seedAcceptanceFixture(
         source,
@@ -1508,10 +1734,35 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           [resource.id],
         );
       }
+      const stateBefore = {
+        revisions: await source.getRepository(CmsRevisionEntity).countBy({
+          resourceId: resource.id,
+        }),
+        typedRows: await source
+          .getRepository(ManagedChunkInstanceRevisionEntity)
+          .countBy({ instanceId: instance.instanceId }),
+        events: await source.getRepository(CmsRevisionEventEntity).countBy({
+          resourceId: resource.id,
+        }),
+      };
       const url = process.env.MANAGED_CHUNK_TEST_DATABASE_URL!;
       const leftSource = await createIndependentSource(url);
       const rightSource = await createIndependentSource(url);
+      const blockerSource = await createIndependentSource(url);
+      const blocker = blockerSource.createQueryRunner();
+      await blocker.connect();
+      await blocker.startTransaction();
       try {
+        await blocker.query(
+          `SELECT id FROM cms_revision_resources WHERE id = $1 FOR UPDATE`,
+          [resource.id],
+        );
+        const [{ pg_backend_pid: leftPid }] = await leftSource.query(
+          'SELECT pg_backend_pid()',
+        );
+        const [{ pg_backend_pid: rightPid }] = await rightSource.query(
+          'SELECT pg_backend_pid()',
+        );
         const invoke = (dataSource: DataSource) => {
           const candidate = servicesFor(dataSource).repository;
           const input = {
@@ -1524,9 +1775,36 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
             ? candidate.approveInstanceRevision(input)
             : candidate.publishInstanceRevision(input);
         };
+        const leftTransition = invoke(leftSource);
+        const rightTransition = invoke(rightSource);
+        const leftWait = await observeLockWait(
+          source,
+          leftPid,
+          'cms_revision_resources',
+        );
+        const rightWait = await observeLockWait(
+          source,
+          rightPid,
+          'cms_revision_resources',
+        );
+        expect(leftWait.heldRelations).toEqual(
+          expect.arrayContaining([
+            'sites',
+            'managed_chunk_instances',
+            'cms_revision_resources',
+          ]),
+        );
+        expect(rightWait.heldRelations).toEqual(
+          expect.arrayContaining([
+            'sites',
+            'managed_chunk_instances',
+            'cms_revision_resources',
+          ]),
+        );
+        await blocker.commitTransaction();
         const results = await Promise.allSettled([
-          invoke(leftSource),
-          invoke(rightSource),
+          leftTransition,
+          rightTransition,
         ]);
         expect(
           results.filter((result) => result.status === 'fulfilled'),
@@ -1538,14 +1816,42 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         expect(rejected).toHaveLength(1);
         expect(rejected[0].reason).toBeInstanceOf(ConflictException);
         expect(sqlState(rejected[0].reason)).not.toBe('40P01');
+        const saved = await source
+          .getRepository(CmsRevisionResourceEntity)
+          .findOneByOrFail({ id: resource.id });
+        expect(saved.draftRevisionId).toBe(instance.revisionId);
+        expect(saved.approvedRevisionId).toBe(instance.revisionId);
+        expect(saved.publishedRevisionId).toBe(
+          operation === 'publish' ? instance.revisionId : null,
+        );
+        expect(saved.reviewState).toBe('approved');
         expect(
           await source.getRepository(CmsRevisionEventEntity).countBy({
             resourceId: resource.id,
             eventType: operation === 'approve' ? 'approved' : 'published',
           }),
         ).toBe(1);
+        expect({
+          revisions: await source.getRepository(CmsRevisionEntity).countBy({
+            resourceId: resource.id,
+          }),
+          typedRows: await source
+            .getRepository(ManagedChunkInstanceRevisionEntity)
+            .countBy({ instanceId: instance.instanceId }),
+          events: await source.getRepository(CmsRevisionEventEntity).countBy({
+            resourceId: resource.id,
+          }),
+        }).toEqual({
+          ...stateBefore,
+          events: stateBefore.events + 1,
+        });
       } finally {
+        if (blocker.isTransactionActive) await blocker.rollbackTransaction();
+        await blocker.release();
         await Promise.all([
+          blockerSource.isInitialized
+            ? blockerSource.destroy()
+            : Promise.resolve(),
           leftSource.isInitialized ? leftSource.destroy() : Promise.resolve(),
           rightSource.isInitialized ? rightSource.destroy() : Promise.resolve(),
         ]);
@@ -1577,8 +1883,12 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     await assignment.startTransaction();
     try {
       await assignment.query(
-        `UPDATE site_accesses SET requires_approval = requires_approval
-         WHERE user_id = $1 AND site_id = $2`,
+        `DELETE FROM site_accesses WHERE user_id = $1 AND site_id = $2`,
+        [fixture.userId, fixture.siteId],
+      );
+      await assignment.query(
+        `INSERT INTO site_accesses (user_id, site_id, role, requires_approval)
+         VALUES ($1, $2, 'site_owner', false)`,
         [fixture.userId, fixture.siteId],
       );
       const [{ pg_backend_pid: layoutPid }] = await layoutSource.query(
@@ -1595,7 +1905,15 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         ],
         actor: employeeActor(fixture),
       });
-      await waitForLockWait(source, layoutPid);
+      const accessWait = await observeLockWait(
+        source,
+        layoutPid,
+        'site_accesses',
+      );
+      expect(accessWait.heldRelations).toContain('site_accesses');
+      expect(accessWait.heldRelations).not.toEqual(
+        expect.arrayContaining(['sites', 'pages', 'managed_chunk_layouts']),
+      );
       expect(
         await source.getRepository(CmsRevisionResourceEntity).countBy({
           siteId: fixture.siteId,
@@ -1618,6 +1936,278 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     }
   }, 30_000);
 
+  it.each(['instance', 'layout'] as const)(
+    'observes real %s restore lock order and verifies the exact post-copy state',
+    async (kind) => {
+      const fixture = await seedAcceptanceFixture(source, 'lock-order-' + kind);
+      const { repository } = servicesFor(source);
+      const [contract] = await repository.registerContracts({
+        templatePackageId: fixture.packageId,
+        templatePackageVersionId: fixture.packageVersionId,
+        definitions: [managedDefinition('lock-order-banner')],
+      });
+      const instance = await repository.createInstanceDraft({
+        siteId: fixture.siteId,
+        displayName: 'Lock order',
+        contractId: contract.id,
+        data: { headline: kind },
+        sanitizerPolicyVersion: null,
+        actor: adminActor(fixture),
+      });
+      const layout = await repository.saveLayoutDraft({
+        siteId: fixture.siteId,
+        target: { kind: 'page', pageId: fixture.pageId },
+        templateKey: 'home',
+        templateVersion: '1',
+        expectedDraftRevisionId: null,
+        placements: [
+          { slotKey: 'hero', position: 0, instanceId: instance.instanceId },
+        ],
+        actor: adminActor(fixture),
+      });
+      const entityId =
+        kind === 'instance' ? instance.instanceId : layout.layoutId;
+      const revisionId =
+        kind === 'instance' ? instance.revisionId : layout.revisionId;
+      const resourceType =
+        kind === 'instance' ? 'chunk_instance' : 'chunk_layout';
+      const ownerTable =
+        kind === 'instance'
+          ? 'managed_chunk_instances'
+          : 'managed_chunk_layouts';
+      const finalTable =
+        kind === 'instance'
+          ? 'managed_chunk_instance_revisions'
+          : 'managed_chunk_placements';
+      const ownerQueryToken =
+        kind === 'instance'
+          ? '"ManagedChunkInstanceEntity"'
+          : '"ManagedChunkLayoutEntity"';
+      const finalQueryToken =
+        kind === 'instance'
+          ? '"ManagedChunkInstanceRevisionEntity"'
+          : '"ManagedChunkPlacementEntity"';
+      const resource = await source
+        .getRepository(CmsRevisionResourceEntity)
+        .findOneByOrFail({
+          siteId: fixture.siteId,
+          resourceType,
+          entityId,
+        });
+      const blockers = [] as ReturnType<DataSource['createQueryRunner']>[];
+      const block = async (sql: string, parameters: unknown[] = []) => {
+        const runner = source.createQueryRunner();
+        blockers.push(runner);
+        await runner.connect();
+        await runner.startTransaction();
+        await runner.query("SET LOCAL statement_timeout = '15s'");
+        await runner.query(sql, parameters);
+        return runner;
+      };
+      const release = async (
+        runner: ReturnType<DataSource['createQueryRunner']>,
+      ) => {
+        if (runner.isTransactionActive) await runner.rollbackTransaction();
+      };
+
+      const accessBlocker = await block(
+        `SELECT id FROM site_accesses
+         WHERE user_id = $1 AND site_id = $2 FOR UPDATE`,
+        [fixture.userId, fixture.siteId],
+      );
+      const siteBlocker = await block(
+        `SELECT id FROM sites WHERE id = $1 FOR UPDATE`,
+        [fixture.siteId],
+      );
+      const ownerBlocker = await block(
+        `SELECT id FROM ${ownerTable} WHERE id = $1 FOR UPDATE`,
+        [entityId],
+      );
+      const resourceBlocker = await block(
+        `SELECT id FROM cms_revision_resources WHERE id = $1 FOR UPDATE`,
+        [resource.id],
+      );
+      const revisionBlocker = await block(
+        `SELECT id FROM cms_revisions WHERE id = $1 FOR UPDATE`,
+        [revisionId],
+      );
+      const typedBlocker =
+        kind === 'instance'
+          ? await block(
+              `SELECT revision_id FROM managed_chunk_instance_revisions
+               WHERE revision_id = $1 FOR UPDATE`,
+              [revisionId],
+            )
+          : await block(
+              `LOCK TABLE managed_chunk_placements IN ACCESS EXCLUSIVE MODE`,
+            );
+      const writerSource = await createIndependentSource(
+        process.env.MANAGED_CHUNK_TEST_DATABASE_URL!,
+      );
+      let restore: Promise<{ id: string; versionNumber: number }> | undefined;
+      try {
+        const [{ pg_backend_pid: writerPid }] = await writerSource.query(
+          'SELECT pg_backend_pid()',
+        );
+        const writerRepository = servicesFor(writerSource).repository;
+        restore =
+          kind === 'instance'
+            ? writerRepository.restoreInstanceRevision({
+                siteId: fixture.siteId,
+                instanceId: instance.instanceId,
+                sourceRevisionId: instance.revisionId,
+                expectedDraftRevisionId: instance.revisionId,
+                actor: employeeActor(fixture),
+              })
+            : writerRepository.restoreLayoutRevision({
+                siteId: fixture.siteId,
+                layoutId: layout.layoutId,
+                sourceRevisionId: layout.revisionId,
+                expectedDraftRevisionId: layout.revisionId,
+                actor: employeeActor(fixture),
+              });
+
+        const accessWait = await observeLockWait(
+          source,
+          writerPid,
+          'site_accesses',
+        );
+        expect(accessWait.heldRelations).toContain('site_accesses');
+        expect(accessWait.heldRelations).not.toEqual(
+          expect.arrayContaining([
+            'sites',
+            ownerTable,
+            'cms_revision_resources',
+            'cms_revisions',
+            finalTable,
+          ]),
+        );
+        await release(accessBlocker);
+
+        const siteWait = await observeLockWait(
+          source,
+          writerPid,
+          '"SiteEntity"',
+        );
+        expect(siteWait.heldRelations).toEqual(
+          expect.arrayContaining(['site_accesses', 'sites']),
+        );
+        await release(siteBlocker);
+
+        const ownerWait = await observeLockWait(
+          source,
+          writerPid,
+          ownerQueryToken,
+        );
+        expect(ownerWait.heldRelations).toEqual(
+          expect.arrayContaining(['sites', ownerTable]),
+        );
+        await release(ownerBlocker);
+
+        const resourceWait = await observeLockWait(
+          source,
+          writerPid,
+          '"CmsRevisionResourceEntity"',
+        );
+        expect(resourceWait.heldRelations).toEqual(
+          expect.arrayContaining([ownerTable, 'cms_revision_resources']),
+        );
+        await release(resourceBlocker);
+
+        const revisionWait = await observeLockWait(
+          source,
+          writerPid,
+          '"CmsRevisionEntity"',
+        );
+        expect(revisionWait.heldRelations).toEqual(
+          expect.arrayContaining(['cms_revision_resources', 'cms_revisions']),
+        );
+        await release(revisionBlocker);
+
+        const typedWait = await observeLockWait(
+          source,
+          writerPid,
+          finalQueryToken,
+        );
+        expect(typedWait.heldRelations).toEqual(
+          expect.arrayContaining(['cms_revision_resources', 'cms_revisions']),
+        );
+        if (kind === 'instance') {
+          expect(typedWait.heldRelations).toContain(finalTable);
+        } else {
+          expect(typedWait.waitingLocks).toContain('relation:AccessShareLock');
+        }
+        await release(typedBlocker);
+
+        const restored = await restore;
+        expect(restored.versionNumber).toBe(2);
+        const savedResource = await source
+          .getRepository(CmsRevisionResourceEntity)
+          .findOneByOrFail({ id: resource.id });
+        expect(savedResource).toEqual(
+          expect.objectContaining({
+            draftRevisionId: restored.id,
+            approvedRevisionId: null,
+            publishedRevisionId: null,
+            latestVersionNumber: 2,
+            reviewState: 'draft',
+          }),
+        );
+        expect(
+          await source.getRepository(CmsRevisionEventEntity).countBy({
+            resourceId: resource.id,
+            eventType: 'version_restored',
+          }),
+        ).toBe(1);
+        expect(
+          await source.getRepository(CmsRevisionEntity).countBy({
+            resourceId: resource.id,
+          }),
+        ).toBe(2);
+        if (kind === 'instance') {
+          const links = await source
+            .getRepository(ManagedChunkInstanceRevisionEntity)
+            .findBy({ instanceId: instance.instanceId });
+          expect(links).toHaveLength(2);
+          expect(links.map(({ contractId }) => contractId)).toEqual([
+            contract.id,
+            contract.id,
+          ]);
+        } else {
+          const placements = await source
+            .getRepository(ManagedChunkPlacementEntity)
+            .findBy({ layoutId: layout.layoutId });
+          expect(placements).toHaveLength(2);
+          expect(
+            placements.map(({ instanceId, slotKey, position }) => ({
+              instanceId,
+              slotKey,
+              position,
+            })),
+          ).toEqual([
+            {
+              instanceId: instance.instanceId,
+              slotKey: 'hero',
+              position: 0,
+            },
+            {
+              instanceId: instance.instanceId,
+              slotKey: 'hero',
+              position: 0,
+            },
+          ]);
+        }
+      } finally {
+        for (const runner of blockers.reverse()) {
+          if (runner.isTransactionActive) await runner.rollbackTransaction();
+          if (!runner.isReleased) await runner.release();
+        }
+        await restore?.catch(() => undefined);
+        if (writerSource.isInitialized) await writerSource.destroy();
+      }
+    },
+    45_000,
+  );
   it('uses real READ ONLY and REPEATABLE READ compatibility transactions', async () => {
     const fixture = await seedAcceptanceFixture(source, 'compatibility');
     const { repository, revisions } = servicesFor(source);
@@ -1900,18 +2490,58 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     ).resolves.toEqual(
       expect.objectContaining({ placements: expect.any(Array) }),
     );
+    await source.query(
+      `UPDATE sites SET template_package_id = $1,
+        current_template_package_version_id = $2 WHERE id = $3`,
+      [fixture.otherPackageId, fixture.otherPackageVersionId, fixture.siteId],
+    );
     await expect(
+      repository.readCompatibilityInventory({
+        siteId: fixture.siteId,
+        templatePackageId: fixture.packageId,
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({ placements: expect.any(Array) }),
+    );
+    expect(
+      await source.query(
+        `SELECT template_package_id, current_template_package_version_id
+         FROM sites WHERE id = $1`,
+        [fixture.siteId],
+      ),
+    ).toEqual([
+      {
+        template_package_id: fixture.otherPackageId,
+        current_template_package_version_id: fixture.otherPackageVersionId,
+      },
+    ]);
+
+    const captureNotFound = async (
+      operation: Promise<unknown>,
+    ): Promise<NotFoundException> => {
+      try {
+        await operation;
+      } catch (error) {
+        expect(error).toBeInstanceOf(NotFoundException);
+        return error as NotFoundException;
+      }
+      throw new Error('Expected compatibility inventory NotFoundException');
+    };
+    const missingSite = await captureNotFound(
       repository.readCompatibilityInventory({
         siteId: randomUUID(),
         templatePackageId: fixture.packageId,
       }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-    await expect(
+    );
+    const missingPackage = await captureNotFound(
       repository.readCompatibilityInventory({
         siteId: fixture.siteId,
         templatePackageId: randomUUID(),
       }),
-    ).rejects.toBeInstanceOf(NotFoundException);
+    );
+    expect(missingSite.message).toBe('Сайт или пакет не найден');
+    expect(missingPackage.message).toBe(missingSite.message);
+    expect(missingPackage.getResponse()).toEqual(missingSite.getResponse());
   }, 40_000);
 
   it('enforces owner identity triggers while allowing mutable metadata and actor SET NULL', async () => {
@@ -2038,19 +2668,27 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         resourceType: 'chunk_instance',
         entityId: instance.instanceId,
       });
-    const instanceBefore = {
-      revisions: await source.getRepository(CmsRevisionEntity).countBy({
-        resourceId: instanceResource.id,
-      }),
-      links: await source
-        .getRepository(ManagedChunkInstanceRevisionEntity)
-        .countBy({
-          instanceId: instance.instanceId,
+    const instanceState = async () => {
+      const current = await source
+        .getRepository(CmsRevisionResourceEntity)
+        .findOneByOrFail({ id: instanceResource.id });
+      return {
+        draft: current.draftRevisionId,
+        approved: current.approvedRevisionId,
+        published: current.publishedRevisionId,
+        reviewState: current.reviewState,
+        revisions: await source.getRepository(CmsRevisionEntity).countBy({
+          resourceId: instanceResource.id,
         }),
-      events: await source.getRepository(CmsRevisionEventEntity).countBy({
-        resourceId: instanceResource.id,
-      }),
+        links: await source
+          .getRepository(ManagedChunkInstanceRevisionEntity)
+          .countBy({ instanceId: instance.instanceId }),
+        events: await source.getRepository(CmsRevisionEventEntity).countBy({
+          resourceId: instanceResource.id,
+        }),
+      };
     };
+    const instanceBefore = await instanceState();
     await expect(
       source.transaction((db) =>
         revisions.restoreManagedRevisionUsingManager(
@@ -2088,19 +2726,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         ),
       ),
     ).rejects.toBeInstanceOf(ConflictException);
-    expect({
-      revisions: await source.getRepository(CmsRevisionEntity).countBy({
-        resourceId: instanceResource.id,
-      }),
-      links: await source
-        .getRepository(ManagedChunkInstanceRevisionEntity)
-        .countBy({
-          instanceId: instance.instanceId,
-        }),
-      events: await source.getRepository(CmsRevisionEventEntity).countBy({
-        resourceId: instanceResource.id,
-      }),
-    }).toEqual(instanceBefore);
+    expect(await instanceState()).toEqual(instanceBefore);
 
     const layout = await repository.saveLayoutDraft({
       siteId: fixture.siteId,
@@ -2120,19 +2746,27 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
         resourceType: 'chunk_layout',
         entityId: layout.layoutId,
       });
-    const layoutBefore = {
-      revisions: await source.getRepository(CmsRevisionEntity).countBy({
-        resourceId: layoutResource.id,
-      }),
-      placements: await source
-        .getRepository(ManagedChunkPlacementEntity)
-        .countBy({
-          layoutId: layout.layoutId,
+    const layoutState = async () => {
+      const current = await source
+        .getRepository(CmsRevisionResourceEntity)
+        .findOneByOrFail({ id: layoutResource.id });
+      return {
+        draft: current.draftRevisionId,
+        approved: current.approvedRevisionId,
+        published: current.publishedRevisionId,
+        reviewState: current.reviewState,
+        revisions: await source.getRepository(CmsRevisionEntity).countBy({
+          resourceId: layoutResource.id,
         }),
-      events: await source.getRepository(CmsRevisionEventEntity).countBy({
-        resourceId: layoutResource.id,
-      }),
+        placements: await source
+          .getRepository(ManagedChunkPlacementEntity)
+          .countBy({ layoutId: layout.layoutId }),
+        events: await source.getRepository(CmsRevisionEventEntity).countBy({
+          resourceId: layoutResource.id,
+        }),
+      };
     };
+    const layoutBefore = await layoutState();
     const modes = ['missing', 'extra', 'changed'] as const;
     for (const mode of modes) {
       await expect(
@@ -2186,19 +2820,7 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           ),
         ),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect({
-        revisions: await source.getRepository(CmsRevisionEntity).countBy({
-          resourceId: layoutResource.id,
-        }),
-        placements: await source
-          .getRepository(ManagedChunkPlacementEntity)
-          .countBy({
-            layoutId: layout.layoutId,
-          }),
-        events: await source.getRepository(CmsRevisionEventEntity).countBy({
-          resourceId: layoutResource.id,
-        }),
-      }).toEqual(layoutBefore);
+      expect(await layoutState()).toEqual(layoutBefore);
     }
   }, 30_000);
 
@@ -2361,6 +2983,58 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
           )
         )[0].manifest_version,
       ).toBe(2);
+      const requiredConstraints = [
+        'CHK_cms_revision_resources_type',
+        'CHK_managed_chunk_contracts_data_schema_object',
+        'CHK_managed_chunk_contracts_digest',
+        'CHK_managed_chunk_contracts_field_contract_object',
+        'CHK_managed_chunk_layouts_scope',
+        'CHK_managed_chunk_migration_provenance_source_type',
+        'CHK_managed_chunk_migration_provenance_target',
+        'CHK_managed_chunk_placements_position',
+        'CHK_template_package_versions_manifest_version',
+        'UQ_pages_id_site_id',
+      ];
+      const constraints: { conname: string; definition: string }[] =
+        await guardedSource.query(
+          `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint WHERE conname = ANY($1::text[]) ORDER BY conname`,
+          [requiredConstraints],
+        );
+      expect(constraints.map(({ conname }) => conname)).toEqual(
+        [...requiredConstraints].sort(),
+      );
+      expect(
+        constraints.find(
+          ({ conname }) => conname === 'CHK_cms_revision_resources_type',
+        ).definition,
+      ).toContain('chunk_instance');
+      expect(
+        constraints.find(
+          ({ conname }) =>
+            conname === 'CHK_template_package_versions_manifest_version',
+        ).definition,
+      ).toContain('2');
+
+      const requiredTriggers = [
+        'TRG_cms_revision_resources_managed_chunk_identity',
+        'TRG_managed_chunk_contracts_immutable',
+        'TRG_managed_chunk_instance_revisions_immutable',
+        'TRG_managed_chunk_instances_protect_identity',
+        'TRG_managed_chunk_instances_resource_identity',
+        'TRG_managed_chunk_layouts_protect_identity',
+        'TRG_managed_chunk_layouts_resource_identity',
+        'TRG_managed_chunk_migration_provenance_immutable',
+        'TRG_managed_chunk_placements_immutable',
+      ];
+      const triggers: { tgname: string }[] = await guardedSource.query(
+        `SELECT tgname FROM pg_trigger
+         WHERE NOT tgisinternal AND tgname = ANY($1::text[]) ORDER BY tgname`,
+        [requiredTriggers],
+      );
+      expect(triggers.map(({ tgname }) => tgname)).toEqual(
+        [...requiredTriggers].sort(),
+      );
     } finally {
       if (guardWriter?.isInitialized) await guardWriter.destroy();
       if (safeSource?.isInitialized) await safeSource.destroy();
