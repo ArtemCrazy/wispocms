@@ -19,9 +19,14 @@ import {
   SiteAccessEntity,
   SiteEntity,
   SiteRole,
+  TemplatePackageEntity,
   TemplatePackageVersionEntity,
 } from '../database/entities';
 import { CmsRevisionsService } from '../content/cms-revisions.service';
+import {
+  checkManagedChunkContractCompatibility,
+  type ManagedChunkCompatibilityCandidate,
+} from './managed-chunk-compatibility';
 import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
 import {
   canonicalManagedChunkContract,
@@ -2826,4 +2831,962 @@ describe('ManagedChunkPersistenceRepository lifecycle lock contract', () => {
       }
     },
   );
+});
+
+type CompatibilityInventoryState = Record<
+  | 'sites'
+  | 'packages'
+  | 'resources'
+  | 'revisions'
+  | 'contracts'
+  | 'instances'
+  | 'instanceLinks'
+  | 'layouts'
+  | 'placements',
+  Array<Record<string, unknown>>
+>;
+
+const INVENTORY_PACKAGE_KEY = 'skinova-media';
+const INVENTORY_OTHER_PACKAGE_ID = '12121212-1212-4212-8212-121212121212';
+const INVENTORY_OTHER_SITE_ID = '13131313-1313-4313-8313-131313131313';
+const INVENTORY_PAGE_ID = '14141414-1414-4414-8414-141414141414';
+const SHARED_INSTANCE_ID = '15151515-1515-4515-8515-151515151515';
+const SWITCHED_INSTANCE_ID = '16161616-1616-4616-8616-161616161616';
+const PUBLISHED_ONLY_INSTANCE_ID = '17171717-1717-4717-8717-171717171717';
+const DRAFT_ONLY_INSTANCE_ID = '22222222-aaaa-4222-8222-222222222222';
+const INVENTORY_LAYOUT_ID = '18181818-1818-4818-8818-181818181818';
+const INVENTORY_LAYOUT_RESOURCE_ID = '19191919-1919-4919-8919-191919191919';
+const INVENTORY_LAYOUT_DRAFT_ID = '20202020-aaaa-4020-8020-202020202020';
+const INVENTORY_LAYOUT_PUBLISHED_ID = '21212121-aaaa-4121-8121-212121212121';
+const DIGEST_A = `sha256:${'a'.repeat(64)}`;
+const DIGEST_B = `sha256:${'b'.repeat(64)}`;
+const DIGEST_C = `sha256:${'c'.repeat(64)}`;
+
+const DATABASE_UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function compatibilityInventoryState(): CompatibilityInventoryState {
+  return {
+    sites: [
+      { id: SITE_ID, templatePackageId: PACKAGE_ID },
+      {
+        id: INVENTORY_OTHER_SITE_ID,
+        templatePackageId: INVENTORY_OTHER_PACKAGE_ID,
+      },
+    ],
+    packages: [
+      { id: PACKAGE_ID, packageId: INVENTORY_PACKAGE_KEY },
+      { id: INVENTORY_OTHER_PACKAGE_ID, packageId: 'other-package' },
+    ],
+    contracts: [
+      {
+        id: 'contract-shared-v1',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'shared',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+      },
+      {
+        id: 'contract-switch-v1',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'switching',
+        schemaVersion: '1',
+        contractDigest: DIGEST_B,
+      },
+      {
+        id: 'contract-switch-v2',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'switching',
+        schemaVersion: '2',
+        contractDigest: DIGEST_C,
+      },
+      {
+        id: 'contract-wrong-resource',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'wrong-resource',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+      },
+      {
+        id: 'contract-wrong-revision',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'wrong-revision',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+      },
+      {
+        id: 'contract-wrong-link',
+        templatePackageId: PACKAGE_ID,
+        definitionKey: 'wrong-link',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+      },
+      {
+        id: 'contract-other-package',
+        templatePackageId: INVENTORY_OTHER_PACKAGE_ID,
+        definitionKey: 'foreign',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+      },
+    ],
+    instances: [
+      {
+        id: SHARED_INSTANCE_ID,
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-shared',
+      },
+      {
+        id: SWITCHED_INSTANCE_ID,
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-switch',
+      },
+      {
+        id: PUBLISHED_ONLY_INSTANCE_ID,
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-published-only',
+      },
+      {
+        id: DRAFT_ONLY_INSTANCE_ID,
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-draft-only',
+      },
+      {
+        id: 'foreign-instance',
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-foreign',
+      },
+      {
+        id: 'wrong-type-instance',
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-wrong-type',
+      },
+      {
+        id: 'wrong-revision-instance',
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-wrong-revision',
+      },
+      {
+        id: 'wrong-link-instance',
+        siteId: SITE_ID,
+        revisionResourceId: 'resource-wrong-link',
+      },
+      {
+        id: 'other-site-instance',
+        siteId: INVENTORY_OTHER_SITE_ID,
+        revisionResourceId: 'resource-other-site',
+      },
+    ],
+    resources: [
+      {
+        id: 'resource-shared',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: SHARED_INSTANCE_ID,
+        draftRevisionId: 'shared-draft',
+        publishedRevisionId: 'shared-published',
+      },
+      {
+        id: 'resource-switch',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: SWITCHED_INSTANCE_ID,
+        draftRevisionId: 'switch-draft',
+        publishedRevisionId: 'switch-published',
+      },
+      {
+        id: 'resource-published-only',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: PUBLISHED_ONLY_INSTANCE_ID,
+        draftRevisionId: null,
+        publishedRevisionId: 'published-only-published',
+      },
+      {
+        id: 'resource-draft-only',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: DRAFT_ONLY_INSTANCE_ID,
+        draftRevisionId: 'draft-only-draft',
+        publishedRevisionId: null,
+      },
+      {
+        id: 'resource-foreign',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: 'foreign-instance',
+        draftRevisionId: 'foreign-draft',
+        publishedRevisionId: null,
+      },
+      {
+        id: 'resource-wrong-type',
+        siteId: SITE_ID,
+        resourceType: 'article',
+        entityId: 'wrong-type-instance',
+        draftRevisionId: 'wrong-type-draft',
+        publishedRevisionId: null,
+      },
+      {
+        id: 'resource-wrong-revision',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: 'wrong-revision-instance',
+        draftRevisionId: 'wrong-revision-draft',
+        publishedRevisionId: null,
+      },
+      {
+        id: 'resource-wrong-link',
+        siteId: SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: 'wrong-link-instance',
+        draftRevisionId: 'wrong-link-draft',
+        publishedRevisionId: null,
+      },
+      {
+        id: INVENTORY_LAYOUT_RESOURCE_ID,
+        siteId: SITE_ID,
+        resourceType: 'chunk_layout',
+        entityId: INVENTORY_LAYOUT_ID,
+        draftRevisionId: INVENTORY_LAYOUT_DRAFT_ID,
+        publishedRevisionId: INVENTORY_LAYOUT_PUBLISHED_ID,
+      },
+      {
+        id: 'surface-layout-resource',
+        siteId: SITE_ID,
+        resourceType: 'chunk_layout',
+        entityId: 'surface-layout',
+        draftRevisionId: 'surface-layout-draft',
+        publishedRevisionId: null,
+      },
+      {
+        id: 'resource-other-site',
+        siteId: INVENTORY_OTHER_SITE_ID,
+        resourceType: 'chunk_instance',
+        entityId: 'other-site-instance',
+        draftRevisionId: 'other-site-draft',
+        publishedRevisionId: null,
+      },
+    ],
+    revisions: [
+      { id: 'shared-draft', resourceId: 'resource-shared', snapshot: {} },
+      {
+        id: 'shared-published',
+        resourceId: 'resource-shared',
+        snapshot: {},
+      },
+      { id: 'switch-draft', resourceId: 'resource-switch', snapshot: {} },
+      {
+        id: 'switch-published',
+        resourceId: 'resource-switch',
+        snapshot: {},
+      },
+      {
+        id: 'published-only-published',
+        resourceId: 'resource-published-only',
+        snapshot: {},
+      },
+      {
+        id: 'draft-only-draft',
+        resourceId: 'resource-draft-only',
+        snapshot: {},
+      },
+      { id: 'foreign-draft', resourceId: 'resource-foreign', snapshot: {} },
+      {
+        id: 'wrong-type-draft',
+        resourceId: 'resource-wrong-type',
+        snapshot: {},
+      },
+      {
+        id: 'wrong-revision-draft',
+        resourceId: 'another-resource',
+        snapshot: {},
+      },
+      {
+        id: 'wrong-link-draft',
+        resourceId: 'resource-wrong-link',
+        snapshot: {},
+      },
+      {
+        id: INVENTORY_LAYOUT_DRAFT_ID,
+        resourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        snapshot: {
+          formatVersion: 1,
+          templateKey: 'home',
+          templateVersion: '2',
+        },
+      },
+      {
+        id: INVENTORY_LAYOUT_PUBLISHED_ID,
+        resourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        snapshot: {
+          formatVersion: 1,
+          templateKey: 'home',
+          templateVersion: '1',
+        },
+      },
+      {
+        id: 'surface-layout-draft',
+        resourceId: 'surface-layout-resource',
+        snapshot: {
+          formatVersion: 1,
+          templateKey: 'shell',
+          templateVersion: '1',
+        },
+      },
+      {
+        id: 'other-site-draft',
+        resourceId: 'resource-other-site',
+        snapshot: {},
+      },
+    ],
+    instanceLinks: [
+      {
+        revisionId: 'shared-draft',
+        revisionResourceId: 'resource-shared',
+        siteId: SITE_ID,
+        instanceId: SHARED_INSTANCE_ID,
+        contractId: 'contract-shared-v1',
+      },
+      {
+        revisionId: 'shared-published',
+        revisionResourceId: 'resource-shared',
+        siteId: SITE_ID,
+        instanceId: SHARED_INSTANCE_ID,
+        contractId: 'contract-shared-v1',
+      },
+      {
+        revisionId: 'switch-draft',
+        revisionResourceId: 'resource-switch',
+        siteId: SITE_ID,
+        instanceId: SWITCHED_INSTANCE_ID,
+        contractId: 'contract-switch-v2',
+      },
+      {
+        revisionId: 'switch-published',
+        revisionResourceId: 'resource-switch',
+        siteId: SITE_ID,
+        instanceId: SWITCHED_INSTANCE_ID,
+        contractId: 'contract-switch-v1',
+      },
+      {
+        revisionId: 'published-only-published',
+        revisionResourceId: 'resource-published-only',
+        siteId: SITE_ID,
+        instanceId: PUBLISHED_ONLY_INSTANCE_ID,
+        contractId: 'contract-shared-v1',
+      },
+      {
+        revisionId: 'draft-only-draft',
+        revisionResourceId: 'resource-draft-only',
+        siteId: SITE_ID,
+        instanceId: DRAFT_ONLY_INSTANCE_ID,
+        contractId: 'contract-shared-v1',
+      },
+      {
+        revisionId: 'foreign-draft',
+        revisionResourceId: 'resource-foreign',
+        siteId: SITE_ID,
+        instanceId: 'foreign-instance',
+        contractId: 'contract-other-package',
+      },
+      {
+        revisionId: 'wrong-type-draft',
+        revisionResourceId: 'resource-wrong-type',
+        siteId: SITE_ID,
+        instanceId: 'wrong-type-instance',
+        contractId: 'contract-wrong-resource',
+      },
+      {
+        revisionId: 'wrong-revision-draft',
+        revisionResourceId: 'resource-wrong-revision',
+        siteId: SITE_ID,
+        instanceId: 'wrong-revision-instance',
+        contractId: 'contract-wrong-revision',
+      },
+      {
+        revisionId: 'wrong-link-draft',
+        revisionResourceId: 'resource-wrong-link',
+        siteId: INVENTORY_OTHER_SITE_ID,
+        instanceId: 'wrong-link-instance',
+        contractId: 'contract-wrong-link',
+      },
+      {
+        revisionId: 'other-site-draft',
+        revisionResourceId: 'resource-other-site',
+        siteId: INVENTORY_OTHER_SITE_ID,
+        instanceId: 'other-site-instance',
+        contractId: 'contract-other-package',
+      },
+    ],
+    layouts: [
+      {
+        id: INVENTORY_LAYOUT_ID,
+        siteId: SITE_ID,
+        revisionResourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        scopeKind: 'page',
+        pageId: INVENTORY_PAGE_ID,
+        surfaceKey: null,
+      },
+      {
+        id: 'surface-layout',
+        siteId: SITE_ID,
+        revisionResourceId: 'surface-layout-resource',
+        scopeKind: 'site_surface',
+        pageId: null,
+        surfaceKey: 'header',
+      },
+      {
+        id: 'other-site-layout',
+        siteId: INVENTORY_OTHER_SITE_ID,
+        revisionResourceId: 'other-site-layout-resource',
+        scopeKind: 'site_surface',
+        pageId: null,
+        surfaceKey: 'secret',
+      },
+    ],
+    placements: [
+      {
+        id: 'draft-switch',
+        siteId: SITE_ID,
+        layoutId: INVENTORY_LAYOUT_ID,
+        layoutRevisionResourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        layoutRevisionId: INVENTORY_LAYOUT_DRAFT_ID,
+        instanceId: SWITCHED_INSTANCE_ID,
+        slotKey: 'hero',
+        position: 0,
+      },
+      {
+        id: 'draft-missing-pointer',
+        siteId: SITE_ID,
+        layoutId: INVENTORY_LAYOUT_ID,
+        layoutRevisionResourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        layoutRevisionId: INVENTORY_LAYOUT_DRAFT_ID,
+        instanceId: PUBLISHED_ONLY_INSTANCE_ID,
+        slotKey: 'secondary',
+        position: 0,
+      },
+      {
+        id: 'published-shared',
+        siteId: SITE_ID,
+        layoutId: INVENTORY_LAYOUT_ID,
+        layoutRevisionResourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        layoutRevisionId: INVENTORY_LAYOUT_PUBLISHED_ID,
+        instanceId: SHARED_INSTANCE_ID,
+        slotKey: 'hero',
+        position: 1,
+      },
+      {
+        id: 'published-switch',
+        siteId: SITE_ID,
+        layoutId: INVENTORY_LAYOUT_ID,
+        layoutRevisionResourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        layoutRevisionId: INVENTORY_LAYOUT_PUBLISHED_ID,
+        instanceId: SWITCHED_INSTANCE_ID,
+        slotKey: 'hero',
+        position: 0,
+      },
+      {
+        id: 'published-missing-pointer',
+        siteId: SITE_ID,
+        layoutId: INVENTORY_LAYOUT_ID,
+        layoutRevisionResourceId: INVENTORY_LAYOUT_RESOURCE_ID,
+        layoutRevisionId: INVENTORY_LAYOUT_PUBLISHED_ID,
+        instanceId: DRAFT_ONLY_INSTANCE_ID,
+        slotKey: 'footer',
+        position: 0,
+      },
+      {
+        id: 'surface-shared',
+        siteId: SITE_ID,
+        layoutId: 'surface-layout',
+        layoutRevisionResourceId: 'surface-layout-resource',
+        layoutRevisionId: 'surface-layout-draft',
+        instanceId: SHARED_INSTANCE_ID,
+        slotKey: 'header',
+        position: 0,
+      },
+      {
+        id: 'wrong-layout-revision-resource',
+        siteId: SITE_ID,
+        layoutId: INVENTORY_LAYOUT_ID,
+        layoutRevisionResourceId: 'wrong-resource',
+        layoutRevisionId: INVENTORY_LAYOUT_DRAFT_ID,
+        instanceId: SHARED_INSTANCE_ID,
+        slotKey: 'leak',
+        position: 0,
+      },
+      {
+        id: 'other-site-placement',
+        siteId: INVENTORY_OTHER_SITE_ID,
+        layoutId: 'other-site-layout',
+        layoutRevisionResourceId: 'other-site-layout-resource',
+        layoutRevisionId: 'other-site-layout-draft',
+        instanceId: 'other-site-instance',
+        slotKey: 'secret',
+        position: 0,
+      },
+    ],
+  };
+}
+
+function createCompatibilityInventoryHarness(options?: { reverse?: boolean }) {
+  const state = compatibilityInventoryState();
+  if (options?.reverse) {
+    for (const rows of Object.values(state)) rows.reverse();
+  }
+  const before = structuredClone(state);
+  const transactionCalls: unknown[][] = [];
+  const queryCalls: Array<{
+    operation: 'find' | 'findOne';
+    entity: unknown;
+    where?: Record<string, unknown>;
+  }> = [];
+  const matches = (
+    row: Record<string, unknown>,
+    where: Record<string, unknown>,
+  ): boolean =>
+    Object.entries(where).every(([key, value]) => {
+      const findOperator = value as {
+        _type?: unknown;
+        _value?: unknown;
+      };
+      if (findOperator?._type === 'in' && Array.isArray(findOperator._value)) {
+        return findOperator._value.includes(row[key]);
+      }
+      return row[key] === value;
+    });
+  const rowsFor = (entity: unknown): Array<Record<string, unknown>> => {
+    if (entity === CmsRevisionResourceEntity) return state.resources;
+    if (entity === CmsRevisionEntity) return state.revisions;
+    if (entity === ManagedChunkContractEntity) return state.contracts;
+    if (entity === ManagedChunkInstanceEntity) return state.instances;
+    if (entity === ManagedChunkInstanceRevisionEntity)
+      return state.instanceLinks;
+    if (entity === ManagedChunkLayoutEntity) return state.layouts;
+    if (entity === ManagedChunkPlacementEntity) return state.placements;
+    throw new Error(
+      `Unexpected inventory collection: ${(entity as { name?: string }).name}`,
+    );
+  };
+  const manager = {
+    findOne: jest.fn(
+      (
+        entity: unknown,
+        options: { where: Record<string, unknown> },
+      ): Promise<Record<string, unknown> | null> => {
+        queryCalls.push({ operation: 'findOne', entity, where: options.where });
+        if (
+          (entity === SiteEntity &&
+            (!DATABASE_UUID_PATTERN.test(String(options.where.id)) ||
+              !DATABASE_UUID_PATTERN.test(
+                String(options.where.templatePackageId),
+              ))) ||
+          (entity === TemplatePackageEntity &&
+            !DATABASE_UUID_PATTERN.test(String(options.where.id)))
+        ) {
+          return Promise.reject(
+            Object.assign(new Error('invalid input syntax for type uuid'), {
+              code: '22P02',
+            }),
+          );
+        }
+        const rows =
+          entity === SiteEntity
+            ? state.sites
+            : entity === TemplatePackageEntity
+              ? state.packages
+              : rowsFor(entity);
+        return Promise.resolve(
+          rows.find((row) => matches(row, options.where)) ?? null,
+        );
+      },
+    ),
+    find: jest.fn(
+      (
+        entity: unknown,
+        options?: { where?: Record<string, unknown> },
+      ): Promise<Array<Record<string, unknown>>> => {
+        queryCalls.push({ operation: 'find', entity, where: options?.where });
+        return Promise.resolve(
+          rowsFor(entity)
+            .filter((row) => !options?.where || matches(row, options.where))
+            .map((row) => structuredClone(row)),
+        );
+      },
+    ),
+  };
+  const dataSource = {
+    transaction: jest.fn(async (...args: unknown[]) => {
+      transactionCalls.push(args);
+      const callback = args.at(-1) as (db: EntityManager) => Promise<unknown>;
+      return callback(manager as unknown as EntityManager);
+    }),
+  };
+  return {
+    repository: new ManagedChunkPersistenceRepository(
+      dataSource as never,
+      {} as CmsRevisionsService,
+    ),
+    state,
+    before,
+    transactionCalls,
+    queryCalls,
+  };
+}
+
+describe('ManagedChunkPersistenceRepository compatibility inventory', () => {
+  it('reads draft and published independently and aggregates exact contracts', async () => {
+    const harness = createCompatibilityInventoryHarness();
+
+    const inventory = await harness.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+
+    expect(inventory.contracts).toEqual([
+      {
+        packageId: INVENTORY_PACKAGE_KEY,
+        definitionKey: 'shared',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+        sources: ['draft', 'published'],
+      },
+      {
+        packageId: INVENTORY_PACKAGE_KEY,
+        definitionKey: 'switching',
+        schemaVersion: '1',
+        contractDigest: DIGEST_B,
+        sources: ['published'],
+      },
+      {
+        packageId: INVENTORY_PACKAGE_KEY,
+        definitionKey: 'switching',
+        schemaVersion: '2',
+        contractDigest: DIGEST_C,
+        sources: ['draft'],
+      },
+    ]);
+    expect(inventory.placements).toEqual([
+      {
+        source: 'draft',
+        layoutKey: `page:${INVENTORY_PAGE_ID}`,
+        templateKey: 'home',
+        templateVersion: '2',
+        slotKey: 'hero',
+        definitionKey: 'switching',
+        schemaVersion: '2',
+        contractDigest: DIGEST_C,
+        position: 0,
+      },
+      {
+        source: 'draft',
+        layoutKey: 'site_surface:header',
+        templateKey: 'shell',
+        templateVersion: '1',
+        slotKey: 'header',
+        definitionKey: 'shared',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+        position: 0,
+      },
+      {
+        source: 'published',
+        layoutKey: `page:${INVENTORY_PAGE_ID}`,
+        templateKey: 'home',
+        templateVersion: '1',
+        slotKey: 'hero',
+        definitionKey: 'switching',
+        schemaVersion: '1',
+        contractDigest: DIGEST_B,
+        position: 0,
+      },
+      {
+        source: 'published',
+        layoutKey: `page:${INVENTORY_PAGE_ID}`,
+        templateKey: 'home',
+        templateVersion: '1',
+        slotKey: 'hero',
+        definitionKey: 'shared',
+        schemaVersion: '1',
+        contractDigest: DIGEST_A,
+        position: 1,
+      },
+    ]);
+    expect(JSON.stringify(inventory)).not.toContain('foreign');
+    expect(JSON.stringify(inventory)).not.toContain('secret');
+    expect(JSON.stringify(inventory)).not.toContain('leak');
+    expect(JSON.stringify(inventory)).not.toContain('wrong-resource');
+    expect(JSON.stringify(inventory)).not.toContain('wrong-revision');
+    expect(JSON.stringify(inventory)).not.toContain('wrong-link');
+  });
+
+  it('does not fallback between missing draft and published instance pointers', async () => {
+    const harness = createCompatibilityInventoryHarness();
+
+    const inventory = await harness.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+
+    expect(inventory.placements).not.toContainEqual(
+      expect.objectContaining({ source: 'draft', slotKey: 'secondary' }),
+    );
+    expect(inventory.placements).not.toContainEqual(
+      expect.objectContaining({ source: 'published', slotKey: 'footer' }),
+    );
+  });
+
+  it('is stable across storage order and caller mutation without writing state', async () => {
+    const forward = createCompatibilityInventoryHarness();
+    const reverse = createCompatibilityInventoryHarness({ reverse: true });
+
+    const first = await forward.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+    const second = await reverse.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+    expect(second).toEqual(first);
+    first.contracts.reverse();
+    first.placements[0].slotKey = 'mutated';
+
+    expect(
+      await forward.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      }),
+    ).toEqual(second);
+    expect(forward.state).toEqual(forward.before);
+    expect(forward.transactionCalls).toEqual([
+      ['REPEATABLE READ', expect.any(Function)],
+      ['REPEATABLE READ', expect.any(Function)],
+    ]);
+  });
+
+  it.each([
+    [
+      'wrong layout resource type',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const resource = harness.state.resources.find(
+          (row) => row.id === INVENTORY_LAYOUT_RESOURCE_ID,
+        );
+        if (!resource) throw new Error('Fixture layout resource is missing');
+        resource.resourceType = 'article';
+      },
+    ],
+    [
+      'wrong layout resource entity',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const resource = harness.state.resources.find(
+          (row) => row.id === INVENTORY_LAYOUT_RESOURCE_ID,
+        );
+        if (!resource) throw new Error('Fixture layout resource is missing');
+        resource.entityId = 'foreign-layout';
+      },
+    ],
+    [
+      'wrong layout revision resource',
+      (harness: ReturnType<typeof createCompatibilityInventoryHarness>) => {
+        const revision = harness.state.revisions.find(
+          (row) => row.id === INVENTORY_LAYOUT_DRAFT_ID,
+        );
+        if (!revision) throw new Error('Fixture layout revision is missing');
+        revision.resourceId = 'foreign-layout-resource';
+      },
+    ],
+  ])(
+    'excludes %s without leaking page placements',
+    async (
+      _: string,
+      mutate: (
+        harness: ReturnType<typeof createCompatibilityInventoryHarness>,
+      ) => void,
+    ) => {
+      const harness = createCompatibilityInventoryHarness();
+      mutate(harness);
+
+      const inventory = await harness.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      });
+
+      expect(inventory.placements).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'draft',
+            layoutKey: 'page:' + INVENTORY_PAGE_ID,
+          }),
+        ]),
+      );
+    },
+  );
+
+  it('keeps the inventory read within a bounded batch query budget', async () => {
+    const harness = createCompatibilityInventoryHarness();
+
+    await harness.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+
+    expect(harness.queryCalls.length).toBeLessThanOrEqual(9);
+    const inValues = (value: unknown): unknown[] => {
+      expect(value).toBeDefined();
+      if (value === null || value === undefined || typeof value !== 'object') {
+        return [];
+      }
+      const operator = value as { _type?: unknown; _value?: unknown };
+      expect(operator._type).toBe('in');
+      expect(Array.isArray(operator._value)).toBe(true);
+      return operator._value as unknown[];
+    };
+    const resourceRead = harness.queryCalls.find(
+      (call) =>
+        call.operation === 'find' && call.entity === CmsRevisionResourceEntity,
+    );
+    const revisionRead = harness.queryCalls.find(
+      (call) => call.operation === 'find' && call.entity === CmsRevisionEntity,
+    );
+    const contractRead = harness.queryCalls.find(
+      (call) =>
+        call.operation === 'find' && call.entity === ManagedChunkContractEntity,
+    );
+    expect(inValues(resourceRead?.where?.resourceType)).toEqual([
+      'chunk_instance',
+      'chunk_layout',
+    ]);
+    expect(inValues(revisionRead?.where?.id)).not.toContain('wrong-type-draft');
+    expect(inValues(contractRead?.where?.id)).not.toContain(
+      'contract-wrong-resource',
+    );
+  });
+
+  it.each([null, 'invalid', []])(
+    'excludes a layout revision with malformed snapshot %p',
+    async (snapshot) => {
+      const harness = createCompatibilityInventoryHarness();
+      const revision = harness.state.revisions.find(
+        (row) => row.id === INVENTORY_LAYOUT_DRAFT_ID,
+      );
+      if (!revision) throw new Error('Fixture layout revision is missing');
+      revision.snapshot = snapshot;
+
+      const inventory = await harness.repository.readCompatibilityInventory({
+        siteId: SITE_ID,
+        templatePackageId: PACKAGE_ID,
+      });
+      expect(inventory.placements).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            source: 'draft',
+            layoutKey: 'page:' + INVENTORY_PAGE_ID,
+          }),
+        ]),
+      );
+    },
+  );
+
+  it.each([
+    ['unknown site', 'unknown-site', PACKAGE_ID],
+    ['cross-package site', SITE_ID, INVENTORY_OTHER_PACKAGE_ID],
+    ['unknown package', SITE_ID, 'unknown-package'],
+  ])(
+    'normalizes %s inventory identity to the same safe error',
+    async (_, siteId, templatePackageId) => {
+      const harness = createCompatibilityInventoryHarness();
+
+      await expect(
+        harness.repository.readCompatibilityInventory({
+          siteId,
+          templatePackageId,
+        }),
+      ).rejects.toThrow('Сайт или пакет не найден');
+    },
+  );
+
+  it('lets an incompatible pending draft block a published-compatible candidate', async () => {
+    const harness = createCompatibilityInventoryHarness();
+    const inventory = await harness.repository.readCompatibilityInventory({
+      siteId: SITE_ID,
+      templatePackageId: PACKAGE_ID,
+    });
+    const candidate: ManagedChunkCompatibilityCandidate = {
+      packageId: INVENTORY_PACKAGE_KEY,
+      definitions: [
+        {
+          definitionKey: 'shared',
+          schemaVersion: '1',
+          contractDigest: DIGEST_A,
+          rendererKey: 'shared-renderer',
+        },
+        {
+          definitionKey: 'switching',
+          schemaVersion: '1',
+          contractDigest: DIGEST_B,
+          rendererKey: 'switching-renderer',
+        },
+        {
+          definitionKey: 'switching',
+          schemaVersion: '2',
+          contractDigest: DIGEST_A,
+          rendererKey: 'switching-renderer',
+        },
+      ],
+      slots: [
+        {
+          templateKey: 'home',
+          templateVersion: '1',
+          slotKey: 'hero',
+          maxItems: 2,
+          allowedChunks: [
+            { definitionKey: 'shared', schemaVersion: '1' },
+            { definitionKey: 'switching', schemaVersion: '1' },
+          ],
+        },
+        {
+          templateKey: 'home',
+          templateVersion: '2',
+          slotKey: 'hero',
+          maxItems: 1,
+          allowedChunks: [{ definitionKey: 'switching', schemaVersion: '2' }],
+        },
+        {
+          templateKey: 'shell',
+          templateVersion: '1',
+          slotKey: 'header',
+          maxItems: 1,
+          allowedChunks: [{ definitionKey: 'shared', schemaVersion: '1' }],
+        },
+      ],
+    };
+
+    const publishedOnly = checkManagedChunkContractCompatibility(
+      candidate,
+      new Set(['shared-renderer', 'switching-renderer']),
+      inventory.contracts
+        .filter((requirement) => requirement.sources.includes('published'))
+        .map((requirement) => ({ ...requirement, sources: ['published'] })),
+      inventory.placements.filter(
+        (placement) => placement.source === 'published',
+      ),
+    );
+    const allSources = checkManagedChunkContractCompatibility(
+      candidate,
+      new Set(['shared-renderer', 'switching-renderer']),
+      inventory.contracts,
+      inventory.placements,
+    );
+
+    expect(publishedOnly).toEqual({ compatible: true, reasons: [] });
+    expect(allSources.reasons).toContainEqual(
+      expect.objectContaining({
+        code: 'contract_digest_mismatch',
+        definitionKey: 'switching',
+        schemaVersion: '2',
+        expectedDigest: DIGEST_C,
+        candidateDigest: DIGEST_A,
+      }),
+    );
+  });
 });

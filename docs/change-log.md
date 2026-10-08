@@ -3039,3 +3039,44 @@
   commit входит в эту запись.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, внешний сервер,
   `main`, push/merge и deploy не затрагивались.
+
+### 2026-10-08 · Phase 2 / Task 6: draft/published compatibility inventory
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализован внутренний read-only
+  `ManagedChunkPersistenceRepository.readCompatibilityInventory`: он
+  валидирует UUID и exact связь site/package безопасным одинаковым `NotFound`,
+  затем в одном `REPEATABLE READ` snapshot читает только ресурсы
+  `chunk_instance`/`chunk_layout`, их текущие draft/published pointers,
+  точные typed links, связанные contracts и placements. Чтение ограничено
+  девятью batch-запросами; обычные CMS resources/revisions и несвязанные
+  package contracts не материализуются.
+- Draft и published разрешаются независимо без fallback. Одинаковый contract
+  агрегирует `sources` в каноническом порядке `draft`, `published`; разные
+  schema version/digest остаются отдельными требованиями. Placement получает
+  contract только через одноимённый source pointer экземпляра, canonical
+  `page:<id>`/`site_surface:<key>`, template/slot/position и exact Phase 1
+  definition identity. Malformed snapshots и неверные tenant/package,
+  resource, revision, typed-link или placement identities исключаются без
+  утечки чужих данных. Результат сортируется codepoint-сравнением и не зависит
+  от DB insertion order или мутации результата прошлого вызова.
+- Изменены
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts`,
+  `.spec.ts` и эта запись журнала. Controller/API, Phase 1 types/algorithm,
+  release CLI и runtime не менялись.
+- БД — схема, миграции, данные и формат сохраняемых значений не менялись.
+  Reader не пишет pointers, events, revisions или пользовательские данные;
+  общая и локальная БД не запускались и не изменялись.
+- TDD RED: первый focused run — 7 ожидаемых failures на отсутствующем
+  `readCompatibilityInventory`, при этом 89 прежних тестов прошли. Review RED
+  отдельно доказал PostgreSQL-like `22P02` для malformed UUID, `TypeError` на
+  JSON `null`, 52 запроса вместо budget 9 и отсутствие managed-type filter.
+  После fixes focused GREEN — 2 suites / 103 tests; широкая Phase 1–2
+  регрессия — 8 suites / 202 tests. API production build/typecheck, targeted
+  ESLint, Prettier и `git diff --check` прошли.
+- Независимый итоговый code review: Critical 0, Important 0, Minor 0, verdict
+  READY. Коммит реализации:
+  `feat: expose managed chunk compatibility inventory` (этот commit).
+- Docker/VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая
+  выкладка не затрагивались.

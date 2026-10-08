@@ -5,7 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { DataSource, EntityManager } from 'typeorm';
+import { isUUID } from 'class-validator';
+import { DataSource, EntityManager, In } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import {
   CmsRevisionEntity,
@@ -17,6 +18,7 @@ import {
   ManagedChunkPlacementEntity,
   PageEntity,
   SiteEntity,
+  TemplatePackageEntity,
   TemplatePackageVersionEntity,
 } from '../database/entities';
 import {
@@ -28,6 +30,11 @@ import {
   computeManagedChunkContractDigest,
   deriveManagedChunkDataSchema,
 } from './managed-chunk-schema';
+import type {
+  ManagedChunkContentSource,
+  ManagedChunkContractRequirement,
+  ManagedChunkPlacementRequirement,
+} from './managed-chunk-compatibility';
 import type { ManagedChunkDefinition } from './managed-chunk.types';
 
 type RegisterManagedChunkContractsInput = {
@@ -85,6 +92,341 @@ export class ManagedChunkPersistenceRepository {
     private readonly dataSource: DataSource,
     private readonly revisions: CmsRevisionsService,
   ) {}
+
+  async readCompatibilityInventory(input: {
+    siteId: string;
+    templatePackageId: string;
+  }): Promise<{
+    contracts: ManagedChunkContractRequirement[];
+    placements: ManagedChunkPlacementRequirement[];
+  }> {
+    const siteId = String(input.siteId);
+    const templatePackageId = String(input.templatePackageId);
+    if (!isUUID(siteId) || !isUUID(templatePackageId)) {
+      this.compatibilityInventoryNotFound();
+    }
+
+    return this.dataSource.transaction('REPEATABLE READ', async (db) => {
+      const site = await db.findOne(SiteEntity, {
+        where: { id: siteId, templatePackageId },
+      });
+      if (!site) this.compatibilityInventoryNotFound();
+      const templatePackage = await db.findOne(TemplatePackageEntity, {
+        where: { id: templatePackageId },
+      });
+      if (!templatePackage) this.compatibilityInventoryNotFound();
+
+      const resources = await db.find(CmsRevisionResourceEntity, {
+        where: {
+          siteId,
+          resourceType: In(['chunk_instance', 'chunk_layout']),
+        },
+      });
+      const instances = await db.find(ManagedChunkInstanceEntity, {
+        where: { siteId },
+      });
+      const layouts = await db.find(ManagedChunkLayoutEntity, {
+        where: { siteId },
+      });
+      const pointerRevisionIds = [
+        ...new Set(
+          resources.flatMap((resource) =>
+            [resource.draftRevisionId, resource.publishedRevisionId].filter(
+              (revisionId): revisionId is string => revisionId !== null,
+            ),
+          ),
+        ),
+      ];
+      const revisions = await db.find(CmsRevisionEntity, {
+        where: { id: In(pointerRevisionIds) },
+      });
+      const instanceLinks = await db.find(ManagedChunkInstanceRevisionEntity, {
+        where: {
+          siteId,
+          revisionId: In(pointerRevisionIds),
+        },
+      });
+      const linkedContractIds = [
+        ...new Set(instanceLinks.map((link) => link.contractId)),
+      ];
+      const packageContracts = await db.find(ManagedChunkContractEntity, {
+        where: {
+          templatePackageId,
+          id: In(linkedContractIds),
+        },
+      });
+      const storedPlacements = await db.find(ManagedChunkPlacementEntity, {
+        where: {
+          siteId,
+          layoutRevisionId: In(pointerRevisionIds),
+        },
+      });
+
+      const sourceOrder = ['draft', 'published'] as const;
+      const sourceRank = new Map<ManagedChunkContentSource, number>(
+        sourceOrder.map((source, index) => [source, index]),
+      );
+      const resourceById = new Map(
+        resources.map((resource) => [resource.id, resource]),
+      );
+      const revisionByIdentity = new Map(
+        revisions.map((revision) => [
+          JSON.stringify([revision.id, revision.resourceId]),
+          revision,
+        ]),
+      );
+      const linkByIdentity = new Map(
+        instanceLinks.map((link) => [
+          JSON.stringify([
+            link.revisionId,
+            link.revisionResourceId,
+            link.siteId,
+            link.instanceId,
+          ]),
+          link,
+        ]),
+      );
+      const contractById = new Map(
+        packageContracts.map((contract) => [contract.id, contract]),
+      );
+      const instanceById = new Map(
+        instances.map((instance) => [instance.id, instance]),
+      );
+      const placementsByLayoutRevision = new Map<
+        string,
+        ManagedChunkPlacementEntity[]
+      >();
+      for (const placement of storedPlacements) {
+        const identity = JSON.stringify([
+          placement.siteId,
+          placement.layoutId,
+          placement.layoutRevisionResourceId,
+          placement.layoutRevisionId,
+        ]);
+        const grouped = placementsByLayoutRevision.get(identity);
+        if (grouped) grouped.push(placement);
+        else placementsByLayoutRevision.set(identity, [placement]);
+      }
+
+      const resolveInstanceContract = (
+        instance: ManagedChunkInstanceEntity,
+        source: ManagedChunkContentSource,
+      ): ManagedChunkContractEntity | null => {
+        const resource = resourceById.get(instance.revisionResourceId);
+        if (
+          !resource ||
+          resource.siteId !== siteId ||
+          resource.resourceType !== 'chunk_instance' ||
+          resource.entityId !== instance.id
+        ) {
+          return null;
+        }
+        const revisionId =
+          source === 'draft'
+            ? resource.draftRevisionId
+            : resource.publishedRevisionId;
+        if (!revisionId) return null;
+        if (
+          !revisionByIdentity.has(JSON.stringify([revisionId, resource.id]))
+        ) {
+          return null;
+        }
+        const link = linkByIdentity.get(
+          JSON.stringify([revisionId, resource.id, siteId, instance.id]),
+        );
+        if (!link) return null;
+        return contractById.get(link.contractId) ?? null;
+      };
+
+      const resolvedInstances = new Map<
+        string,
+        ManagedChunkContractEntity | null
+      >();
+      const contractsByIdentity = new Map<
+        string,
+        ManagedChunkContractRequirement
+      >();
+      for (const instance of instances) {
+        for (const source of sourceOrder) {
+          const contract = resolveInstanceContract(instance, source);
+          resolvedInstances.set(
+            this.inventorySourceIdentity(source, instance.id),
+            contract,
+          );
+          if (!contract) continue;
+          const identity = JSON.stringify([
+            contract.definitionKey,
+            contract.schemaVersion,
+            contract.contractDigest,
+          ]);
+          const existing = contractsByIdentity.get(identity);
+          contractsByIdentity.set(identity, {
+            packageId: templatePackage.packageId,
+            definitionKey: contract.definitionKey,
+            schemaVersion: contract.schemaVersion,
+            contractDigest: contract.contractDigest,
+            sources: sourceOrder.filter(
+              (candidateSource) =>
+                candidateSource === source ||
+                existing?.sources.includes(candidateSource) === true,
+            ),
+          });
+        }
+      }
+
+      const placements: ManagedChunkPlacementRequirement[] = [];
+      for (const layout of layouts) {
+        const layoutKey = this.inventoryLayoutKey(layout);
+        if (!layoutKey) continue;
+        const resource = resourceById.get(layout.revisionResourceId);
+        if (
+          !resource ||
+          resource.siteId !== siteId ||
+          resource.resourceType !== 'chunk_layout' ||
+          resource.entityId !== layout.id
+        ) {
+          continue;
+        }
+
+        for (const source of sourceOrder) {
+          const layoutRevisionId =
+            source === 'draft'
+              ? resource.draftRevisionId
+              : resource.publishedRevisionId;
+          if (!layoutRevisionId) continue;
+          const revision = revisionByIdentity.get(
+            JSON.stringify([layoutRevisionId, resource.id]),
+          );
+          if (!revision) continue;
+          const snapshot: unknown = revision.snapshot;
+          if (
+            snapshot === null ||
+            typeof snapshot !== 'object' ||
+            Array.isArray(snapshot)
+          ) {
+            continue;
+          }
+          const snapshotRecord = snapshot as Record<string, unknown>;
+          const templateKey = snapshotRecord.templateKey;
+          const templateVersion = snapshotRecord.templateVersion;
+          if (
+            snapshotRecord.formatVersion !== 1 ||
+            typeof templateKey !== 'string' ||
+            typeof templateVersion !== 'string'
+          ) {
+            continue;
+          }
+
+          const layoutPlacements =
+            placementsByLayoutRevision.get(
+              JSON.stringify([
+                siteId,
+                layout.id,
+                resource.id,
+                layoutRevisionId,
+              ]),
+            ) ?? [];
+          for (const placement of layoutPlacements) {
+            if (!instanceById.has(placement.instanceId)) continue;
+            const contract = resolvedInstances.get(
+              this.inventorySourceIdentity(source, placement.instanceId),
+            );
+            if (!contract) continue;
+            placements.push({
+              source,
+              layoutKey,
+              templateKey,
+              templateVersion,
+              slotKey: placement.slotKey,
+              definitionKey: contract.definitionKey,
+              schemaVersion: contract.schemaVersion,
+              contractDigest: contract.contractDigest,
+              position: placement.position,
+            });
+          }
+        }
+      }
+
+      const contracts = [...contractsByIdentity.values()].sort((left, right) =>
+        this.compareInventoryTuples(
+          [
+            left.definitionKey,
+            left.schemaVersion,
+            left.contractDigest,
+            left.packageId,
+          ],
+          [
+            right.definitionKey,
+            right.schemaVersion,
+            right.contractDigest,
+            right.packageId,
+          ],
+        ),
+      );
+      placements.sort((left, right) => {
+        const sourceOrderResult =
+          (sourceRank.get(left.source) ?? Number.MAX_SAFE_INTEGER) -
+          (sourceRank.get(right.source) ?? Number.MAX_SAFE_INTEGER);
+        if (sourceOrderResult !== 0) return sourceOrderResult;
+        const textOrder = this.compareInventoryTuples(
+          [left.layoutKey, left.slotKey],
+          [right.layoutKey, right.slotKey],
+        );
+        if (textOrder !== 0) return textOrder;
+        if (left.position !== right.position) {
+          return left.position - right.position;
+        }
+        return this.compareInventoryTuples(
+          [
+            left.definitionKey,
+            left.schemaVersion,
+            left.contractDigest,
+            left.templateKey,
+            left.templateVersion,
+          ],
+          [
+            right.definitionKey,
+            right.schemaVersion,
+            right.contractDigest,
+            right.templateKey,
+            right.templateVersion,
+          ],
+        );
+      });
+      return { contracts, placements };
+    });
+  }
+  private inventorySourceIdentity(
+    source: ManagedChunkContentSource,
+    instanceId: string,
+  ): string {
+    return JSON.stringify([source, instanceId]);
+  }
+
+  private inventoryLayoutKey(layout: ManagedChunkLayoutEntity): string | null {
+    if (layout.scopeKind === 'page' && layout.pageId) {
+      return 'page:' + layout.pageId;
+    }
+    if (layout.scopeKind === 'site_surface' && layout.surfaceKey) {
+      return 'site_surface:' + layout.surfaceKey;
+    }
+    return null;
+  }
+
+  private compareInventoryTuples(
+    left: readonly string[],
+    right: readonly string[],
+  ): number {
+    for (let index = 0; index < left.length; index += 1) {
+      const result = this.compareStrings(left[index], right[index]);
+      if (result !== 0) return result;
+    }
+    return 0;
+  }
+
+  private compatibilityInventoryNotFound(): never {
+    throw new NotFoundException('Сайт или пакет не найден');
+  }
 
   async restoreInstanceRevision(input: {
     siteId: string;
