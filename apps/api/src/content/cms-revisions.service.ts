@@ -390,6 +390,43 @@ export class CmsRevisionsService {
     return this.saveDraftInTransaction(db, input);
   }
 
+  async savePreparedManagedDraftUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      snapshot: Record<string, unknown>;
+      expectedDraftRevisionId: string | null;
+      actor: RevisionActor;
+    },
+    prepare: (manager: EntityManager) => Promise<{ entityId: string }>,
+    revisionCreatedHook: RevisionCreatedHook,
+  ): Promise<{ id: string; versionNumber: number; entityId: string }> {
+    this.assertManagedResourceType(input.resourceType);
+    if (
+      typeof prepare !== 'function' ||
+      typeof revisionCreatedHook !== 'function'
+    ) {
+      throw new BadRequestException(
+        'Управляемый ресурс требует prepare и revision-created hook',
+      );
+    }
+    await this.authorizeManagedWriteUsingManager(db, {
+      siteId: input.siteId,
+      resourceType: input.resourceType,
+      actor: input.actor,
+    });
+    const prepared = await prepare(db);
+    const revision = await this.saveDraftInTransaction(
+      db,
+      { ...input, entityId: prepared.entityId },
+      'draft_saved',
+      null,
+      revisionCreatedHook,
+    );
+    return { ...revision, entityId: prepared.entityId };
+  }
+
   async saveManagedDraftUsingManager(
     db: EntityManager,
     input: {
@@ -402,26 +439,14 @@ export class CmsRevisionsService {
     },
     revisionCreatedHook: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number }> {
-    this.assertManagedResourceType(input.resourceType);
-    if (typeof revisionCreatedHook !== 'function') {
-      throw new BadRequestException(
-        'Управляемый ресурс требует revision-created hook',
-      );
-    }
-    await this.authorizeManagedWriteUsingManager(db, {
-      siteId: input.siteId,
-      resourceType: input.resourceType,
-      actor: input.actor,
-    });
-    return this.saveDraftInTransaction(
+    const { entityId, ...managedInput } = input;
+    return this.savePreparedManagedDraftUsingManager(
       db,
-      input,
-      'draft_saved',
-      null,
+      managedInput,
+      () => Promise.resolve({ entityId }),
       revisionCreatedHook,
     );
   }
-
   /** Trusted publication adapter for actors allowed to publish directly; never
    * expose this as a generic route or let it overwrite an outstanding CMS draft.
    * Caller must hold the article lock and include the live write in this transaction.

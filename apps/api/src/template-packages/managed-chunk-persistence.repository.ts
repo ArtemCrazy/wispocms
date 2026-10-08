@@ -145,102 +145,104 @@ export class ManagedChunkPersistenceRepository {
     });
 
     return this.dataSource.transaction(async (db) => {
-      await this.revisions.authorizeManagedWriteUsingManager(db, {
-        siteId,
-        resourceType: 'chunk_layout',
-        actor,
-      });
-      const site = await db.findOne(SiteEntity, {
-        where: { id: siteId },
-        lock: { mode: 'pessimistic_write' },
-      });
-      if (!site) throw new NotFoundException('Сайт не найден');
-
-      if (target.kind === 'page') {
-        const page = await db.findOne(PageEntity, {
-          where: { id: target.pageId, siteId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!page) throw new NotFoundException('Цель раскладки не найдена');
-      }
-
-      const layoutWhere =
-        target.kind === 'page'
-          ? {
-              siteId,
-              scopeKind: 'page' as const,
-              pageId: target.pageId,
-            }
-          : {
-              siteId,
-              scopeKind: 'site_surface' as const,
-              surfaceKey: target.surfaceKey,
-            };
-      const layout = await db.findOne(ManagedChunkLayoutEntity, {
-        where: layoutWhere,
-        lock: { mode: 'pessimistic_write' },
-      });
-      const layoutId = layout?.id ?? randomUUID();
-      const instanceIds = [
-        ...new Set(placements.map((row) => row.instanceId)),
-      ].sort();
-
-      const revision = await this.revisions.saveManagedDraftUsingManager(
-        db,
-        {
-          siteId,
-          resourceType: 'chunk_layout',
-          entityId: layoutId,
-          snapshot,
-          expectedDraftRevisionId,
-          actor,
-        },
-        async (hookDb, savedRevision, resource) => {
-          for (const instanceId of instanceIds) {
-            const instance = await hookDb.findOne(ManagedChunkInstanceEntity, {
-              where: { id: instanceId, siteId },
-              lock: { mode: 'pessimistic_read' },
+      let layout: ManagedChunkLayoutEntity | null = null;
+      const revision =
+        await this.revisions.savePreparedManagedDraftUsingManager(
+          db,
+          {
+            siteId,
+            resourceType: 'chunk_layout',
+            snapshot,
+            expectedDraftRevisionId,
+            actor,
+          },
+          async (prepareDb) => {
+            const site = await prepareDb.findOne(SiteEntity, {
+              where: { id: siteId },
+              lock: { mode: 'pessimistic_write' },
             });
-            if (!instance) {
-              throw new NotFoundException('Экземпляр чанка не найден');
+            if (!site) throw new NotFoundException('Сайт не найден');
+
+            if (target.kind === 'page') {
+              const page = await prepareDb.findOne(PageEntity, {
+                where: { id: target.pageId, siteId },
+                lock: { mode: 'pessimistic_write' },
+              });
+              if (!page) {
+                throw new NotFoundException('Цель раскладки не найдена');
+              }
             }
-          }
 
-          if (!layout) {
-            await hookDb.save(
-              Object.assign(new ManagedChunkLayoutEntity(), {
-                id: layoutId,
-                siteId,
-                revisionResourceId: resource.id,
-                scopeKind: target.kind,
-                pageId: target.kind === 'page' ? target.pageId : null,
-                surfaceKey:
-                  target.kind === 'site_surface' ? target.surfaceKey : null,
-              }),
-            );
-          }
+            const layoutWhere =
+              target.kind === 'page'
+                ? {
+                    siteId,
+                    scopeKind: 'page' as const,
+                    pageId: target.pageId,
+                  }
+                : {
+                    siteId,
+                    scopeKind: 'site_surface' as const,
+                    surfaceKey: target.surfaceKey,
+                  };
+            layout = await prepareDb.findOne(ManagedChunkLayoutEntity, {
+              where: layoutWhere,
+              lock: { mode: 'pessimistic_write' },
+            });
+            return { entityId: layout?.id ?? randomUUID() };
+          },
+          async (hookDb, savedRevision, resource) => {
+            const instanceIds = [
+              ...new Set(placements.map((row) => row.instanceId)),
+            ].sort();
+            for (const instanceId of instanceIds) {
+              const instance = await hookDb.findOne(
+                ManagedChunkInstanceEntity,
+                {
+                  where: { id: instanceId, siteId },
+                  lock: { mode: 'pessimistic_read' },
+                },
+              );
+              if (!instance) {
+                throw new NotFoundException('Экземпляр чанка не найден');
+              }
+            }
 
-          if (placements.length > 0) {
-            await hookDb.save(
-              placements.map((placement) =>
-                Object.assign(new ManagedChunkPlacementEntity(), {
-                  id: randomUUID(),
+            if (!layout) {
+              await hookDb.save(
+                Object.assign(new ManagedChunkLayoutEntity(), {
+                  id: resource.entityId,
                   siteId,
-                  layoutId,
-                  layoutRevisionResourceId: resource.id,
-                  layoutRevisionId: savedRevision.id,
-                  instanceId: placement.instanceId,
-                  slotKey: placement.slotKey,
-                  position: placement.position,
+                  revisionResourceId: resource.id,
+                  scopeKind: target.kind,
+                  pageId: target.kind === 'page' ? target.pageId : null,
+                  surfaceKey:
+                    target.kind === 'site_surface' ? target.surfaceKey : null,
                 }),
-              ),
-            );
-          }
-        },
-      );
+              );
+            }
+
+            if (placements.length > 0) {
+              await hookDb.save(
+                placements.map((placement) =>
+                  Object.assign(new ManagedChunkPlacementEntity(), {
+                    id: randomUUID(),
+                    siteId,
+                    layoutId: resource.entityId,
+                    layoutRevisionResourceId: resource.id,
+                    layoutRevisionId: savedRevision.id,
+                    instanceId: placement.instanceId,
+                    slotKey: placement.slotKey,
+                    position: placement.position,
+                  }),
+                ),
+              );
+            }
+          },
+        );
 
       return {
-        layoutId,
+        layoutId: revision.entityId,
         revisionId: revision.id,
         versionNumber: revision.versionNumber,
       };
@@ -271,53 +273,58 @@ export class ManagedChunkPersistenceRepository {
     };
 
     return this.dataSource.transaction(async (db) => {
-      const revision = await this.revisions.saveManagedDraftUsingManager(
-        db,
-        {
-          siteId,
-          resourceType: 'chunk_instance',
-          entityId: instanceId,
-          snapshot,
-          expectedDraftRevisionId: null,
-          actor,
-        },
-        async (hookDb, savedRevision, resource) => {
-          const site = await hookDb.findOne(SiteEntity, {
-            where: { id: siteId },
-            lock: { mode: 'pessimistic_read' },
-          });
-          const contract = await hookDb.findOne(ManagedChunkContractEntity, {
-            where: { id: contractId },
-          });
-          if (
-            !contract ||
-            !site ||
-            site.templatePackageId !== contract.templatePackageId
-          ) {
-            throw new NotFoundException('Контракт чанка не найден');
-          }
-
-          await hookDb.save(
-            Object.assign(new ManagedChunkInstanceEntity(), {
-              id: instanceId,
-              siteId,
-              revisionResourceId: resource.id,
-              displayName,
-              isArchived: false,
-              createdByUserId: actor.userId,
-            }),
-          );
-          await hookDb.save(
-            Object.assign(new ManagedChunkInstanceRevisionEntity(), {
-              revisionId: savedRevision.id,
-              revisionResourceId: resource.id,
-              siteId,
-              instanceId,
-              contractId,
-            }),
-          );
-        },
-      );
+      const revision =
+        await this.revisions.savePreparedManagedDraftUsingManager(
+          db,
+          {
+            siteId,
+            resourceType: 'chunk_instance',
+            snapshot,
+            expectedDraftRevisionId: null,
+            actor,
+          },
+          async (prepareDb) => {
+            const site = await prepareDb.findOne(SiteEntity, {
+              where: { id: siteId },
+              lock: { mode: 'pessimistic_read' },
+            });
+            if (!site) {
+              throw new NotFoundException('Контракт чанка не найден');
+            }
+            const contract = await prepareDb.findOne(
+              ManagedChunkContractEntity,
+              { where: { id: contractId } },
+            );
+            if (
+              !contract ||
+              site.templatePackageId !== contract.templatePackageId
+            ) {
+              throw new NotFoundException('Контракт чанка не найден');
+            }
+            return { entityId: instanceId };
+          },
+          async (hookDb, savedRevision, resource) => {
+            await hookDb.save(
+              Object.assign(new ManagedChunkInstanceEntity(), {
+                id: instanceId,
+                siteId,
+                revisionResourceId: resource.id,
+                displayName,
+                isArchived: false,
+                createdByUserId: actor.userId,
+              }),
+            );
+            await hookDb.save(
+              Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+                revisionId: savedRevision.id,
+                revisionResourceId: resource.id,
+                siteId,
+                instanceId,
+                contractId,
+              }),
+            );
+          },
+        );
       return {
         instanceId,
         revisionId: revision.id,

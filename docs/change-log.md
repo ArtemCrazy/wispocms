@@ -2936,10 +2936,12 @@
   транзакцией создаёт или переиспользует стабильную identity page/site-surface
   layout, сохраняет metadata-only CMS revision и полный immutable placements
   set этой версии, включая пустой набор. Частичного placement API нет.
-- Конкурентность и tenant safety: manager-bound authorization сначала блокирует
-  `SiteAccess`, и только затем repository читает/блокирует site/page/layout;
-  denial останавливается до target lookup. Instance workflow использует тот же
-  typed boundary. Page и каждый instance проверяются в том же site.
+- Конкурентность и tenant safety: единый typed prepare-boundary ровно один раз
+  выполняет manager-bound authorization (`SiteAccess` для employee), затем
+  repository читает/блокирует site и валидирует target/contract, и только после
+  этого создаёт resource/revision. Denial и admin missing-site останавливаются
+  до любых writes. Mandatory hook сохраняет instance/link либо layout/placements.
+  Page и каждый instance проверяются в том же site.
 - Позиции placements валидируются до transaction как PostgreSQL `integer`:
   допустимы только целые значения `0..2147483647`.
 - План Task 7 исправлен: concurrent initial same-target save даёт ровно один
@@ -2957,9 +2959,13 @@
   при 28 прошедших прежних тестах; GREEN — repository suite 45/45.
 - Quality review TDD: RED — 73 прежних теста прошли, 7 упали на отсутствующем
   access-first boundary, старом lock order и принятом int32 overflow; GREEN —
-  repository + revision service 80/80. Также пройдены API `nest build`, адресный
-  ESLint/Prettier четырёх TS-файлов и `git diff --check`.
-- Коммиты: `4c86116` (`feat: persist atomic managed chunk layouts`) и отдельный
-  quality-fix commit этой записи.
+  repository + revision service 80/80.
+- Повторный review TDD: RED — 46 прежних repository-тестов прошли, 3 упали на
+  resource-before-site/contract и двойном layout authorization; GREEN —
+  repository + revision service 82/82, вместе с workflow regression 91/91.
+  Также пройдены API `nest build`, адресный ESLint/Prettier и `git diff --check`.
+- Коммиты: `4c86116` (`feat: persist atomic managed chunk layouts`), `856a0ea`
+  (`fix: order managed chunk persistence locks`) и отдельный follow-up commit
+  этой записи.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, `main`, push/merge и
   deploy не затрагивались.

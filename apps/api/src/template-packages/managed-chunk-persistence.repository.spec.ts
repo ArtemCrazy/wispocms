@@ -41,6 +41,10 @@ const ACTOR = {
   userId: '55555555-5555-4555-8555-555555555555',
   platformRole: PlatformRole.EMPLOYEE,
 };
+const ADMIN_ACTOR = {
+  userId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  platformRole: PlatformRole.WISPO_ADMIN,
+};
 
 function definition(
   overrides: Partial<ManagedChunkDefinition> = {},
@@ -501,6 +505,7 @@ function createLayoutHarness(options?: {
   instances?: Array<{ id: string; siteId: string }>;
   failOnSave?: 'layout' | 'placement';
   denyAccess?: boolean;
+  siteExists?: boolean;
   beforeTransaction?: () => Promise<void>;
 }) {
   let committed: LayoutState = {
@@ -557,7 +562,7 @@ function createLayoutHarness(options?: {
               });
               if (entity === SiteEntity) {
                 return Promise.resolve(
-                  query.where.id === SITE_ID
+                  query.where.id === SITE_ID && options?.siteExists !== false
                     ? { id: SITE_ID, templatePackageId: PACKAGE_ID }
                     : null,
                 );
@@ -1178,9 +1183,9 @@ describe('ManagedChunkPersistenceRepository', () => {
       expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(harness.lookupOperations).toEqual([
         { entity: 'access', lock: { mode: 'pessimistic_read' } },
-        { entity: 'resource', lock: { mode: 'pessimistic_write' } },
         { entity: 'site', lock: { mode: 'pessimistic_read' } },
         { entity: 'contract', lock: null },
+        { entity: 'resource', lock: { mode: 'pessimistic_write' } },
       ]);
     });
 
@@ -1246,6 +1251,35 @@ describe('ManagedChunkPersistenceRepository', () => {
       });
     });
 
+    it('returns safe not-found for an admin and missing site before any revision save', async () => {
+      const harness = createInstanceHarness({
+        siteDisappearsAfterAuthorization: true,
+      });
+
+      await expect(
+        harness.repository.createInstanceDraft({
+          siteId: SITE_ID,
+          displayName: 'Missing site',
+          contractId: CONTRACT_ID,
+          data: {},
+          sanitizerPolicyVersion: null,
+          actor: ADMIN_ACTOR,
+        }),
+      ).rejects.toEqual(new NotFoundException('Контракт чанка не найден'));
+
+      expect(harness.lookupOperations).toEqual([
+        { entity: 'site', lock: { mode: 'pessimistic_read' } },
+      ]);
+      expect(harness.contractLookups).toEqual([]);
+      expect(harness.saveAttempts).toEqual([]);
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        instances: [],
+        links: [],
+        events: [],
+      });
+    });
     it.each(['instance', 'link'] as const)(
       'rolls back every draft write when the %s save fails inside the hook',
       async (failOnSave) => {
@@ -1438,7 +1472,7 @@ describe('ManagedChunkPersistenceRepository', () => {
       ]);
       expect(harness.state.events).toHaveLength(1);
       expect(harness.dataSource.transaction).toHaveBeenCalledTimes(1);
-      expect(harness.lookupOperations.slice(0, 4)).toEqual([
+      expect(harness.lookupOperations).toEqual([
         {
           entity: 'access',
           where: { userId: ACTOR.userId, siteId: SITE_ID },
@@ -1462,6 +1496,25 @@ describe('ManagedChunkPersistenceRepository', () => {
             pageId: PAGE_ID,
           },
           lock: { mode: 'pessimistic_write' },
+        },
+        {
+          entity: 'resource',
+          where: {
+            siteId: SITE_ID,
+            resourceType: 'chunk_layout',
+            entityId: result.layoutId,
+          },
+          lock: { mode: 'pessimistic_write' },
+        },
+        {
+          entity: 'instance',
+          where: { id: HERO_INSTANCE_ID, siteId: SITE_ID },
+          lock: { mode: 'pessimistic_read' },
+        },
+        {
+          entity: 'instance',
+          where: { id: PROMO_INSTANCE_ID, siteId: SITE_ID },
+          lock: { mode: 'pessimistic_read' },
         },
       ]);
     });
@@ -1773,6 +1826,37 @@ describe('ManagedChunkPersistenceRepository', () => {
       });
     });
 
+    it('returns safe not-found for an admin and missing site before any revision save', async () => {
+      const harness = createLayoutHarness({ siteExists: false });
+
+      await expect(
+        harness.repository.saveLayoutDraft({
+          siteId: SITE_ID,
+          target: { kind: 'page', pageId: PAGE_ID },
+          templateKey: 'skinova-home',
+          templateVersion: '1',
+          expectedDraftRevisionId: null,
+          placements: [],
+          actor: ADMIN_ACTOR,
+        }),
+      ).rejects.toEqual(new NotFoundException('Сайт не найден'));
+
+      expect(harness.lookupOperations).toEqual([
+        {
+          entity: 'site',
+          where: { id: SITE_ID },
+          lock: { mode: 'pessimistic_write' },
+        },
+      ]);
+      expect(harness.saveAttempts).toEqual([]);
+      expect(harness.state).toEqual({
+        resources: [],
+        revisions: [],
+        layouts: [],
+        placements: [],
+        events: [],
+      });
+    });
     it('does not expose a partial placement write API', () => {
       const harness = createLayoutHarness();
 
