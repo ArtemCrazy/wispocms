@@ -3116,8 +3116,7 @@
 
 ### 2026-10-08 · Phase 2 / Task 7: disposable PostgreSQL acceptance
 
-- Статус: **Готово к проверке после residual promise-tracking review; остаётся
-  cleanup-замечание по четырём ранее созданным anonymous Docker volumes**. Владелец: Роман / Codex; ветка
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
   `codex/managed-chunks-sdk-v1`.
 - Задача: добавлен fail-closed real-PostgreSQL acceptance suite полного migration
   ledger и tenant/FK/trigger/rollback/lock/concurrency контрактов managed chunks.
@@ -3214,13 +3213,17 @@
   отсутствует, порт `55440` свободен, оба opt-in env отсутствуют. Все семь
   `wispo-cms-local-*` container ID/name read-only сверены и не менялись. Набор
   Docker volumes при tmpfs-прогоне не менялся, новый anonymous volume не создан.
-  Anonymous volumes
+  Четыре anonymous volumes
   `6353b59d0c5ba9ab17c4d01abb2f153397227d1976a35e67ba54c5ba2ae3872a`,
   `bde1d673395eb7f8dcb84bad994c86a2826e178950bd7a9d89deb5fb69bdc8f1`,
   `cbe75d1c2996ef20f09007018fc7bad9b4708b3a2cdee1d15f287bffe28ede2d` и
   `587d1e6a8659bb4c551307913357fe70d0cbe5e8628b4a0e5e769b5f2682f1bf`
-  остаются unmounted/нетронутыми по прямому запрету; named volumes/networks не
-  создавались, `wispo-cms-local` network не использовалась.
+  отдельно сверены с журналом: label `com.docker.volume.anonymous`, время
+  создания совпадает с pre-tmpfs test runs, подключённых контейнеров нет. После
+  этой read-only проверки удалены только эти четыре disposable test volumes;
+  прочие dangling/named volumes и все рабочие контейнеры не затронуты.
+  Named volumes/networks тестами не создавались, `wispo-cms-local` network не
+  использовалась.
 - Первичный коммит: `7689b3be05e70a5b7b9d6626ce2f371d731551b6`
   (`test: verify managed chunk persistence in postgres`). Первый spec-review fix:
   `44b128186ce2b8af35352f4f3ab2e277cac357eb`
