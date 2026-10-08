@@ -3411,5 +3411,21 @@
   `git diff --check` — PASS.
 - Некритичные E2E/PostgreSQL, race matrix, visual/runtime smoke и backfill
   mapping добавлены в `docs/managed-chunks-post-mvp-review.md`; MVP не блокируют.
-- Коммит реализации: ix: register Skinova v2 managed contracts.
+- Коммит реализации: `fix: register Skinova v2 managed contracts`.
   Push, merge, deploy, VDS и общая БД не затрагивались.
+### 2026-10-08 · Phase 3.2a: published Skinova managed backfill
+
+- Статус: **В работе, утверждён design; код не начат**. Владелец: Роман /
+  Codex; ветка `codex/managed-chunks-sdk-v1`.
+- Задача: отдельной управляемой release-командой идемпотентно перенести
+  опубликованные `banners`/`page_banner_assignments` Skinova в managed
+  instances/layouts/placements без переключения runtime и package pointers.
+- Утверждено: backfill не запускается автоматически при регистрации v2.
+  Legacy rows не изменяются; история/drafts, shadow-read, dual-write и UI
+  остаются следующими этапами.
+- Read-only аудит выявил обязательную коррекцию v2 contract: добавить
+  `sort_order` и `homepage_top` slot для `system_page`, иначе текущие Skinova
+  данные 404/privacy переносятся неполно.
+- Design: `docs/superpowers/specs/2026-10-08-skinova-managed-backfill-design.md`.
+- БД: в этой записи схема, migration ledger и данные не менялись; backfill,
+  Docker, VDS, общая/рабочая БД и deploy не запускались.
