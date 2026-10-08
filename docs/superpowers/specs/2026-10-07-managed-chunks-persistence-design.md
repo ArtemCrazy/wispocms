@@ -351,3 +351,22 @@ adapter и shadow comparison. Только после подтверждённо
 добавит Generic API/forms, sanitization и media validation. Ни commit, ни push,
 ни merge сами по себе не означают deployment или применение миграции к общей
 БД.
+## Addendum: fail-closed persistence hardening
+
+Финальный аудит Phase 2 уточнил два обязательных инварианта уже утверждённой
+архитектуры без изменения схемы БД.
+
+1. После `revisionCreatedHook`, но до записи draft pointer и события, managed
+   draft save повторно читает через тот же `EntityManager` точный typed state.
+   Для instance должны совпасть owner `(site, instance, resource)` и единственная
+   revision-to-contract link. Для layout должны совпасть owner и полный
+   канонический multiset placements `(slotKey, position, instanceId)`; пустой set
+   является валидным. Несовпадение завершает всю транзакцию безопасной ошибкой.
+2. Compatibility inventory различает отсутствующий pointer и повреждённый
+   pointer. Первый означает отсутствие draft/published source. Если pointer
+   существует, но его resource, revision, owner, typed link, contract, layout
+   snapshot или placement нельзя разрешить точно, чтение завершается общей
+   безопасной ошибкой без UUID и частичного inventory. Такие данные не могут
+   дать ложный результат `compatible`.
+
+Новая таблица, backfill, API, UI и controller для этого hardening не нужны.

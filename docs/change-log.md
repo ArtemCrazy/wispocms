@@ -3321,3 +3321,18 @@
 - Итог: Phase 2 подтверждена в согласованных границах и локально готова к
   отдельному решению о push. Push, merge, deploy, VDS/Registry, общая/рабочая
   БД, `main` и фактическая выкладка не выполнялись и не изменялись.
+### 2026-10-08 · Phase 2: fail-closed hardening после финального аудита
+
+- Статус: **В работе**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Задача: исключить два fail-open пути — непроверенный результат managed draft
+  hook и молчаливое исключение повреждённых present pointers из compatibility
+  inventory. Отсутствующий draft/published pointer остаётся валидным отсутствием
+  source; присутствующий pointer обязан разрешаться полностью.
+- План: без новой migration и без изменения API/UI добавить post-hook exact
+  verification instance/link либо layout/full placement set, а inventory сделать
+  fail-closed с одной безопасной ошибкой без внутренних UUID.
+- БД: схема, migration ledger, persisted format, backfill, ручные и
+  пользовательские данные не меняются. Общая/рабочая БД и VDS не используются.
+- Файлы и проверки будут дополнены по мере выполнения. Push/merge/deploy не
+  выполняются.
