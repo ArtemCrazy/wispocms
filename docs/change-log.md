@@ -3381,13 +3381,35 @@
   post-MVP этапа.
 ### 2026-10-08 · Phase 3.1: Skinova v2 registration MVP
 
-- Статус: **В работе**. Владелец: Роман / Codex; ветка
-  `codex/managed-chunks-sdk-v1`.
+- Статус: **Реализовано локально, не выпущено**. Владелец: Роман / Codex;
+  ветка `codex/managed-chunks-sdk-v1`.
 - Задача: добавить отдельный реальный Skinova manifest v2 и атомарно
   materialize его managed chunk contracts при регистрации package version.
   Production v1 manifest, текущий сайт и legacy banners остаются активными.
 - Scope: validator-dispatch v1/v2, DTO/service registration boundary,
   manager-aware contract registration и критичные TDD-проверки. Backfill,
   shadow-read, API/UI, runtime switch и VDS в этот шаг не входят.
-- БД: новая migration и изменение схемы не планируются; данные общей/рабочей БД
-  и формат существующих записей не меняются. Локально код пока не изменён.
+- На старте подтверждено: новая migration и изменение схемы не требуются;
+  данные общей/рабочей БД и формат существующих записей не меняются.
+- Реализация: добавлен отдельный `manifest.v2.template.json` Skinova версии 2
+  с категорией «Баннеры», тремя managed definitions и точными allow-list для
+  `homepage_top`, `homepage_middle`, `article_sidebar`. Существующий v1 manifest
+  не изменялся и остаётся активным.
+- Release boundary и DTO принимают v1/v2. При регистрации v2 package version и
+  contracts записываются одной транзакцией; идентичный повтор идемпотентно
+  достраивает отсутствующие contracts. V1 не запускает materialization.
+- Изменены registration validator/DTO/service, manager-aware метод persistence,
+  production v2 manifest и связанные unit-тесты. API/UI, runtime, activation,
+  legacy banners/assignments и public/preview не менялись.
+- БД: migration/entity/schema не менялись. Формат существующих значений не
+  менялся. При будущем вызове регистрации v2 используются уже существующие
+  таблицы package versions/contracts; в этой итерации локальная, общая и
+  рабочая БД не запускались и данные не изменялись.
+- TDD RED: общий release validator отсутствовал; production service отклонял
+  v2; manager-bound contract method отсутствовал. GREEN: 4 связанных suites,
+  141/141 tests PASS. После форматирования `pnpm --dir apps/api build` — PASS,
+  `git diff --check` — PASS.
+- Некритичные E2E/PostgreSQL, race matrix, visual/runtime smoke и backfill
+  mapping добавлены в `docs/managed-chunks-post-mvp-review.md`; MVP не блокируют.
+- Коммит реализации: ix: register Skinova v2 managed contracts.
+  Push, merge, deploy, VDS и общая БД не затрагивались.

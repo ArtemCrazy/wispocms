@@ -24,8 +24,12 @@ import {
   hasSitePermission,
   SitePermission,
 } from '../content/content.permissions';
-import type { TemplatePackageManifest } from './template-package.types';
-import { assertValidTemplatePackageManifest } from './template-package.validation';
+import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
+import {
+  assertValidTemplatePackageRelease,
+  type TemplatePackageReleaseManifest,
+  type ValidatedTemplatePackageRelease,
+} from './template-package-release-validation';
 
 export type TemplatePackageVersionReference = {
   packageId: string;
@@ -51,7 +55,9 @@ function canonicalize(value: unknown): unknown {
   );
 }
 
-export function canonicalManifestDigest(manifest: TemplatePackageManifest) {
+export function canonicalManifestDigest(
+  manifest: TemplatePackageReleaseManifest,
+) {
   return createHash('sha256')
     .update(JSON.stringify(canonicalize(manifest)), 'utf8')
     .digest('hex');
@@ -67,7 +73,7 @@ function runtimeIsAvailable(
   );
 }
 
-function templateIdentities(manifest: TemplatePackageManifest) {
+function templateIdentities(manifest: TemplatePackageReleaseManifest) {
   return manifest.templates.map(({ kind, key, version }) => ({
     kind,
     key,
@@ -86,21 +92,33 @@ export class TemplatePackageService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly auditService: AuditService,
+    private readonly managedChunks: ManagedChunkPersistenceRepository,
   ) {}
 
   async register(input: unknown) {
-    const manifest = assertValidTemplatePackageManifest(input);
+    const release = assertValidTemplatePackageRelease(input);
+    const manifest = release.manifest;
     const manifestDigest = canonicalManifestDigest(manifest);
     let result: RegistrationResult;
     try {
       result = await this.dataSource.transaction((manager) =>
-        this.registerCandidate(manager, manifest, manifestDigest),
+        this.registerCandidate(
+          manager,
+          manifest,
+          manifestDigest,
+          release.definitions,
+        ),
       );
     } catch (firstError) {
       if (!isPostgresUniqueViolation(firstError)) throw firstError;
       try {
         result = await this.dataSource.transaction((manager) =>
-          this.registerCandidate(manager, manifest, manifestDigest),
+          this.registerCandidate(
+            manager,
+            manifest,
+            manifestDigest,
+            release.definitions,
+          ),
         );
       } catch (secondError) {
         if (!isPostgresUniqueViolation(secondError)) throw secondError;
@@ -109,6 +127,7 @@ export class TemplatePackageService {
             manager,
             manifest,
             manifestDigest,
+            release.definitions,
             secondError,
           ),
         );
@@ -127,8 +146,9 @@ export class TemplatePackageService {
 
   private async registerCandidate(
     manager: EntityManager,
-    manifest: TemplatePackageManifest,
+    manifest: TemplatePackageReleaseManifest,
     manifestDigest: string,
+    definitions: ValidatedTemplatePackageRelease['definitions'],
   ): Promise<RegistrationResult> {
     const packages = manager.getRepository(TemplatePackageEntity);
     const versions = manager.getRepository(TemplatePackageVersionEntity);
@@ -157,6 +177,13 @@ export class TemplatePackageService {
     });
     if (existing) {
       this.assertVersionIdentity(existing, manifest, manifestDigest);
+      await this.materializeManagedContracts(
+        manager,
+        templatePackage,
+        existing,
+        manifest,
+        definitions,
+      );
       return { templatePackage, version: existing, created: false };
     }
 
@@ -177,6 +204,13 @@ export class TemplatePackageService {
         runtimeUrl: manifest.build.runtimeUrl ?? null,
       }),
     );
+    await this.materializeManagedContracts(
+      manager,
+      templatePackage,
+      version,
+      manifest,
+      definitions,
+    );
     await this.auditService.recordSystemEvent(
       this.registrationAuditEvent(templatePackage, version),
       manager,
@@ -184,10 +218,26 @@ export class TemplatePackageService {
     return { templatePackage, version, created: true };
   }
 
+  private async materializeManagedContracts(
+    manager: EntityManager,
+    templatePackage: TemplatePackageEntity,
+    version: TemplatePackageVersionEntity,
+    manifest: TemplatePackageReleaseManifest,
+    definitions: ValidatedTemplatePackageRelease['definitions'],
+  ): Promise<void> {
+    if (manifest.manifestVersion !== 2) return;
+    await this.managedChunks.registerContractsUsingManager(manager, {
+      templatePackageId: templatePackage.id,
+      templatePackageVersionId: version.id,
+      definitions,
+    });
+  }
+
   private async resolveRegistrationRace(
     manager: EntityManager,
-    manifest: TemplatePackageManifest,
+    manifest: TemplatePackageReleaseManifest,
     manifestDigest: string,
+    definitions: ValidatedTemplatePackageRelease['definitions'],
     uniqueViolation: QueryFailedError,
   ): Promise<RegistrationResult> {
     const templatePackage = await manager
@@ -205,12 +255,19 @@ export class TemplatePackageService {
       });
     if (!version) throw uniqueViolation;
     this.assertVersionIdentity(version, manifest, manifestDigest);
+    await this.materializeManagedContracts(
+      manager,
+      templatePackage,
+      version,
+      manifest,
+      definitions,
+    );
     return { templatePackage, version, created: false };
   }
 
   private assertPackageIdentity(
     templatePackage: TemplatePackageEntity,
-    manifest: TemplatePackageManifest,
+    manifest: TemplatePackageReleaseManifest,
   ) {
     if (
       String(templatePackage.siteType) !== manifest.siteType ||
@@ -224,7 +281,7 @@ export class TemplatePackageService {
 
   private assertVersionIdentity(
     version: TemplatePackageVersionEntity,
-    manifest: TemplatePackageManifest,
+    manifest: TemplatePackageReleaseManifest,
     manifestDigest: string,
   ) {
     if (
@@ -410,7 +467,8 @@ export class TemplatePackageService {
     assignments: SiteContentTemplateEntity[],
     includeRuntime = true,
   ) {
-    const manifest = version.manifest as unknown as TemplatePackageManifest;
+    const manifest =
+      version.manifest as unknown as TemplatePackageReleaseManifest;
     const manifestAssignments = new Set(
       manifest.templates.map(
         (template) => `${template.kind}:${template.key}@${template.version}`,
@@ -439,7 +497,8 @@ export class TemplatePackageService {
     version: TemplatePackageVersionEntity,
     assignments: SiteContentTemplateEntity[],
   ) {
-    const manifest = version.manifest as unknown as TemplatePackageManifest;
+    const manifest =
+      version.manifest as unknown as TemplatePackageReleaseManifest;
     const reasons = this.compatibilityReasons(
       site,
       templatePackage,

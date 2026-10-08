@@ -4,6 +4,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { RegisterTemplatePackageDto } from './template-package.dto';
+import { assertValidTemplatePackageRelease } from './template-package-release-validation';
 import { assertValidTemplatePackageManifest } from './template-package.validation';
 import { assertValidManagedChunkManifestV2 } from './managed-chunk-validation';
 
@@ -29,9 +30,12 @@ describe('Managed Chunks Phase 1 release boundary', () => {
     expect(assertValidTemplatePackageManifest(release)).toBe(release);
   });
 
-  it('keeps synthetic v2 behind the isolated SDK and outside production DTO', async () => {
+  it('routes v2 through the managed validator while keeping the legacy validator v1-only', async () => {
     const v2 = read('../../test/fixtures/managed-chunks-v2.fixture.json');
     expect(assertValidManagedChunkManifestV2(v2).manifest.manifestVersion).toBe(
+      2,
+    );
+    expect(assertValidTemplatePackageRelease(v2).manifest.manifestVersion).toBe(
       2,
     );
     expect(() => assertValidTemplatePackageManifest(v2)).toThrow(
@@ -43,6 +47,6 @@ describe('Managed Chunks Phase 1 release boundary', () => {
         { manifest: v2 },
         { type: 'body', metatype: RegisterTemplatePackageDto },
       ),
-    ).rejects.toBeDefined();
+    ).resolves.toBeDefined();
   });
 });

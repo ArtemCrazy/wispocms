@@ -188,7 +188,11 @@ function createHarness(options?: {
   };
   const audit = { recordSystemEvent: jest.fn() };
   return {
-    service: new TemplatePackageService(dataSource as never, audit as never),
+    service: new TemplatePackageService(
+      dataSource as never,
+      audit as never,
+      { registerContractsUsingManager: jest.fn() } as never,
+    ),
     audit,
   };
 }

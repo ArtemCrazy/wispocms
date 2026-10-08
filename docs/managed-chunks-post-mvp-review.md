@@ -16,6 +16,15 @@
    производительности после завершения пользовательского API/UI.
 5. Разобрать существующий общий ESLint/Prettier baseline отдельно от этого
    функционала.
+6. Выполнить CLI/API end-to-end регистрацию реального Skinova manifest v2 на
+   одноразовой PostgreSQL-БД и проверить фактические строки contracts.
+7. Расширить v2 race/concurrency matrix для одновременной регистрации package
+   version и contracts; базовая идемпотентность уже покрыта unit-тестами.
+8. После появления runtime bindings провести visual smoke трёх Skinova
+   renderers и проверить preview/current switch.
+9. Перед legacy backfill утвердить явное сопоставление `buttonText` →
+   `button_text`, `linkUrl` → `link_url`, `mediaId` → `media_id`,
+   `mobileMediaId` → `mobile_media_id`, `isActive` → `is_active`.
 
 ## Уже закрыто для MVP
 

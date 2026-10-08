@@ -176,6 +176,7 @@ function createHarness(options?: {
   }> = [];
   const contractLookups: ContractIdentity[] = [];
   const contractInserts: ContractIdentity[] = [];
+  let lastRegistrationManager: EntityManager | null = null;
 
   const dataSource = {
     transaction: jest.fn(
@@ -270,6 +271,7 @@ function createHarness(options?: {
           }),
           createQueryBuilder: jest.fn(() => queryBuilder),
         } as unknown as EntityManager;
+        lastRegistrationManager = manager;
 
         const result = await callback(manager);
         contracts.splice(
@@ -303,6 +305,9 @@ function createHarness(options?: {
     versionLookups,
     contractLookups,
     contractInserts,
+    get lastRegistrationManager() {
+      return lastRegistrationManager;
+    },
     get insertAttempts() {
       return insertAttempts;
     },
@@ -777,6 +782,27 @@ const register = (
   });
 
 describe('ManagedChunkPersistenceRepository', () => {
+  it('can register contracts with the caller transaction manager', async () => {
+    const harness = createHarness();
+    const source = definition();
+    await register(harness.repository, [source]);
+    const manager = harness.lastRegistrationManager;
+    if (!manager) throw new Error('Registration manager was not captured');
+    harness.dataSource.transaction.mockClear();
+
+    await expect(
+      harness.repository.registerContractsUsingManager(manager, {
+        templatePackageId: PACKAGE_ID,
+        templatePackageVersionId: VERSION_ID,
+        definitions: [source],
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ definitionKey: source.key }),
+    ]);
+
+    expect(harness.dataSource.transaction).not.toHaveBeenCalled();
+  });
+
   it('persists exactly one contract per definition and returns input order', async () => {
     const harness = createHarness();
     const hero = definition();

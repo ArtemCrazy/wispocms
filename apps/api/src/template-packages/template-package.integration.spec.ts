@@ -112,7 +112,9 @@ integration('Template package release / isolated PostgreSQL', () => {
       db.getRepository(SiteEntity),
       db.getRepository(SiteAccessEntity),
     );
-    service = new TemplatePackageService(db, audit);
+    service = new TemplatePackageService(db, audit, {
+      registerContractsUsingManager: jest.fn(),
+    } as never);
     content = new ContentService(
       db.getRepository(SiteEntity),
       db.getRepository(SiteAccessEntity),

@@ -1177,20 +1177,37 @@ export class ManagedChunkPersistenceRepository {
     input: RegisterManagedChunkContractsInput,
   ): Promise<ManagedChunkContractEntity[]> {
     const prepared = this.prepareRegistration(input);
-    return this.dataSource.transaction(async (manager) => {
-      const storedByIdentity = await this.registerInTransaction(
-        manager,
-        prepared,
-      );
-      return prepared.resultIdentityKeys.map((identityKey) => {
-        const stored = storedByIdentity.get(identityKey);
-        if (!stored) {
-          throw new ConflictException(
-            'Контракт чанка не удалось зарегистрировать',
-          );
-        }
-        return stored;
-      });
+    return this.dataSource.transaction((manager) =>
+      this.registerPreparedContracts(manager, prepared),
+    );
+  }
+
+  async registerContractsUsingManager(
+    manager: EntityManager,
+    input: RegisterManagedChunkContractsInput,
+  ): Promise<ManagedChunkContractEntity[]> {
+    return this.registerPreparedContracts(
+      manager,
+      this.prepareRegistration(input),
+    );
+  }
+
+  private async registerPreparedContracts(
+    manager: EntityManager,
+    prepared: PreparedRegistration,
+  ): Promise<ManagedChunkContractEntity[]> {
+    const storedByIdentity = await this.registerInTransaction(
+      manager,
+      prepared,
+    );
+    return prepared.resultIdentityKeys.map((identityKey) => {
+      const stored = storedByIdentity.get(identityKey);
+      if (!stored) {
+        throw new ConflictException(
+          'Контракт чанка не удалось зарегистрировать',
+        );
+      }
+      return stored;
     });
   }
 
