@@ -123,6 +123,32 @@
   (40 entities), targeted ESLint/Prettier и `git diff --check` прошли.
   Миграция к БД не применялась; данные/backfill,
   Docker/VDS/Registry/push/merge/deploy не затронуты.
+- Task 2 Phase 2 завершён локально 08.10.2026, статус: **Готово, не
+  выложено**. Внутренний
+  `ManagedChunkPersistenceRepository` идемпотентно регистрирует immutable
+  contracts из уже валидированных manifest v2 одной транзакцией: проверяет
+  точную package/version identity, сохраняет definitions в исходном порядке,
+  использует `INSERT ... ON CONFLICT DO NOTHING` и безопасно перечитывает
+  конкурентную строку без запроса в abort-состоянии PostgreSQL. Digest и
+  canonical field contract сверяются независимо; presentation-only изменения
+  не меняют semantic contract.
+- Файлы Task 2: добавлены
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  `.spec.ts`; repository зарегистрирован и экспортирован из
+  `template-package.module.ts`; продолжена эта запись журнала. API/controller,
+  DTO, release CLI и Skinova manifest не подключались.
+- БД Task 2 — схема/миграции: без изменений. Формат будущих строк:
+  `field_contract` — canonical presentation-free объект,
+  `data_schema` — серверно выведенная JSON Schema; фактические строки ни в
+  общую, ни в локальную БД не записывались, backfill и ручные изменения данных
+  не выполнялись.
+- TDD RED: точная repository-команда завершилась с 1 failed suite / 0 tests,
+  причина — ожидаемый `Cannot find module
+  './managed-chunk-persistence.repository'`. GREEN: repository + schema —
+  2 suites / 18 tests; отдельный repository suite — 12/12. API production
+  build, targeted ESLint/Prettier и `git diff --check` прошли. Коммит
+  реализации: `feat: register immutable chunk contracts`.
+- БД/Docker/VDS/Registry/push/merge/deploy не запускались и не затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.

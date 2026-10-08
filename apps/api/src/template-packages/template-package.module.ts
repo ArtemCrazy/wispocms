@@ -8,6 +8,7 @@ import {
   TemplatePackageController,
   TemplatePackageCurrentController,
 } from './template-package.controller';
+import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
 import { TemplatePackageService } from './template-package.service';
 
 @Module({
@@ -17,7 +18,12 @@ import { TemplatePackageService } from './template-package.service';
     TemplatePackageCurrentController,
     TemplatePackageCandidatesController,
   ],
-  providers: [TemplatePackageService, ReleaseTokenGuard, PlatformAdminGuard],
-  exports: [TemplatePackageService],
+  providers: [
+    TemplatePackageService,
+    ManagedChunkPersistenceRepository,
+    ReleaseTokenGuard,
+    PlatformAdminGuard,
+  ],
+  exports: [TemplatePackageService, ManagedChunkPersistenceRepository],
 })
 export class TemplatePackageModule {}
