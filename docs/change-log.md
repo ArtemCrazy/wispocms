@@ -2963,9 +2963,14 @@
 - Повторный review TDD: RED — 46 прежних repository-тестов прошли, 3 упали на
   resource-before-site/contract и двойном layout authorization; GREEN —
   repository + revision service 82/82, вместе с workflow regression 91/91.
+- Финальный review TDD: RED — 32 прежних service-теста прошли, 2 упали на
+  admin missing-site в compatibility wrapper и лишнем runtime `entityId`;
+  GREEN — service 34/34, общий targeted regression 92/92. Wrapper сохраняет
+  Access→Site→Resource и возвращает ровно `{ id, versionNumber }`.
   Также пройдены API `nest build`, адресный ESLint/Prettier и `git diff --check`.
 - Коммиты: `4c86116` (`feat: persist atomic managed chunk layouts`), `856a0ea`
-  (`fix: order managed chunk persistence locks`) и отдельный follow-up commit
-  этой записи.
+  (`fix: order managed chunk persistence locks`), `ac483a9`
+  (`fix: prepare managed drafts before revision writes`) и отдельный финальный
+  quality-fix commit этой записи.
 - Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, `main`, push/merge и
   deploy не затрагивались.

@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import {
+  CmsRevisionResourceEntity,
   PlatformRole,
   SiteAccessEntity,
   SiteEntity,
@@ -319,7 +321,7 @@ describe('CMS revision storage', () => {
       },
     );
 
-    await service.saveManagedDraftUsingManager(
+    const result = await service.saveManagedDraftUsingManager(
       db as never,
       {
         siteId: 'site-1',
@@ -332,6 +334,14 @@ describe('CMS revision storage', () => {
       hook,
     );
 
+    expect(typeof result.id).toBe('string');
+    expect(result.versionNumber).toBe(1);
+    expect(Object.keys(result).sort()).toEqual(['id', 'versionNumber']);
+    expect(db.findOne.mock.calls.map(([entity]) => entity)).toEqual([
+      SiteAccessEntity,
+      SiteEntity,
+      CmsRevisionResourceEntity,
+    ]);
     expect(sites.findOne).not.toHaveBeenCalled();
     expect(siteAccesses.findOne).not.toHaveBeenCalled();
     expect(hook).toHaveBeenCalledTimes(1);
@@ -344,6 +354,46 @@ describe('CMS revision storage', () => {
     ]);
   });
 
+  it('returns safe not-found for an admin and missing site before direct managed wrapper writes', async () => {
+    const { service } = setup();
+    const db = {
+      findOne: jest.fn((entity: unknown) =>
+        entity === SiteEntity ? Promise.resolve(null) : Promise.resolve(null),
+      ),
+      save: jest.fn(),
+    };
+    const hook = jest.fn(() => Promise.resolve());
+
+    await expect(
+      service.saveManagedDraftUsingManager(
+        db as never,
+        {
+          siteId: 'missing-site',
+          resourceType: 'chunk_instance',
+          entityId: 'instance-1',
+          snapshot: { formatVersion: 1, data: {} },
+          expectedDraftRevisionId: null,
+          actor: {
+            userId: 'admin-id',
+            platformRole: PlatformRole.WISPO_ADMIN,
+          },
+        },
+        hook,
+      ),
+    ).rejects.toEqual(new NotFoundException('Сайт не найден'));
+
+    expect(db.findOne.mock.calls).toEqual([
+      [
+        SiteEntity,
+        {
+          where: { id: 'missing-site' },
+          lock: { mode: 'pessimistic_read' },
+        },
+      ],
+    ]);
+    expect(db.save).not.toHaveBeenCalled();
+    expect(hook).not.toHaveBeenCalled();
+  });
   it('rejects a missing managed hook before authorization or writes', async () => {
     const { service, db, operations } = setup();
     const callWithoutHook = service.saveManagedDraftUsingManager.bind(

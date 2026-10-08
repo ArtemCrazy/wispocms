@@ -440,12 +440,20 @@ export class CmsRevisionsService {
     revisionCreatedHook: RevisionCreatedHook,
   ): Promise<{ id: string; versionNumber: number }> {
     const { entityId, ...managedInput } = input;
-    return this.savePreparedManagedDraftUsingManager(
+    const revision = await this.savePreparedManagedDraftUsingManager(
       db,
       managedInput,
-      () => Promise.resolve({ entityId }),
+      async (prepareDb) => {
+        const site = await prepareDb.findOne(SiteEntity, {
+          where: { id: input.siteId },
+          lock: { mode: 'pessimistic_read' },
+        });
+        if (!site) throw new NotFoundException('Сайт не найден');
+        return { entityId };
+      },
       revisionCreatedHook,
     );
+    return { id: revision.id, versionNumber: revision.versionNumber };
   }
   /** Trusted publication adapter for actors allowed to publish directly; never
    * expose this as a generic route or let it overwrite an outstanding CMS draft.
