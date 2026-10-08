@@ -604,11 +604,11 @@ describe('ManagedChunkPersistenceRepository', () => {
   });
 
   it('rolls back all earlier inserts when a later definition conflicts', async () => {
-    const conflictingSource = definition({ key: 'conflict' });
+    const conflictingSource = definition({ key: 'z-conflict' });
     const existing = storedContract(conflictingSource);
     const harness = createHarness({ contracts: [existing] });
     const changedConflict = definition({
-      key: 'conflict',
+      key: 'z-conflict',
       fields: [
         {
           key: 'enabled',
@@ -620,12 +620,17 @@ describe('ManagedChunkPersistenceRepository', () => {
 
     await expect(
       register(harness.repository, [
-        definition({ key: 'new' }),
         changedConflict,
+        definition({ key: 'a-new' }),
       ]),
     ).rejects.toBeInstanceOf(ConflictException);
 
+    expect(harness.insertAttempts).toBe(1);
+    expect(harness.contractInserts.map(identityLabel)).toEqual(['a-new@1']);
     expect(harness.contracts).toEqual([existing]);
+    expect(harness.contracts.some((row) => row.definitionKey === 'a-new')).toBe(
+      false,
+    );
   });
 
   it('rereads a concurrent same-identity insert without retrying the transaction', async () => {

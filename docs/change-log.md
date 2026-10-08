@@ -168,6 +168,19 @@
 - Review не менял schema/entities/migrations/API или формат сохраняемых
   значений. Строки в общую/локальную БД не записывались; Docker/VDS/Registry,
   push/merge/deploy не запускались и не затрагивались.
+- Spec re-review Task 2 завершён локально 08.10.2026, статус: **Готово, не
+  выложено**. Rollback test теперь передаёт conflict `z-conflict` раньше
+  `a-new` в caller order, но проверяет deterministic DB order: один insert
+  `a-new@1` реально происходит до позднего conflict, а committed state
+  сохраняет только pre-existing row. Mutation RED с намеренным commit working
+  rows в fake `catch` дал 1 focused failure и показал leaked `a-new`;
+  временная мутация удалена, focused GREEN — 1/1. Финальный GREEN:
+  repository + schema — 2 suites / 25 tests, API production build, targeted
+  ESLint/Prettier и `git diff --check` прошли. Изменены только repository spec
+  и эта запись; production repository, schema/entities/migrations/API/БД и
+  формат данных не менялись. Коммит:
+  `test: prove chunk contract batch rollback`. Docker/VDS/Registry,
+  push/merge/deploy не запускались и не затрагивались.
 - По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
   `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
   этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
