@@ -1,5 +1,11 @@
 # Wispo CMS — журнал параллельных доработок
 
+### 2026-10-09 · Слияние Managed Chunks SDK
+
+- Статус: **В работе**. Артём / Codex, `feature/creation-publication-stage-7`: по поручению пользователя интегрировать `origin/codex/managed-chunks-sdk-v1` (`6086509`) поверх `2f7fab1`.
+- Tier 2: новые API/права, typed managed revisions, защита медиа и одна schema-only миграция `ManagedChunkPersistence1791876000000`. Проверить diff критичных границ и миграцию на изолированной копии production. Не запускать автоматический backfill Skinova, регистрацию пакетов или переключение runtime; существующие сайты остаются на legacy-модели.
+- До выкладки: свежая проверенная копия БД/медиа на VDS и E, сверка текущих образов и migration ledger, production-сборки и проверка готового web-контейнера. Проверка рабочего интерфейса — без создания публикаций и изменения прав.
+
 ### 2026-10-07 · Слияние site-scoped публикации на сервер заказчика
 
 - Статус: **слито в main и выложено; авторизованный browser-smoke ожидает вход пользователя**. Артём / Codex, ветка `feature/creation-publication-stage-7`: слита `origin/codex/site-scoped-publication-main-sync` (`c43c462`, реализация `a4660b4`) поверх `8de3465`.
