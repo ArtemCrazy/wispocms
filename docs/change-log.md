@@ -3466,16 +3466,50 @@
 
 ### 2026-10-09 · Phase 4.1: managed chunks API и UI для Skinova
 
-- Статус: **В работе, утверждена граница этапа; код не начат**. Владелец:
-  Роман / Codex; ветка `codex/managed-chunks-sdk-v1`.
-- Задача: добавить site-scoped generic API и видимый раздел CMS «Чанки» с
-  категорией «Баннеры», чтением backfilled instances, contract-driven формой и
-  существующим revision/approval workflow.
-- Design:
-  `docs/superpowers/specs/2026-10-09-managed-chunks-api-ui-design.md`.
-- Граница: public/preview runtime, legacy write/dual-write, layouts/placements,
-  TinyMCE/richText и рабочая/VDS БД не меняются. Новая migration и изменение
-  persisted format не ожидаются; при обнаружении такой необходимости этап
-  останавливается для отдельного согласования.
-- Изменены только design и эта запись журнала. Схема/данные БД, API/UI код,
-  Docker, VDS, deploy и внешние сервисы не затрагивались.
+- Статус: **Локально реализовано и зафиксировано этим commit; не выпущено**.
+  Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализовано: site-scoped API каталога/instances, contract-driven create и
+  immutable draft, submit/approve/request-changes/publish/restore; раздел CMS
+  «Чанки» с категорией «Баннеры», формой `text`/`textarea`/`image`/`number`/
+  `boolean`, server-driven actions, dirty guard и доступным modal focus flow.
+- Безопасность: exact first-seen contract/catalog fail-closed, tenant isolation,
+  Ajv и same-site image validation внутри транзакции, optimistic draft, typed
+  lifecycle proof. Удаление media блокируется для активных managed draft/
+  published snapshots; историческая revision повторно проверяется при restore.
+- Изменены API: `cms-revisions.service.ts`, `content.service.ts`,
+  `content.media.spec.ts`, managed persistence repository/spec, новый managed
+  chunk service/controller/DTO и specs, `template-package.module.ts`.
+- Изменены Web: `managed-chunks-model.ts` и spec,
+  `managed-chunks-view.tsx`, `page.tsx`, `media-site-view.tsx`,
+  `globals.css`, focused `site-shell-navigation.spec.ts`.
+- Документация: design и implementation plan Phase 4.1, этот журнал и
+  `docs/managed-chunks-post-mvp-review.md`.
+- БД — схема: не менялась, migration/entity не добавлялись, применённые
+  migrations не редактировались. В изолированной локальной БД зарегистрированы
+  Skinova package v1/v2 и идемпотентно выполнен site-specific backfill для
+  Skinova `51a00000-0000-4000-8000-000000000002`: созданы 3 active managed
+  instances и 3 `chunk_instance` resources, у всех есть draft/published
+  pointers. Persisted format остаётся managed snapshot v1
+  `{formatVersion: 1, data, sanitizerPolicyVersion: null}`.
+- Перед локальным backfill создан свежий backup
+  `.local/backups/wispo-before-phase41-20261009-130305.dump`; читаемость backup
+  проверена командой `pg_restore --list`. Локальный dump на VDS не переносился.
+- Runtime/совместимость: public/preview Skinova, legacy banner write, layouts/
+  placements не переключались; current runtime pointer Skinova остаётся на
+  package v1 / manifest v1. Изменилось только безопасное поведение legacy media
+  delete: активная managed-ссылка теперь запрещает удаление файла.
+- Критические проверки: focused API — 5 suites / 212 tests PASS на последнем
+  полном прогоне исполнителя; дополнительные targeted suites 12/12 и 144/144
+  PASS после review-fixes; API build PASS. Web model spec PASS, focused shell
+  scenario 1 PASS, scoped ESLint PASS, Web production build PASS; независимые
+  API/Web spec и quality review — Approved. Локальный browser smoke PASS:
+  категория «Баннеры», 3 строки, открытие editor и dirty guard после отмены
+  закрытия; после login не зафиксировано 4xx/5xx. Дополнительный общий прогон
+  остановлен по решению владельца; расширенные проверки вынесены в post-MVP
+  список.
+- Отложено: historical media reference index, pagination/N+1, full browser/
+  responsive/pixel/security/performance matrix — в
+  `docs/managed-chunks-post-mvp-review.md`.
+- Commit реализации: этот локальный commit `feat: add managed chunks API and
+  CMS UI`. Push/merge/deploy/VDS и ветка `main` не затрагивались.

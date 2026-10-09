@@ -17,6 +17,7 @@ import { PagesView } from "./pages-view";
 import { SiteDirectoryView } from "./site-directories-view";
 import { SiteSettingsView } from "./site-settings-view";
 import { SiteBannersView } from "./site-banners-view";
+import { ManagedChunksView } from "./managed-chunks-view";
 import {
   GlobalSearchView,
   type GlobalSearchTarget,
@@ -244,6 +245,7 @@ function Dashboard({
     | "privacy-policy"
     | "404"
     | "banners"
+    | "chunks"
     | "header"
     | "footer"
     | "layout"
@@ -473,6 +475,7 @@ function Dashboard({
         "layout",
         "variables",
         "banners",
+        "chunks",
         "media",
         "globals",
         "seo",
@@ -732,6 +735,7 @@ function Dashboard({
       ...mediaSystemPages,
       { id: "layout", icon: "header", label: "Шапка и подвал" },
       { id: "banners", icon: "banners", label: "Баннеры" },
+      { id: "chunks", icon: "banners", label: "Чанки" },
       { id: "variables", icon: "company-data", label: "Переменные" },
       { id: "media", icon: "content-center", label: "Медиатека" },
       { id: "globals", icon: "company-data", label: "Общие данные" },
@@ -2597,6 +2601,14 @@ function Dashboard({
                 : undefined
             }
             focusRequestId={navigationTarget?.requestId}
+          />
+        ) : activeView === "chunks" && site?.siteType === "media" ? (
+          <ManagedChunksView
+            key={site.id}
+            siteId={site.id}
+            siteName={site.name}
+            canEdit={canEdit}
+            onDirtyChange={setHasUnsavedChanges}
           />
         ) : activeView === "banners" ? (
           !hasBannerSlots ? null : site?.siteType === "media" ? (

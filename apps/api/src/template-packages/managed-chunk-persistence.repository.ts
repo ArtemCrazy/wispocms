@@ -580,6 +580,11 @@ export class ManagedChunkPersistenceRepository {
     sourceRevisionId: string;
     expectedDraftRevisionId: string | null;
     actor: RevisionActor;
+    validateUsingManager?: (
+      db: EntityManager,
+      snapshot: Record<string, unknown>,
+      contractId: string,
+    ) => Promise<void>;
   }): Promise<{ id: string; versionNumber: number }> {
     const siteId = String(input.siteId);
     const instanceId = String(input.instanceId);
@@ -605,6 +610,11 @@ export class ManagedChunkPersistenceRepository {
             revisionId: sourceRevisionId,
           });
           sourceLink = prepared.link;
+          await input.validateUsingManager?.(
+            prepareDb,
+            prepared.revision.snapshot,
+            prepared.link.contractId,
+          );
           return prepared;
         },
         async (hookDb, revision, resource) => {
@@ -623,6 +633,116 @@ export class ManagedChunkPersistenceRepository {
     });
   }
 
+  async saveInstanceDraft(input: {
+    siteId: string;
+    instanceId: string;
+    data: Record<string, unknown>;
+    expectedDraftRevisionId: string | null;
+    actor: RevisionActor;
+    validateUsingManager?: (db: EntityManager) => Promise<void>;
+  }): Promise<{ revisionId: string; versionNumber: number }> {
+    const siteId = String(input.siteId);
+    const instanceId = String(input.instanceId);
+    const actor = { ...input.actor };
+    const snapshot = {
+      formatVersion: 1,
+      data: structuredClone(input.data),
+      sanitizerPolicyVersion: null,
+    };
+    return this.dataSource.transaction(async (db) => {
+      let contractId: string | null = null;
+      const revision =
+        await this.revisions.savePreparedManagedDraftUsingManager(
+          db,
+          {
+            siteId,
+            resourceType: 'chunk_instance',
+            snapshot,
+            expectedDraftRevisionId: input.expectedDraftRevisionId,
+            actor,
+          },
+          async (prepareDb) => {
+            const instance = await prepareDb.findOne(
+              ManagedChunkInstanceEntity,
+              {
+                where: { id: instanceId, siteId, isArchived: false },
+                lock: { mode: 'pessimistic_read' },
+              },
+            );
+            if (!instance) this.managedRevisionNotFound();
+            const resource = await prepareDb.findOne(
+              CmsRevisionResourceEntity,
+              {
+                where: {
+                  id: instance.revisionResourceId,
+                  siteId,
+                  resourceType: 'chunk_instance',
+                  entityId: instanceId,
+                },
+                lock: { mode: 'pessimistic_write' },
+              },
+            );
+            if (!resource) this.managedRevisionNotFound();
+            const currentRevisionId =
+              resource.draftRevisionId ??
+              resource.publishedRevisionId ??
+              resource.approvedRevisionId;
+            if (!currentRevisionId) this.managedRevisionNotFound();
+            const link = await prepareDb.findOne(
+              ManagedChunkInstanceRevisionEntity,
+              {
+                where: {
+                  revisionId: currentRevisionId,
+                  revisionResourceId: resource.id,
+                  siteId,
+                  instanceId,
+                },
+                lock: { mode: 'pessimistic_read' },
+              },
+            );
+            if (!link) this.managedRevisionNotFound();
+            contractId = link.contractId;
+            await input.validateUsingManager?.(prepareDb);
+            return {
+              entityId: instanceId,
+              proof: { kind: 'instance' as const, contractId },
+            };
+          },
+          async (hookDb, savedRevision, resource) => {
+            if (!contractId) this.managedRevisionNotFound();
+            await hookDb.save(
+              Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+                revisionId: savedRevision.id,
+                revisionResourceId: resource.id,
+                siteId,
+                instanceId,
+                contractId,
+              }),
+            );
+          },
+        );
+      return { revisionId: revision.id, versionNumber: revision.versionNumber };
+    });
+  }
+
+  async submitInstanceRevision(input: {
+    siteId: string;
+    instanceId: string;
+    revisionId: string;
+    actor: RevisionActor;
+  }): Promise<void> {
+    return this.runInstanceLifecycle(input, 'submit');
+  }
+
+  async requestInstanceRevisionChanges(input: {
+    siteId: string;
+    instanceId: string;
+    revisionId: string;
+    actor: RevisionActor;
+    reason: string;
+  }): Promise<void> {
+    return this.runInstanceLifecycle(input, 'request_changes', input.reason);
+  }
   async approveInstanceRevision(input: {
     siteId: string;
     instanceId: string;
@@ -726,7 +846,8 @@ export class ManagedChunkPersistenceRepository {
       revisionId: string;
       actor: RevisionActor;
     },
-    operation: 'approve' | 'publish',
+    operation: 'submit' | 'approve' | 'request_changes' | 'publish',
+    reason?: string,
   ): Promise<void> {
     const siteId = String(input.siteId);
     const instanceId = String(input.instanceId);
@@ -746,10 +867,23 @@ export class ManagedChunkPersistenceRepository {
         revisionId,
         actor,
       };
-      if (operation === 'approve') {
+      if (operation === 'submit') {
+        await this.revisions.submitManagedRevisionUsingManager(
+          db,
+          lifecycleInput,
+          prepare,
+        );
+      } else if (operation === 'approve') {
         await this.revisions.approveManagedRevisionUsingManager(
           db,
           lifecycleInput,
+          prepare,
+        );
+      } else if (operation === 'request_changes') {
+        await this.revisions.requestManagedRevisionChangesUsingManager(
+          db,
+          lifecycleInput,
+          reason ?? '',
           prepare,
         );
       } else {
@@ -761,7 +895,6 @@ export class ManagedChunkPersistenceRepository {
       }
     });
   }
-
   private async runLayoutLifecycle(
     input: {
       siteId: string;
@@ -1093,6 +1226,7 @@ export class ManagedChunkPersistenceRepository {
     data: Record<string, unknown>;
     sanitizerPolicyVersion: string | null;
     actor: RevisionActor;
+    validateUsingManager?: (db: EntityManager) => Promise<void>;
   }): Promise<{
     instanceId: string;
     revisionId: string;
@@ -1138,6 +1272,7 @@ export class ManagedChunkPersistenceRepository {
             ) {
               throw new NotFoundException('Контракт чанка не найден');
             }
+            await input.validateUsingManager?.(prepareDb);
             return {
               entityId: instanceId,
               proof: { kind: 'instance' as const, contractId },

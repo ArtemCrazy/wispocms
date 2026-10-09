@@ -18,6 +18,7 @@ import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import nodemailer from 'nodemailer';
 import {
+  DataSource,
   EntityManager,
   In,
   IsNull,
@@ -42,6 +43,11 @@ import {
   ContentEventType,
   ContentTemplateKind,
   DomainStatus,
+  CmsRevisionEntity,
+  CmsRevisionResourceEntity,
+  ManagedChunkContractEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
   MediaEntity,
   PageEntity,
   PageActivityEntity,
@@ -203,6 +209,8 @@ export class ContentService {
     @InjectRepository(PageActivityEntity)
     private readonly pageActivities?: Repository<PageActivityEntity>,
     private readonly revisions?: CmsRevisionsService,
+    @Optional()
+    private readonly dataSource?: DataSource,
   ) {}
 
   private categoryIsPublic(
@@ -5138,6 +5146,114 @@ export class ContentService {
     return this.media.save(item);
   }
 
+  private managedImageFieldKeys(
+    contract: ManagedChunkContractEntity,
+  ): string[] {
+    const fields = contract.fieldContract?.fields;
+    if (!Array.isArray(fields)) {
+      throw new ConflictException('Данные управляемого контента повреждены');
+    }
+    const imageKeys: string[] = [];
+    for (const field of fields) {
+      if (
+        !field ||
+        typeof field !== 'object' ||
+        Array.isArray(field) ||
+        typeof (field as Record<string, unknown>).key !== 'string' ||
+        typeof (field as Record<string, unknown>).widget !== 'string'
+      ) {
+        throw new ConflictException('Данные управляемого контента повреждены');
+      }
+      if ((field as Record<string, unknown>).widget === 'image') {
+        imageKeys.push(String((field as Record<string, unknown>).key));
+      }
+    }
+    return imageKeys;
+  }
+
+  private managedSnapshotUsesMedia(
+    revision: CmsRevisionEntity,
+    contract: ManagedChunkContractEntity,
+    mediaId: string,
+  ): boolean {
+    const data = revision.snapshot?.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new ConflictException('Данные управляемого контента повреждены');
+    }
+    for (const key of this.managedImageFieldKeys(contract)) {
+      const value = (data as Record<string, unknown>)[key];
+      if (value === null || value === undefined) continue;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new ConflictException('Данные управляемого контента повреждены');
+      }
+      const referencedMediaId = (value as Record<string, unknown>).mediaId;
+      if (typeof referencedMediaId !== 'string') {
+        throw new ConflictException('Данные управляемого контента повреждены');
+      }
+      if (referencedMediaId === mediaId) return true;
+    }
+    return false;
+  }
+
+  private async assertManagedMediaUnusedUsingManager(
+    manager: EntityManager,
+    workspaceSiteIds: string[],
+    mediaId: string,
+  ): Promise<void> {
+    const instances = await manager.find(ManagedChunkInstanceEntity, {
+      where: { siteId: In(workspaceSiteIds), isArchived: false },
+    });
+    for (const instance of instances) {
+      const resource = await manager.findOne(CmsRevisionResourceEntity, {
+        where: {
+          id: instance.revisionResourceId,
+          siteId: instance.siteId,
+          resourceType: 'chunk_instance',
+          entityId: instance.id,
+        },
+      });
+      if (!resource) {
+        throw new ConflictException('Данные управляемого контента повреждены');
+      }
+      const revisionIds = new Set(
+        [resource.draftRevisionId, resource.publishedRevisionId].filter(
+          (value): value is string => Boolean(value),
+        ),
+      );
+      for (const revisionId of revisionIds) {
+        const revision = await manager.findOne(CmsRevisionEntity, {
+          where: { id: revisionId, resourceId: resource.id },
+        });
+        const link = await manager.findOne(ManagedChunkInstanceRevisionEntity, {
+          where: {
+            revisionId,
+            revisionResourceId: resource.id,
+            siteId: instance.siteId,
+            instanceId: instance.id,
+          },
+        });
+        if (!revision || !link) {
+          throw new ConflictException(
+            'Данные управляемого контента повреждены',
+          );
+        }
+        const contract = await manager.findOne(ManagedChunkContractEntity, {
+          where: { id: link.contractId },
+        });
+        if (!contract) {
+          throw new ConflictException(
+            'Данные управляемого контента повреждены',
+          );
+        }
+        if (this.managedSnapshotUsesMedia(revision, contract, mediaId)) {
+          throw new ConflictException(
+            'Изображение используется в контенте рабочего пространства. Сначала уберите его со всех сайтов.',
+          );
+        }
+      }
+    }
+  }
+
   async deleteMedia(siteId: string, mediaId: string, actor: Actor) {
     const site = await this.requireSite(
       siteId,
@@ -5216,7 +5332,23 @@ export class ContentService {
         'Изображение используется в контенте рабочего пространства. Сначала уберите его со всех сайтов.',
       );
 
-    await this.media.remove(item);
+    if (this.dataSource) {
+      await this.dataSource.transaction(async (manager) => {
+        const lockedMedia = await manager.findOne(MediaEntity, {
+          where: { id: mediaId, workspaceId: site.workspaceId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedMedia) throw new NotFoundException('Файл не найден');
+        await this.assertManagedMediaUnusedUsingManager(
+          manager,
+          workspaceSiteIds,
+          mediaId,
+        );
+        await manager.remove(lockedMedia);
+      });
+    } else {
+      await this.media.remove(item);
+    }
     await unlink(
       join(
         process.env.MEDIA_ROOT ?? '/data/media',

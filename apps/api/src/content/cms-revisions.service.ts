@@ -1045,6 +1045,89 @@ export class CmsRevisionsService {
     return { id: restored.id, versionNumber: restored.versionNumber };
   }
 
+  async submitManagedRevisionUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    prepare: ManagedRevisionLifecyclePrepare,
+  ): Promise<void> {
+    this.assertManagedResourceType(input.resourceType);
+    if (typeof prepare !== 'function') {
+      throw new BadRequestException(
+        'Управляемая отправка требует typed precondition',
+      );
+    }
+    await this.authorizeManagedPermissionUsingManager(
+      db,
+      input,
+      this.permission(input.resourceType),
+    );
+    const context = await this.verifyManagedRevisionUsingManager(
+      db,
+      input,
+      await prepare(db),
+    );
+    Object.assign(
+      context.resource,
+      submitRevision(this.pointers(context.resource), input.revisionId),
+    );
+    await db.save(context.resource);
+    await this.event(
+      db,
+      context.resource.id,
+      input.revisionId,
+      'submitted',
+      input.actor.userId,
+    );
+  }
+
+  async requestManagedRevisionChangesUsingManager(
+    db: EntityManager,
+    input: {
+      siteId: string;
+      resourceType: ManagedCmsResourceType;
+      entityId: string;
+      revisionId: string;
+      actor: RevisionActor;
+    },
+    reason: string,
+    prepare: ManagedRevisionLifecyclePrepare,
+  ): Promise<void> {
+    this.assertManagedResourceType(input.resourceType);
+    if (typeof prepare !== 'function') {
+      throw new BadRequestException(
+        'Управляемый возврат требует typed precondition',
+      );
+    }
+    await this.authorizeManagedPermissionUsingManager(
+      db,
+      input,
+      SitePermission.APPROVE,
+    );
+    const context = await this.verifyManagedRevisionUsingManager(
+      db,
+      input,
+      await prepare(db),
+    );
+    Object.assign(
+      context.resource,
+      requestChanges(this.pointers(context.resource), input.revisionId, reason),
+    );
+    await db.save(context.resource);
+    await this.event(
+      db,
+      context.resource.id,
+      input.revisionId,
+      'changes_requested',
+      input.actor.userId,
+      reason.trim(),
+    );
+  }
   async approveManagedRevisionUsingManager(
     db: EntityManager,
     input: {

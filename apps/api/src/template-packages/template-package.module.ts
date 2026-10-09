@@ -9,6 +9,8 @@ import {
   TemplatePackageController,
   TemplatePackageCurrentController,
 } from './template-package.controller';
+import { ManagedChunkContentController } from './managed-chunk-content.controller';
+import { ManagedChunkContentService } from './managed-chunk-content.service';
 import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
 import { SkinovaManagedBackfillService } from './skinova-managed-backfill.service';
 import { TemplatePackageService } from './template-package.service';
@@ -19,9 +21,11 @@ import { TemplatePackageService } from './template-package.service';
     TemplatePackageController,
     TemplatePackageCurrentController,
     TemplatePackageCandidatesController,
+    ManagedChunkContentController,
   ],
   providers: [
     TemplatePackageService,
+    ManagedChunkContentService,
     ManagedChunkPersistenceRepository,
     SkinovaManagedBackfillService,
     ReleaseTokenGuard,

@@ -2250,6 +2250,7 @@ function initialManagedLifecycleState(): ManagedLifecycleState {
         siteId: SITE_ID,
         revisionResourceId: INSTANCE_RESOURCE_ID,
         displayName: 'Hero',
+        isArchived: false,
       },
       {
         id: OTHER_INSTANCE_ID,
@@ -2308,7 +2309,9 @@ function initialManagedLifecycleState(): ManagedLifecycleState {
   };
 }
 
-function createManagedLifecycleHarness() {
+function createManagedLifecycleHarness(options?: {
+  requiresApproval?: boolean;
+}) {
   let committed = initialManagedLifecycleState();
   let failOnSave: null | 'link' | 'placement' = null;
   const operations: Array<{
@@ -2366,7 +2369,12 @@ function createManagedLifecycleHarness() {
               if (entity === SiteAccessEntity) {
                 return Promise.resolve(
                   query.where.userId === ACTOR.userId
-                    ? { role: SiteRole.OWNER, requiresApproval: false }
+                    ? options?.requiresApproval
+                      ? {
+                          role: SiteRole.CONTENT_MANAGER,
+                          requiresApproval: true,
+                        }
+                      : { role: SiteRole.OWNER, requiresApproval: false }
                     : null,
                 );
               }
@@ -2489,6 +2497,103 @@ function createManagedLifecycleHarness() {
 }
 
 describe('ManagedChunkPersistenceRepository typed lifecycle', () => {
+  it('saves an immutable instance draft with the current typed contract and preserves published pointer', async () => {
+    const harness = createManagedLifecycleHarness();
+    const resource = harness.state.resources.find(
+      (row) => row.id === INSTANCE_RESOURCE_ID,
+    )!;
+    resource.publishedRevisionId = INSTANCE_REVISION_ID;
+    const data = { headline: 'Next' };
+
+    const saved = await harness.repository.saveInstanceDraft({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      data,
+      expectedDraftRevisionId: INSTANCE_REVISION_ID,
+      actor: ACTOR,
+    });
+
+    expect(resource.publishedRevisionId).toBe(INSTANCE_REVISION_ID);
+    expect(
+      harness.state.revisions.find((row) => row.id === saved.revisionId)
+        ?.snapshot,
+    ).toEqual({
+      formatVersion: 1,
+      data,
+      sanitizerPolicyVersion: null,
+    });
+    expect(
+      harness.state.links.find((row) => row.revisionId === saved.revisionId)
+        ?.contractId,
+    ).toBe(CONTRACT_ID);
+    data.headline = 'Mutated';
+    expect(
+      (
+        harness.state.revisions.find((row) => row.id === saved.revisionId)
+          ?.snapshot as any
+      ).data.headline,
+    ).toBe('Next');
+  });
+
+  it('rejects a stale instance draft without partial rows', async () => {
+    const harness = createManagedLifecycleHarness();
+    const first = await harness.repository.saveInstanceDraft({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      data: { headline: 'First' },
+      expectedDraftRevisionId: INSTANCE_REVISION_ID,
+      actor: ACTOR,
+    });
+    const before = harness.snapshot();
+    await expect(
+      harness.repository.saveInstanceDraft({
+        siteId: SITE_ID,
+        instanceId: INSTANCE_ID,
+        data: { headline: 'Stale' },
+        expectedDraftRevisionId: INSTANCE_REVISION_ID,
+        actor: ACTOR,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(harness.state).toEqual(before);
+    expect(first.revisionId).toBe(before.resources[0].draftRevisionId);
+  });
+
+  it('submits and requests changes only through the verified instance link', async () => {
+    const harness = createManagedLifecycleHarness();
+    await harness.repository.submitInstanceRevision({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      revisionId: INSTANCE_REVISION_ID,
+      actor: ACTOR,
+    });
+    expect(harness.state.resources[0].reviewState).toBe('in_review');
+    await harness.repository.requestInstanceRevisionChanges({
+      siteId: SITE_ID,
+      instanceId: INSTANCE_ID,
+      revisionId: INSTANCE_REVISION_ID,
+      actor: ADMIN_ACTOR,
+      reason: 'Fix',
+    });
+    expect(harness.state.resources[0].reviewState).toBe('changes_requested');
+    expect(harness.state.events.map((event) => event.eventType)).toEqual([
+      'submitted',
+      'changes_requested',
+    ]);
+  });
+
+  it('blocks direct managed publish when the content-manager grant requires approval', async () => {
+    const harness = createManagedLifecycleHarness({ requiresApproval: true });
+    const before = harness.snapshot();
+    await expect(
+      harness.repository.publishInstanceRevision({
+        siteId: SITE_ID,
+        instanceId: INSTANCE_ID,
+        revisionId: INSTANCE_REVISION_ID,
+        actor: ACTOR,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(harness.state).toEqual(before);
+  });
   it.each(['approve', 'publish'] as const)(
     'blocks instance %s when the exact typed contract link is missing',
     async (operation) => {

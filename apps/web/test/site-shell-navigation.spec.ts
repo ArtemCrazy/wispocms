@@ -82,6 +82,46 @@ async function setSessionCookie(
   ]);
 }
 
+test("media site shell integrates generic Chunks and preserves legacy Banners", () => {
+  const appDirectory = join(__dirname, "../src/app");
+  const pageSource = readFileSync(join(appDirectory, "page.tsx"), "utf8");
+  const mediaSiteSource = readFileSync(
+    join(appDirectory, "media-site-view.tsx"),
+    "utf8",
+  );
+  const managedChunksSource = readFileSync(
+    join(appDirectory, "managed-chunks-view.tsx"),
+    "utf8",
+  );
+
+  expect(pageSource).toContain('| "chunks"');
+  expect(pageSource).toContain('{ id: "chunks", icon: "banners", label: "Чанки" }');
+  expect(pageSource).toMatch(
+    /activeView === "chunks"[\s\S]*?<ManagedChunksView[\s\S]*?siteId=\{site\.id\}/,
+  );
+  expect(pageSource).toContain('activeView === "banners"');
+  expect(pageSource).toContain("<SiteBannersView");
+  expect(mediaSiteSource).toContain('id: "chunks"');
+  expect(mediaSiteSource).toContain('title: "Чанки"');
+  expect(mediaSiteSource).toContain('id: "banners"');
+  expect(mediaSiteSource).toContain('title: "Баннеры"');
+  expect(pageSource).toMatch(
+    /<ManagedChunksView[\s\S]*?onDirtyChange=\{setHasUnsavedChanges\}/,
+  );
+  expect(managedChunksSource).toContain("createPortal");
+  expect(managedChunksSource).toContain("onDirtyChange?.(editorDirty)");
+  expect(managedChunksSource).toContain('querySelector<HTMLElement>(".app-shell")');
+  expect(managedChunksSource).toContain("shell.inert = true");
+  expect(managedChunksSource).toContain('shell.setAttribute("aria-hidden", "true")');
+  expect(managedChunksSource).toMatch(
+    /#managed-chunks-dialog-title"\)\s*\?\.focus\(\);[\s\S]*?shell\.inert = true/,
+  );
+  expect(managedChunksSource).toMatch(/event\.key !== "Tab"[\s\S]*?event\.shiftKey/);
+  expect(managedChunksSource).toMatch(/event\.key === "Escape"[\s\S]*?requestCloseEditor/);
+  expect(managedChunksSource).toContain("openerRef.current?.focus()");
+  expect(managedChunksSource).toMatch(/aria-label="Закрыть редактор"[\s\S]*?<svg/);
+});
+
 test("root project menu keeps site tools out of the header and admin tools in the profile", async ({
   page,
 }) => {

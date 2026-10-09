@@ -8,6 +8,7 @@ type MediaSiteTarget =
   | "404"
   | "privacy-policy"
   | "banners"
+  | "chunks"
   | "variables"
   | "media";
 
@@ -43,13 +44,19 @@ export function MediaSiteView({
         description: "Единая библиотека баннеров без привязки к месту показа.",
       },
       {
+        id: "chunks",
+        icon: "banners",
+        title: "Чанки",
+        description: "Управляемые блоки контента с черновиками и публикацией.",
+      },
+      {
         id: "media",
         icon: "content-center",
         title: "Медиатека",
         description: "Изображения и файлы, используемые на страницах сайта.",
       },
     ] satisfies Array<{
-      id: "templates" | "banners" | "variables" | "media";
+      id: "templates" | "banners" | "chunks" | "variables" | "media";
       icon: "template" | "banners" | "company-data" | "content-center";
       title: string;
       description: string;

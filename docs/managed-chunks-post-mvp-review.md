@@ -40,3 +40,20 @@
 - backfill подтверждён для 3 instances, 4 layouts, 5 placements и 8 provenance
   rows; идентичный повтор является no-op, checksum conflict не оставляет
   частичных записей.
+
+## Phase 4.1: отложено после API/UI MVP
+
+1. Запустить API/Web на одноразовой PostgreSQL-БД, зарегистрировать Skinova v2,
+   выполнить backfill и пройти полный create → save → review → publish →
+   restore browser flow без изменения общей локальной или VDS-БД.
+2. Провести full browser regression существующего sidebar, legacy banners,
+   media delete и всех ролей/`requiresApproval`.
+3. Проверить responsive/mobile, keyboard/screen-reader и pixel-perfect
+   состояние списка, формы, picker и modal на реальных данных.
+4. Добавить нормализованный индекс media references для исторических managed
+   revisions, если продукт должен гарантировать восстановление удалённых файлов;
+   до этого historical restore безопасно отклоняет отсутствующую media.
+5. Добавить pagination/batch loading и устранить последовательный N+1 в
+   catalog/instance list перед эксплуатацией больших каталогов.
+6. Выполнить расширенную tenant/security/concurrency/performance матрицу,
+   включая параллельные save/delete/restore и повреждённые contract chains.
