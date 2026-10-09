@@ -12145,3 +12145,534 @@ input[type="checkbox"] {
   border-radius: 12px;
   background: white;
 }
+
+.managed-chunks-shell {
+  width: min(100%, 1180px);
+  min-width: 0;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.managed-chunks-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+
+.managed-chunks-heading small,
+.managed-chunks-dialog header small {
+  color: var(--accent);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.managed-chunks-heading h1 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: clamp(28px, 4vw, 42px);
+}
+
+.managed-chunks-heading p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.managed-chunks-message {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.managed-chunks-message--error,
+.managed-chunks-state--error {
+  color: var(--danger);
+}
+
+.managed-chunks-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.managed-chunks-tabs {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.managed-chunks-tabs button,
+.managed-chunks-create,
+.managed-chunks-state button,
+.managed-chunks-dialog button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--surface);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.managed-chunks-tabs button {
+  min-height: 34px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.managed-chunks-tabs button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.managed-chunks-tabs button:focus-visible,
+.managed-chunks-create:focus-visible,
+.managed-chunks-state button:focus-visible,
+.managed-chunks-row:focus-visible,
+.managed-chunks-dialog button:focus-visible,
+.managed-chunks-dialog input:focus-visible,
+.managed-chunks-dialog textarea:focus-visible,
+.managed-chunks-dialog select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.managed-chunks-list {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.managed-chunks-list-head,
+.managed-chunks-row {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.6fr) minmax(130px, 1.25fr) minmax(112px, 0.7fr)
+    minmax(150px, 0.9fr) minmax(68px, auto);
+  align-items: center;
+  gap: 14px;
+}
+
+.managed-chunks-list-head {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.managed-chunks-row {
+  width: 100%;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.managed-chunks-row:last-child {
+  border-bottom: 0;
+}
+
+.managed-chunks-row:hover {
+  background: var(--workspace-bg);
+}
+
+.managed-chunks-row:disabled,
+.managed-chunks-dialog button:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.managed-chunks-row > strong,
+.managed-chunks-row > span,
+.managed-chunks-row > time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-chunks-row > span,
+.managed-chunks-row > time {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.managed-chunks-status {
+  justify-self: start;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--sidebar-bg);
+  font-weight: 700;
+}
+
+.managed-chunks-status--in_review {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.managed-chunks-status--changes_requested {
+  color: var(--danger);
+}
+
+.managed-chunks-status--approved {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.managed-chunks-open {
+  justify-self: end;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.managed-chunks-state {
+  min-height: 240px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.managed-chunks-state strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.managed-chunks-state p {
+  max-width: 480px;
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.managed-chunks-overlay {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  padding: 24px;
+  background: var(--modal-overlay);
+}
+
+.managed-chunks-dialog {
+  align-self: center;
+  width: min(860px, 100%);
+  max-height: calc(100vh - 48px);
+  margin: auto;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.managed-chunks-dialog > header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.managed-chunks-dialog header h2 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 21px;
+}
+
+.managed-chunks-dialog header button,
+.managed-chunks-dialog button.secondary {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+}
+.managed-chunks-dialog .managed-chunks-close {
+  display: grid;
+  width: 38px;
+  padding: 0;
+  place-items: center;
+}
+
+.managed-chunks-close svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.7;
+}
+
+.managed-chunks-version-state {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 22px 0;
+}
+
+.managed-chunks-version-state > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--workspace-bg);
+}
+
+.managed-chunks-version-state small,
+.managed-chunks-field small,
+.managed-chunks-image-field small,
+.managed-chunks-switch small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.managed-chunks-version-state strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managed-chunks-draft-note {
+  margin: 16px 22px 0;
+  padding: 11px 12px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.managed-chunks-dialog > .managed-chunks-message {
+  margin: 16px 22px 0;
+}
+
+.managed-chunks-dialog form {
+  display: grid;
+  gap: 16px;
+  padding: 20px 22px 0;
+}
+
+.managed-chunks-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.managed-chunks-field,
+.managed-chunks-image-field,
+.managed-chunks-switch {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.managed-chunks-field {
+  display: grid;
+  gap: 7px;
+}
+
+.managed-chunks-field textarea {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.managed-chunks-dialog input,
+.managed-chunks-dialog textarea,
+.managed-chunks-dialog select {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+
+.managed-chunks-image-field {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.managed-chunks-image-field legend {
+  padding: 0 5px;
+}
+
+.managed-chunks-image-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.managed-chunks-image-preview img {
+  width: 180px;
+  height: 110px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.managed-chunks-image-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.managed-chunks-switch {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.managed-chunks-switch input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.managed-chunks-switch small {
+  grid-column: 2;
+}
+
+.managed-chunks-dialog form > footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 4px -22px 0;
+  padding: 14px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.managed-chunks-dirty-hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.managed-chunks-workflow,
+.managed-chunks-save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.managed-chunks-save-actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 980px) {
+  .managed-chunks-list-head {
+    display: none;
+  }
+
+  .managed-chunks-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .managed-chunks-row > span,
+  .managed-chunks-row > time {
+    grid-column: 1;
+  }
+
+  .managed-chunks-open {
+    grid-column: 2;
+    grid-row: 1 / span 4;
+  }
+}
+
+@media (max-width: 720px) {
+  .managed-chunks-shell {
+    padding: 20px;
+  }
+
+  .managed-chunks-heading,
+  .managed-chunks-toolbar,
+  .managed-chunks-dialog form > footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .managed-chunks-fields,
+  .managed-chunks-version-state {
+    grid-template-columns: 1fr;
+  }
+
+  .managed-chunks-overlay {
+    padding: 12px;
+  }
+
+  .managed-chunks-dialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .managed-chunks-image-preview {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .managed-chunks-image-preview img {
+    width: 100%;
+    height: auto;
+  }
+
+  .managed-chunks-workflow,
+  .managed-chunks-save-actions {
+    width: 100%;
+  }
+}

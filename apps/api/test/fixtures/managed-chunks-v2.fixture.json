@@ -1,0 +1,97 @@
+{
+  "manifestVersion": 2,
+  "packageId": "managed-chunks-fixture",
+  "packageVersion": "1",
+  "title": "Managed Chunks Fixture",
+  "siteType": "media",
+  "cmsApi": {
+    "minSchemaVersion": "1.2"
+  },
+  "source": {
+    "repository": "https://example.com/wispo/managed-chunks-fixture.git",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "build": {
+    "releaseDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "artifactDigest": null,
+    "builtAt": "2026-10-07T00:00:00Z",
+    "runtimeMode": "embedded-next"
+  },
+  "chunkCategories": [
+    {
+      "key": "banners",
+      "title": "Баннеры",
+      "order": 10,
+      "iconKey": "banner"
+    }
+  ],
+  "chunkDefinitions": [
+    {
+      "key": "fixture-banner",
+      "schemaVersion": "1",
+      "title": "Тестовый баннер",
+      "categoryKey": "banners",
+      "rendererKey": "fixture-banner-renderer",
+      "fields": [
+        {
+          "key": "headline",
+          "label": "Заголовок",
+          "widget": "text",
+          "required": true
+        },
+        {
+          "key": "picture",
+          "label": "Изображение",
+          "widget": "image",
+          "nullable": true
+        },
+        {
+          "key": "body",
+          "label": "Текст",
+          "widget": "html",
+          "constraints": {
+            "maxLength": 20000,
+            "iframeProviders": ["youtube"]
+          }
+        }
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "kind": "homepage",
+      "key": "fixture-home",
+      "version": "1",
+      "title": "Fixture Home",
+      "dataScope": "cms-entity",
+      "runtimeContext": ["siteSlug"],
+      "dataSchemaVersion": "1",
+      "dataSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "configSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "slots": [
+        {
+          "key": "hero",
+          "title": "Главный баннер",
+          "placement": "homepage-hero",
+          "maxItems": 3,
+          "allowedChunks": [
+            {
+              "definitionKey": "fixture-banner",
+              "schemaVersion": "1"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

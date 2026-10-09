@@ -9,6 +9,7 @@ import {
   TemplatePackageEntity,
   TemplatePackageVersionEntity,
 } from '../database/entities';
+import type { TemplatePackageManifestV2 } from './managed-chunk.types';
 import type { TemplatePackageManifest } from './template-package.types';
 import {
   canonicalManifestDigest,
@@ -39,6 +40,32 @@ function skinovaManifest(): TemplatePackageManifest {
       builtAt: '2026-10-02T09:30:00Z',
     },
   } as TemplatePackageManifest;
+}
+
+function skinovaV2Manifest(): TemplatePackageManifestV2 {
+  const template = JSON.parse(
+    readFileSync(
+      resolve(
+        process.cwd(),
+        '../web/template-packages/skinova/manifest.v2.template.json',
+      ),
+      'utf8',
+    ),
+  ) as Record<string, unknown>;
+  return {
+    ...template,
+    source: {
+      ...(template.source as Record<string, unknown>),
+      revision: '0123456789abcdef0123456789abcdef01234567',
+    },
+    build: {
+      ...(template.build as Record<string, unknown>),
+      releaseDigest:
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      artifactDigest: null,
+      builtAt: '2026-10-08T09:30:00Z',
+    },
+  } as TemplatePackageManifestV2;
 }
 
 function createHarness(options?: {
@@ -170,13 +197,21 @@ function createHarness(options?: {
         : Promise.resolve(undefined),
     ),
   };
+  const managedChunks = {
+    registerContractsUsingManager: jest.fn().mockResolvedValue([]),
+  };
   return {
-    service: new TemplatePackageService(dataSource as never, audit as never),
+    service: new TemplatePackageService(
+      dataSource as never,
+      audit as never,
+      managedChunks as never,
+    ),
     packages,
     versions,
     site,
     assignments,
     audit,
+    managedChunks,
     manager,
     siteFindOne,
     get siteSaveCount() {
@@ -316,7 +351,11 @@ function createRegistrationRaceHarness(raceAt: 'package' | 'version') {
   };
 
   return {
-    service: new TemplatePackageService(dataSource as never, audit as never),
+    service: new TemplatePackageService(
+      dataSource as never,
+      audit as never,
+      { registerContractsUsingManager: jest.fn() } as never,
+    ),
     packages,
     versions,
     audit,
@@ -372,6 +411,58 @@ describe('TemplatePackageService', () => {
     expect(harness.audit.recordSystemEvent.mock.calls[0][1]).toBe(
       harness.manager,
     );
+    expect(
+      harness.managedChunks.registerContractsUsingManager,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('registers Skinova v2 contracts in the package transaction on create and retry', async () => {
+    const harness = createHarness();
+    const manifest = skinovaV2Manifest();
+
+    const first = await harness.service.register(manifest);
+    const retry = await harness.service.register(structuredClone(manifest));
+
+    expect(first).toMatchObject({
+      packageId: 'skinova-media',
+      packageVersion: '2',
+      created: true,
+    });
+    expect(retry).toEqual({ ...first, created: false });
+    expect(harness.versions).toHaveLength(1);
+    expect(harness.versions[0]).toMatchObject({ manifestVersion: 2 });
+    expect(
+      harness.managedChunks.registerContractsUsingManager,
+    ).toHaveBeenCalledTimes(2);
+    for (const call of harness.managedChunks.registerContractsUsingManager.mock
+      .calls) {
+      expect(call[0]).toBe(harness.manager);
+      expect(call[1]).toMatchObject({
+        templatePackageId: 'package-1',
+        templatePackageVersionId: 'version-1',
+      });
+      expect(
+        call[1].definitions.map(({ key }: { key: string }) => key),
+      ).toEqual([
+        'skinova-promo-strip',
+        'skinova-consultation-banner',
+        'skinova-article-sidebar-banner',
+      ]);
+    }
+  });
+
+  it('rolls back the v2 package candidate when contract materialization fails', async () => {
+    const harness = createHarness();
+    harness.managedChunks.registerContractsUsingManager.mockRejectedValueOnce(
+      new Error('contract materialization failed'),
+    );
+
+    await expect(harness.service.register(skinovaV2Manifest())).rejects.toThrow(
+      'contract materialization failed',
+    );
+    expect(harness.packages).toHaveLength(0);
+    expect(harness.versions).toHaveLength(0);
+    expect(harness.audit.recordSystemEvent).not.toHaveBeenCalled();
   });
 
   it('resolves concurrent identical first-package registration to one candidate', async () => {
@@ -463,6 +554,7 @@ describe('TemplatePackageService', () => {
     const service = new TemplatePackageService(
       dataSource as never,
       { recordSystemEvent: jest.fn() } as never,
+      { registerContractsUsingManager: jest.fn() } as never,
     );
 
     await expect(service.register(skinovaManifest())).rejects.toBe(

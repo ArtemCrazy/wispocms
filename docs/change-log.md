@@ -6,6 +6,368 @@
 - Tier 2: новые API/права, typed managed revisions, защита медиа и одна schema-only миграция `ManagedChunkPersistence1791876000000`. Проверить diff критичных границ и миграцию на изолированной копии production. Не запускать автоматический backfill Skinova, регистрацию пакетов или переключение runtime; существующие сайты остаются на legacy-модели.
 - До выкладки: свежая проверенная копия БД/медиа на VDS и E, сверка текущих образов и migration ledger, production-сборки и проверка готового web-контейнера. Проверка рабочего интерфейса — без создания публикаций и изменения прав.
 
+### 2026-10-07 · Проектирование Managed Chunks SDK для Skinova
+
+- Статус: **В работе**. Владелец: Roman / Codex; ветка
+  `codex/managed-chunks-sdk-v1`, создана от актуального `origin/main` `8de3465`.
+- Задача: спроектировать универсальные manifest-driven чанки без привязки CMS к
+  баннеру или другому визуальному типу: безопасные поля, TinyMCE/HTML-политика,
+  экземпляры, slots, ревизии, согласование и обратная совместимость схем.
+- БД — схема/данные/формат: на этапе спецификации не изменяются; миграции,
+  backfill и ручные изменения данных не выполняются. Будущий формат и переход
+  существующих Skinova-баннеров должны быть описаны до реализации.
+- Источники: актуальное ТЗ из Google Drive, существующий TemplatePackage
+  manifest Skinova и подтверждённые владельцем решения по OCI/frontend и
+  отдельным immutable SiteRelease. Код, VDS, Registry и общая БД не меняются.
+- План: независимый аудит текущей модели и security-контракта, затем design-spec,
+  самопроверка на противоречия и отдельное подтверждение перед implementation
+  plan. Для документационных изменений сборка и деплой не запускаются.
+- Архитектура подтверждена в диалоге и записана в
+  `docs/superpowers/specs/2026-10-07-managed-chunks-sdk-design.md`: manifest v2,
+  универсальные definitions/instances/slots, динамические категории раздела
+  «Чанки» (для Skinova — «Баннеры»), `fields` как единственный declarative
+  contract, фиксированные widgets, TinyMCE и серверная HTML-policy,
+  совместимость drafts/published layouts, права и аддитивный переход с
+  legacy-баннеров.
+  Администратор Wispo видит пакеты, определения, экземпляры и версии всех
+  сайтов; исходный код в CMS не редактируется.
+- Миграционный design учитывает idempotent backfill, сохранение существующих
+  revision resources/events, shadow comparison, временный dual-write и явную
+  rollback boundary до включения generic-only полей. Это только описание
+  будущих миграций: схема, данные, формат сохраняемых значений и окружение в
+  текущей работе фактически не менялись.
+- Письменная спецификация подтверждена владельцем 07.10.2026. Для первой фазы
+  создан TDD implementation plan
+  `docs/superpowers/plans/2026-10-07-managed-chunks-manifest-v2.md`; его
+  реализация ещё не начиналась. Phase 1 ограничена изолированным контрактным
+  SDK: без DB schema, register/DTO/service wiring, реального Skinova v2,
+  изменений баннеров и поведения release CLI/preflight.
+- Phase 2: письменная persistence-спецификация
+  `docs/superpowers/specs/2026-10-07-managed-chunks-persistence-design.md`
+  подтверждена владельцем 07.10.2026; отдельный TDD-план создан в
+  `docs/superpowers/plans/2026-10-07-managed-chunks-persistence-phase2.md` и
+  подтверждён владельцем 08.10.2026; начат Task 1: migration contract и
+  TypeORM metadata. На старте схема и данные фактически не применялись;
+  общая БД, VDS и Registry не затрагивались. Baseline перед
+  реализацией: Jest API — 124 suites / 931 tests PASS, 5 suites / 81 tests
+  SKIP без opt-in.
+- Task 1 Phase 2 завершён локально: добавлена schema-only миграция
+  `1791876000000-ManagedChunkPersistence` и TypeORM metadata для шести пустых
+  managed-chunk таблиц; разрешены manifest v1/v2 и resource types
+  `chunk_instance`/`chunk_layout`, добавлены tenant-safe unique/FK,
+  exact-resource constraint triggers, immutable-history triggers и безопасный
+  pre-drop guard для `down()`. Изменены
+  `apps/api/src/database/entities.ts`,
+  `apps/api/src/database/data-source.ts`,
+  `apps/api/src/database/data-source.spec.ts`; добавлены
+  `apps/api/src/database/migrations/1791876000000-ManagedChunkPersistence.ts`
+  и
+  `apps/api/src/database/migrations/1791876000000-ManagedChunkPersistence.spec.ts`;
+  продолжена эта запись `docs/change-log.md`.
+- БД Task 1 — схема: описана новой миграцией, но ни к одной БД не применялась.
+  Данные, существующие строки и формат уже сохраняемых значений не менялись;
+  `INSERT`, backfill и ручные изменения данных отсутствуют. TDD RED:
+  отсутствующий migration module и 51 вместо ожидаемых 52 migrations. GREEN:
+  3 Jest suites / 12 tests, API production build, targeted ESLint, Prettier и
+  `git diff --check` прошли. Общая/локальная рабочая БД, Docker, VDS, Registry,
+  push, merge и выкладка не затрагивались; изменение не выпущено.
+- Review-fix Task 1: первоначальный migration spec проверял часть DDL только
+  строковыми smoke-assertions. Без изменения production migration/entities
+  добавлены whitespace-insensitive структурные проверки полного legacy resource
+  list, value checks, всех tenant/composite FK и delete actions, unique/partial
+  indexes, immutable/deferred exact-resource triggers, reverse guard, первого
+  pre-drop guard, FK-safe rollback order и точного восстановления прежних
+  checks. Mutation RED подтверждён временной заменой actor FK `SET NULL` на
+  `RESTRICT`: новый тест упал строго на delete action; мутация полностью
+  отменена до commit. Исходный DDL mismatch не выявлен. GREEN после review:
+  3 Jest suites / 15 tests, API production build, targeted ESLint, Prettier и
+  `git diff --check` прошли. БД/Docker/VDS/Registry/push/merge/deploy не
+  затрагивались.
+- Code-quality fix Task 1: `down()` теперь первым единым query batch берёт
+  transaction-wide `SHARE ROW EXCLUSIVE` locks в фиксированном порядке на все
+  шесть managed tables, `cms_revision_resources` и
+  `template_package_versions`, затем выполняет guard; race между проверкой и
+  `DROP` закрыт. Instance нельзя удалить или перенести между site/resource;
+  разрешены display/archive/updated metadata и actor `SET NULL`. Layout update
+  и delete запрещены отдельным owner-identity trigger. Удалены неиспользуемые
+  `UQ_cms_revision_resources_exact_identity` и
+  `IDX_managed_chunk_contracts_package` из DDL/rollback/TypeORM metadata.
+- Review TDD: исходный DDL дал 5 ожидаемых failures на отсутствующих locks/
+  owner triggers и лишних unique/index. Отдельный mutation RED
+  `source_checksum varchar(128) -> varchar(127)` доказал exact column contract:
+  упал только column test; мутация отменена. GREEN — 3 Jest suites / 18 tests,
+  API build, targeted ESLint/Prettier, TypeORM metadata construction
+  (40 entities) и `git diff --check` прошли. Полный `tsc --noEmit` по-прежнему
+  завершается на 106 ранее существовавших diagnostics в чужих spec; diagnostics
+  Task 1 — 0. Task 7 plan дополнен двухсоединенческой lock-race и owner-identity
+  DB acceptance; БД/Docker фактически не запускались. Данные/backfill, VDS,
+  Registry, push, merge и deploy не затрагивались.
+- Post-review technical clarification Task 1: письменные persistence spec и
+  plan приведены в соответствие с одобренной реализацией exact resource
+  identity через deferred lookup по PK + reverse guard; избыточный
+  `cms_revision_resources(id, site_id, resource_type, entity_id)` unique не
+  возвращён. Layout owner trigger уточнён: DELETE и изменения
+  `id/site_id/revision_resource_id/scope_kind/page_id/surface_key/created_at`
+  запрещены null-safe сравнением, но no-op и будущие non-identity UPDATE
+  допустимы. Внешнее поведение и scope Phase 2 не расширены, данные/backfill
+  отсутствуют, миграция ни к одной БД не применялась. Mutation RED временно
+  удалял сравнение `surface_key`: новый structural test упал ровно на owner
+  contract (1 fail, остальные 9 pass); мутация восстановлена до commit. GREEN:
+  3 Jest suites / 18 tests, API production build, TypeORM metadata construction
+  (40 entities), targeted ESLint/Prettier и `git diff --check` прошли.
+  БД/Docker/VDS/Registry/push/merge/deploy не запускались и не затрагивались.
+- Runtime SQL review-fix Task 1: shared owner PL/pgSQL function разделена на
+  `protect_managed_chunk_instance_identity()` и
+  `protect_managed_chunk_layout_identity()`, чтобы PostgreSQL `RECORD NEW/OLD`
+  никогда не разрешал поля чужого row descriptor. Семантика сохранена:
+  instance organizational metadata и actor -> `NULL` разрешены, layout no-op
+  разрешён, DELETE и стабильные identity/target поля защищены. Down удаляет оба
+  triggers перед их точными functions. TDD RED: новые structural assertions
+  дали 2 expected failures на отсутствующих table-specific functions/cleanup,
+  остальные 8 tests прошли; focused GREEN — 10/10. Финальный GREEN:
+  3 Jest suites / 18 tests, API production build, TypeORM metadata construction
+  (40 entities), targeted ESLint/Prettier и `git diff --check` прошли.
+  Миграция к БД не применялась; данные/backfill,
+  Docker/VDS/Registry/push/merge/deploy не затронуты.
+- Task 2 Phase 2 завершён локально 08.10.2026, статус: **Готово, не
+  выложено**. Внутренний
+  `ManagedChunkPersistenceRepository` идемпотентно регистрирует immutable
+  contracts из уже валидированных manifest v2 одной транзакцией: проверяет
+  точную package/version identity, сохраняет definitions в исходном порядке,
+  использует `INSERT ... ON CONFLICT DO NOTHING` и безопасно перечитывает
+  конкурентную строку без запроса в abort-состоянии PostgreSQL. Digest и
+  canonical field contract сверяются независимо; presentation-only изменения
+  не меняют semantic contract.
+- Файлы Task 2: добавлены
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  `.spec.ts`; repository зарегистрирован и экспортирован из
+  `template-package.module.ts`; продолжена эта запись журнала. API/controller,
+  DTO, release CLI и Skinova manifest не подключались.
+- БД Task 2 — схема/миграции: без изменений. Формат будущих строк:
+  `field_contract` — canonical presentation-free объект,
+  `data_schema` — серверно выведенная JSON Schema; фактические строки ни в
+  общую, ни в локальную БД не записывались, backfill и ручные изменения данных
+  не выполнялись.
+- TDD RED: точная repository-команда завершилась с 1 failed suite / 0 tests,
+  причина — ожидаемый `Cannot find module
+  './managed-chunk-persistence.repository'`. GREEN: repository + schema —
+  2 suites / 18 tests; отдельный repository suite — 12/12. API production
+  build, targeted ESLint/Prettier и `git diff --check` прошли. Коммит
+  реализации: `feat: register immutable chunk contracts`.
+- БД/Docker/VDS/Registry/push/merge/deploy не запускались и не затрагивались.
+- Code-quality review Task 2 завершён локально 08.10.2026, статус: **Готово,
+  не выложено**. До первого `await` repository снимает независимый call-time
+  snapshot identities, canonical `field_contract`, derived `data_schema` и
+  digest; одинаковые identities группируются, semantic-conflict отклоняется
+  до DB writes, unique work items обрабатываются в стабильном порядке
+  `definition_key`/`schema_version`, а результат восстанавливает caller order
+  вместе с duplicates. Empty batch по-прежнему проверяет exact manifest v2
+  package version. Existing и concurrent rows теперь сверяются по digest,
+  `field_contract` и `data_schema` без зависимости от порядка JSONB-ключей.
+- Review TDD RED: repository suite — 5 ожидаемых failures / 14 passes:
+  data-schema mismatch, caller-order DB processing, mutable input после gate и
+  late duplicate conflict. GREEN: repository + schema — 2 suites / 25 tests;
+  API production build, targeted ESLint/Prettier и `git diff --check` прошли.
+  В Task 7 добавлен two-connection PostgreSQL acceptance для одновременных
+  совместимых batch `[A, B]`/`[B, A]` без `40P01` и с теми же двумя rows.
+  Коммит review-fix: `fix: harden chunk contract registration`.
+- Review не менял schema/entities/migrations/API или формат сохраняемых
+  значений. Строки в общую/локальную БД не записывались; Docker/VDS/Registry,
+  push/merge/deploy не запускались и не затрагивались.
+- Spec re-review Task 2 завершён локально 08.10.2026, статус: **Готово, не
+  выложено**. Rollback test теперь передаёт conflict `z-conflict` раньше
+  `a-new` в caller order, но проверяет deterministic DB order: один insert
+  `a-new@1` реально происходит до позднего conflict, а committed state
+  сохраняет только pre-existing row. Mutation RED с намеренным commit working
+  rows в fake `catch` дал 1 focused failure и показал leaked `a-new`;
+  временная мутация удалена, focused GREEN — 1/1. Финальный GREEN:
+  repository + schema — 2 suites / 25 tests, API production build, targeted
+  ESLint/Prettier и `git diff --check` прошли. Изменены только repository spec
+  и эта запись; production repository, schema/entities/migrations/API/БД и
+  формат данных не менялись. Коммит:
+  `test: prove chunk contract batch rollback`. Docker/VDS/Registry,
+  push/merge/deploy не запускались и не затрагивались.
+- Task 3 Phase 2 завершён локально 08.10.2026, статус: **Готово, не выложено**.
+  Добавлено атомарное создание site-scoped managed chunk instance через
+  существующий CMS revision workflow: после сохранения resource/revision
+  внутренний manager-only hook создаёт instance и typed contract link до
+  обновления draft pointer и события. Ошибка hook откатывает все записи.
+- Файлы: `cms-revisions.service.ts` и spec,
+  `managed-chunk-persistence.repository.ts` и spec,
+  `template-package.module.ts`, эта запись журнала. Generic API/controller,
+  sanitizer/media validation, schema/entities/migrations не менялись.
+- Формат новых сохраняемых значений: типы разделены — generic
+  `CmsResourceType` не содержит managed resources, а отдельный закрытый
+  `ManagedCmsResourceType` содержит `chunk_instance`/`chunk_layout`; snapshot
+  instance строго равен
+  `{ formatVersion: 1, data, sanitizerPolicyVersion }`; typed link хранит точные
+  `revisionId`, `revisionResourceId`, `siteId`, `instanceId`, `contractId`.
+  Вызов снимает independent clone `data` до первого `await`, без санитаризации
+  или иных преобразований. Неизвестный контракт, несовпадение пакета сайта и
+  исчезнувший после авторизации сайт дают одинаковый безопасный `NotFound`.
+- БД — схема/миграции: без изменений. Общая/локальная БД и фактические строки
+  не изменялись; тесты используют только stateful in-memory transaction fake.
+  При будущем вызове метода новые instance/resource/revision/link/event
+  сохраняются одной транзакцией; backfill и ручные изменения данных не нужны.
+- TDD RED: точный targeted command — 2 failed suites, 10 ожидаемых failures,
+  42 existing passes (`createInstanceDraft` отсутствовал, hook не вызывался).
+  GREEN: targeted 2 suites / 53 tests; regression-набор вместе с
+  `revision-workflow` и `managed-chunk-schema` — 4 suites / 68 tests; API
+  production build, targeted ESLint/Prettier и `git diff --check` прошли.
+- Коммит реализации: `feat: persist typed chunk instance revisions`.
+  Docker/VDS/Registry, push/merge/deploy не запускались и не затрагивались.
+- Quality review Task 3 завершён локально 08.10.2026, статус: **Готово, не
+  выложено**. Generic `saveDraft`/`saveDraftUsingManager` теперь типами и runtime
+  guard закрыты для `chunk_instance`/`chunk_layout`; managed write доступен
+  только через внутренний `saveManagedDraftUsingManager` с обязательным hook.
+- Public generic authorization перенесена внутрь её transaction, оба draft
+  manager-пути читают site/access через переданный `EntityManager`; access read
+  использует `pessimistic_read`. Repository внутри того же manager сначала
+  берёт `pessimistic_read` site lock, затем читает contract и проверяет exact
+  package assignment, исключая commit против устаревшей активации пакета.
+- Test fidelity: instance suite использует реальный `CmsRevisionsService` и
+  stateful transaction fake, доказывая общий rollback resource/revision/
+  instance/link/pointer/event. Task 7 plan дополнен точным two-connection
+  package-activation race: A удерживает site lock, B блокируется; обратная
+  сериализация заставляет A увидеть новый package и безопасно отклонить contract.
+- Изменены только `cms-revisions.service.ts` и spec,
+  `managed-chunk-persistence.repository.ts` и spec, Phase 2 plan и эта запись.
+  Schema/entities/migrations/controllers/API и формат snapshot/link не менялись.
+  Общая/локальная БД, фактические строки, Docker/VDS/Registry не затрагивались.
+- Review TDD RED: targeted 2 failed suites, 18 ожидаемых failures / 41 existing
+  passes. GREEN: targeted 2 suites / 59 tests; regression с `revision-workflow`
+  и `managed-chunk-schema` — 4 suites / 74 tests; API production build,
+  targeted ESLint/Prettier и `git diff --check` прошли.
+- Коммит review-fix: `fix: enforce typed chunk revision boundary`.
+  Push/merge/deploy не выполнялись.
+- Spec re-review Task 3 завершён локально 08.10.2026: журнал и Phase 2 plan
+  приведены к фактической разделённой границе generic/managed revisions;
+  исправлено сцепление строк journal. Изменены только два Markdown-файла.
+  Schema/данные/формат сохраняемых значений, код, БД и выкладка не менялись;
+  проверки — placeholder scan и `git diff --check`. Коммит:
+  `docs: align typed chunk revision plan`.
+- По итогам self-review Phase 1 plan уточнён: лимиты полей зафиксированы как
+  `text <= 2000`, `textarea <= 20000`, `html <= 65536`; iframe provider первого
+  этапа — только `youtube`; manifest не управляет MIME/размером `mediaFile`.
+  Pure compatibility seam проверяет contracts/digests, доверенный build-side
+  renderer inventory, slots/allowed definitions/maxItems и переданный inventory
+  published/draft placements, включая безопасные уникальные positions. Для
+  отсутствующих provider/protocol/target catalogs digest использует стабильный
+  `platform-default` sentinel; присланный несовпадающий digest планируется как
+  `ConflictException`/HTTP 409. Это по-прежнему документация: DB-backed lookup,
+  runtime attestation и production preflight wiring отложены.
+- Task 1 Phase 1 завершён локально: добавлены только
+  `managed-chunk.types.ts`, его Jest-spec и синтетический v2 fixture. Production
+  alias/validator/DTO/service, реальный Skinova manifest, баннеры и БД не
+  менялись. TDD RED подтверждён отсутствующим модулем, затем отдельными
+  compile-time ошибками exact type contract; GREEN — Jest 1 suite / 2 tests,
+  точечный TypeScript compile, ESLint, Prettier и `git diff --check` прошли.
+  Spec review — compliant; code-quality review — approved после форматирования.
+  Коммиты Task 1: `05c0564`, `0779851`, `e3c2d58`. Push, merge и выкладка не
+  выполнялись.
+- Task 2 Phase 1 завершён локально: добавлены только
+  `managed-chunk-schema.ts` и его Jest-spec. Реализованы закрытая JSON Schema
+  draft-07 для всех разрешённых widgets и стабильный SHA-256 digest
+  семантического контракта; подписи, порядок полей и другие presentation-данные
+  digest не меняют. Отсутствующие каталоги протоколов, targets и iframe-provider
+  фиксируются sentinel `platform-default`, явно переданные каталоги — как
+  `explicit`.
+- TDD Task 2: первый RED — отсутствие модуля; второй RED — отсутствие функций
+  canonicalization/digest. GREEN — Jest 1 suite / 6 tests; отдельно прошли
+  production build API, точечные TypeScript-check, ESLint, Prettier и
+  `git diff --check`. Spec review — compliant; code-quality review — approved.
+  Коммит Task 2: `09a41105`. Схема БД, данные, формат уже сохраняемых значений,
+  миграции, Skinova manifest, production wiring и общая БД не менялись. Push,
+  merge и выкладка не выполнялись.
+- Task 3 Phase 1 завершён локально: добавлены fail-closed path-aware validator
+  manifest v2 и characterization-тест границы релиза. Validator до semantic
+  validation создаёт безопасную копию только из собственных data-descriptors,
+  отклоняет proxy/accessor/symbol, нестандартные prototypes, циклы, разреженные
+  массивы и превышение входных лимитов; затем проверяет закрытые ключи,
+  каталоги, ссылки, дубли и complexity budgets. Derived schema/digest считаются
+  сервером; корректный по форме, но несовпадающий digest возвращает HTTP 409.
+- TDD Task 3: RED — оба suite не находили модуль validator; GREEN — 4 suite /
+  29 tests для Tasks 1–3. Отдельно прошли API production build, ESLint,
+  Prettier и `git diff --check`; spec review — compliant, security/code-quality
+  review — approved. Коммит Task 3: `678d059`. Production validator/DTO,
+  рабочая Skinova и release CLI остались на manifest v1. Схема БД, данные,
+  формат сохраняемых значений, миграции, общая БД, VDS, push, merge и выкладка
+  не затрагивались.
+- Task 4 Phase 1 завершён локально: добавлен pure compatibility primitive для
+  contracts, доверенного renderer inventory, template slots и переданных
+  published/draft placements. Он проверяет definitions/digests, доступность
+  renderer, allowed definitions, capacity и безопасные уникальные positions;
+  layouts published/draft учитываются независимо. Причины сортируются
+  детерминированно без зависимости от locale, не содержат content payloads;
+  входные данные не мутируются, tuple identities не имеют delimiter collisions.
+- TDD Task 4: RED — отсутствовал compatibility-модуль; GREEN — 5 suite /
+  41 test для Tasks 1–4. Отдельно прошли API production build, ESLint,
+  Prettier и `git diff --check`; spec review — compliant, security/code-quality
+  review — approved. Коммит Task 4: `0f8a9e1`. Production wiring, БД, схема,
+  данные, формат сохраняемых значений, миграции, Skinova manifest, release CLI,
+  VDS, push, merge и выкладка не затрагивались.
+- Task 5 Phase 1 завершён локально: добавлен trusted frontend runtime catalog,
+  который связывает rendererKey только с собственной data-property явно
+  переданного build-side bindings-объекта и разрешает frozen реализацию по
+  точной package/version/definition/schema identity. Коллизионные identities,
+  дубли, отсутствующие, inherited, accessor и nullish bindings отклоняются;
+  getter не исполняется. Dynamic imports, пути из manifest и network отсутствуют.
+- TDD Task 5: RED — отсутствовал runtime catalog module; GREEN — новый suite
+  7/7, вместе с существующим template runtime — 12/12. Web TypeScript, ESLint,
+  Prettier и `git diff --check` прошли; spec review — compliant, React/Next
+  security/code-quality review — approved после fail-closed nullish fix.
+  Коммиты Task 5: `78edd75`, `e72bf30`. Production wiring, существующий runtime
+  catalog, реальная Skinova, БД, схема/данные/формат, миграции, VDS, push, merge
+  и выкладка не затрагивались.
+- Task 6 и Phase 1 завершены локально. Финальная проверка: граница v1/v2 —
+  1 suite / 2 tests; focused API managed-chunk — 5 suites / 41 test; web runtime
+  — 12/12; неизменённый release CLI — 21/21. API production build, web
+  TypeScript, точечные ESLint/Prettier и `git diff --check` прошли.
+- Scope-аудит подтвердил отсутствие diff в БД/миграциях, production
+  TemplatePackage types/validator/DTO/service, реальном Skinova manifest и
+  release CLI; placeholders, секреты и generated-файлы не найдены. Статус
+  design-spec приведён в соответствие с фактом подтверждения и проверки.
+- Схема БД, данные, формат сохраняемых значений, миграции, production v1,
+  баннеры и CLI preflight не менялись. Общая БД, Docker, VDS, Registry, push,
+  merge и выкладка не использовались. DB-backed published/draft compatibility,
+  runtime attestation, production registration/release wiring, real Skinova v2,
+  backfill/dual-write, TinyMCE/sanitizer/media/payload validation, UI, workflow
+  согласования и public/preview rendering остаются следующими фазами.
+- После финального `fetch` актуальный `origin/main` продвинулся с `8de3465` до
+  `2f7fab1`: feature-ветка находится на 20 коммитов впереди и 8 позади.
+  Изменённые source-файлы не пересекаются; безопасная `merge-tree`-симуляция
+  показала единственный content conflict в `docs/change-log.md`, поскольку обе
+  ветки дополняли общий журнал. Rebase/merge и разрешение конфликта не
+  выполнялись; при интеграции нужно сохранить записи обеих веток.
+- Синхронизация после Phase 1 завершена локально: по подтверждению владельца
+  feature-ветка сначала отправлена в `origin/codex/managed-chunks-sdk-v1` на
+  коммите `2512e80`, затем актуальный `origin/main` `2f7fab1` объединён только
+  в эту feature-ветку. Единственный конфликт `docs/change-log.md` разрешён с
+  сохранением полных записей обеих сторон; остальные файлы main перенесены
+  побайтово, Managed Chunks при merge не менялись.
+- Проверки объединённого состояния: API Managed Chunks 41/41, web runtime
+  12/12, release CLI 21/21, API production build и web TypeScript — PASS;
+  `git diff --cached --check` чист. `main`, VDS, Registry и общая БД не
+  изменялись; интеграционные тесты на общей БД не запускались.
+- Merge-коммит `a3a93ab` с родителями feature `4ee7cb1` и main `2f7fab1`
+  отправлен в `origin/codex/managed-chunks-sdk-v1`. Pull Request, merge в
+  `main`, deployment и изменения VDS не выполнялись.
+- Phase 2 — **В работе, проектирование подтверждено владельцем 07.10.2026**.
+  Зафиксирован гибридный способ хранения: immutable contracts и site-scoped
+  instances/layouts/placements используют существующий `cms_revision_*`
+  workflow; раскладка страницы или шаблонной поверхности сохраняется,
+  согласуется и публикуется одной атомарной версией. До утверждения отдельной
+  спецификации и TDD-плана код, схема БД, данные и формат сохраняемых значений
+  не меняются; миграции, backfill и ручные правки не выполняются. Проверки БД
+  будут запускаться только на одноразовой локальной PostgreSQL, без общей БД,
+  VDS, Registry и production.
+- Изменённые файлы текущего документационного этапа: эта существующая запись
+  журнала, design-spec и implementation plan выше. Документационные коммиты
+  спецификации: `c5fc0e3`, `efb19d2`; plan: `7cd4d95`. Код, схема БД,
+  данные и формат сохраняемых значений не менялись; миграции/backfill/ручные
+  правки данных, сборка, тесты, Docker, общая БД, VDS, Registry, push, merge,
+  деплой и фактическая выкладка не выполнялись.
+
 ### 2026-10-07 · Слияние site-scoped публикации на сервер заказчика
 
 - Статус: **слито в main и выложено; авторизованный browser-smoke ожидает вход пользователя**. Артём / Codex, ветка `feature/creation-publication-stage-7`: слита `origin/codex/site-scoped-publication-main-sync` (`c43c462`, реализация `a4660b4`) поверх `8de3465`.
@@ -2571,3 +2933,589 @@
 
 Работу над независимым интерфейсом можно продолжать. Изменения общей схемы,
 конфликтующих данных и параллельную выкладку необходимо согласовывать.
+
+### 2026-10-08 · Phase 2 / Task 4: атомарные версии layout и placements
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализовано: typed repository boundary `saveLayoutDraft` одной внешней
+  транзакцией создаёт или переиспользует стабильную identity page/site-surface
+  layout, сохраняет metadata-only CMS revision и полный immutable placements
+  set этой версии, включая пустой набор. Частичного placement API нет.
+- Конкурентность и tenant safety: единый typed prepare-boundary ровно один раз
+  выполняет manager-bound authorization (`SiteAccess` для employee), затем
+  repository читает/блокирует site и валидирует target/contract, и только после
+  этого создаёт resource/revision. Denial и admin missing-site останавливаются
+  до любых writes. Mandatory hook сохраняет instance/link либо layout/placements.
+  Page и каждый instance проверяются в том же site.
+- Позиции placements валидируются до transaction как PostgreSQL `integer`:
+  допустимы только целые значения `0..2147483647`.
+- План Task 7 исправлен: concurrent initial same-target save даёт ровно один
+  success и один `Conflict`, затем loser retry создаёт version 2; также добавлен
+  двухсоединенческий access-reassignment regression без Site→Access deadlock.
+- Изменено: `apps/api/src/content/cms-revisions.service.ts` и его spec,
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  его spec, `docs/superpowers/plans/2026-10-07-managed-chunks-persistence-phase2.md`
+  и эта запись журнала.
+- БД — схема: не менялась. Новых или отредактированных миграций нет.
+- БД — данные и формат: существующие данные не менялись. Layout snapshot имеет
+  только `{ formatVersion, templateKey, templateVersion }`; placements остаются
+  нормализованными строками точной revision согласно уже принятой схеме.
+- TDD реализации: RED подтверждён ошибкой `saveLayoutDraft is not a function`
+  при 28 прошедших прежних тестах; GREEN — repository suite 45/45.
+- Quality review TDD: RED — 73 прежних теста прошли, 7 упали на отсутствующем
+  access-first boundary, старом lock order и принятом int32 overflow; GREEN —
+  repository + revision service 80/80.
+- Повторный review TDD: RED — 46 прежних repository-тестов прошли, 3 упали на
+  resource-before-site/contract и двойном layout authorization; GREEN —
+  repository + revision service 82/82, вместе с workflow regression 91/91.
+- Финальный review TDD: RED — 32 прежних service-теста прошли, 2 упали на
+  admin missing-site в compatibility wrapper и лишнем runtime `entityId`;
+  GREEN — service 34/34, общий targeted regression 92/92. Wrapper сохраняет
+  Access→Site→Resource и возвращает ровно `{ id, versionNumber }`.
+  Также пройдены API `nest build`, адресный ESLint/Prettier и `git diff --check`.
+- Коммиты: `4c86116` (`feat: persist atomic managed chunk layouts`), `856a0ea`
+  (`fix: order managed chunk persistence locks`), `ac483a9`
+  (`fix: prepare managed drafts before revision writes`) и отдельный финальный
+  quality-fix commit этой записи.
+- Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, `main`, push/merge и
+  deploy не затрагивались.
+
+### 2026-10-08 · Phase 2 / Task 5: typed lifecycle managed-версий
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализовано: внутренние manager-bound prepare/copy boundaries для restore,
+  approve и publish managed instance/layout revisions; public legacy-сигнатуры
+  сохранены как delegates, а generic entry points runtime-guarded от managed
+  типов. Repository wrappers проверяют точные site/owner/resource/revision и
+  typed link либо весь фактически присутствующий placement set.
+- Restore: всегда создаётся новая immutable CMS revision. Instance получает
+  новый точный contract link; layout получает независимую копию всего source
+  placement set. Пустой placement set является валидной полной раскладкой.
+  Source revision и её typed rows не становятся draft и не изменяются.
+- Tenant/atomic safety: порядок manager workflow — Access → Site → стабильный
+  typed owner → resource → revision → typed rows/placements. Unknown,
+  cross-site и cross-resource substitutions возвращают одинаковый safe
+  NotFound. Precondition/copy failure откатывает revision, typed rows, pointers
+  и events одной внешней транзакцией.
+- Изменено: `apps/api/src/content/cms-revisions.service.ts` и spec,
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  spec, Task 7 plan и эта запись журнала. Task 7 теперь явно проверяет lifecycle
+  FK/typed rollback, same-revision concurrency, restore copy atomicity и
+  двухсоединенческий lock/deadlock contract на disposable PostgreSQL.
+- БД — схема: не менялась. Новых или отредактированных миграций/entity нет.
+- БД — данные и формат: существующие данные не менялись; формат snapshot,
+  contract link и placement rows сохранён. Проверки использовали только
+  stateful in-memory transaction harness с реальным `CmsRevisionsService`.
+- TDD RED: 83 прежних теста прошли, 16 новых упали — 13 на отсутствующих
+  lifecycle wrapper methods и 3 на generic restore/approve/publish, которые
+  доходили до NotFound/Forbidden. Дополнительный RED: 38 прежних service-тестов
+  прошли, 6 упали на остальных generic entry points, принимавших managed types.
+- GREEN/регрессия: targeted revision service/repository/workflow — 120/120;
+  API `nest build`, адресные ESLint и Prettier прошли. Финальный commit:
+  `feat: guard managed chunk revision lifecycle` (этот commit).
+- Quality review fix: сервис больше не доверяет generic callback context. После
+  prepare он сам перечитывает canonical Site → typed owner → resource → revision
+  → link/placements и изменяет только canonical resource. После restore hook до
+  pointer/event он проверяет exact contract ID или полный placement multiset;
+  malformed context нормализуется без raw `TypeError`.
+- Review TDD RED: 44 прежних service-теста прошли, 11 упали на fail-open
+  fake/malformed context и no-op/wrong restore copy. GREEN — service 55/55.
+  Отдельный lock-harness RED: 67 прежних repository-тестов прошли, 6 упали,
+  потому что harness терял lock modes; GREEN — repository 73/73 с точным
+  Access→Site→owner→resource→revision→typed rows порядком для approve/publish/
+  restore и post-copy reads.
+- Финальные проверки quality fix: targeted workflow/service/repository 137/137;
+  расширенная Phase 1+2 регрессия 8 suites / 186 tests; API `nest build`,
+  адресные ESLint и Prettier, `git diff --check` прошли. Коммиты Task 5:
+  `ce2ffe6` и последующий quality-fix commit этой записи.
+- Повторный review: managed approve/publish теперь имеют single-transition
+  semantics после canonical typed re-read заблокированного resource. Если exact
+  revision уже стоит в approved/published pointer, сервис до mutation/event
+  возвращает `ConflictException`; generic article/category lifecycle не менялся.
+  Already-published revision также нельзя повторно approve.
+- Повторный review TDD RED: 128 прежних service/repository тестов прошли, 10
+  новых упали — duplicate approve возвращал `BadRequestException`, duplicate
+  publish повторно записывал event. GREEN — focused service/repository 138/138;
+  расширенная Phase 1+2 регрессия 8 suites / 196 tests, API `nest build`,
+  адресные ESLint/Prettier и `git diff --check` прошли. Task 7 сохраняет
+  отдельные real-PostgreSQL two-connection approve/publish сценарии с
+  `ConflictException` для loser. Последующий single-transition quality-fix
+  commit входит в эту запись.
+- Выкладка: не выполнялась. Docker/VDS/Registry, общая БД, внешний сервер,
+  `main`, push/merge и deploy не затрагивались.
+
+### 2026-10-08 · Phase 2 / Task 6: draft/published compatibility inventory
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализован внутренний compatibility inventory reader. Standalone
+  `ManagedChunkPersistenceRepository.readCompatibilityInventory` независимо
+  валидирует UUID, существование site и explicit candidate package одинаковым
+  безопасным `NotFound`, затем открывает `REPEATABLE READ` snapshot и первым
+  manager command выполняет `SET TRANSACTION READ ONLY`. Site может быть без
+  текущего package либо иметь другое назначение: candidate scope не меняет его
+  pointers. `readCompatibilityInventoryUsingManager` повторно использует тот же
+  mapper внутри уже существующей site-locking transaction, не открывает свою
+  transaction и не переводит внешнюю transaction в read-only режим.
+- Draft и published разрешаются независимо без fallback. Одинаковый contract
+  агрегирует `sources` в каноническом порядке `draft`, `published`; разные
+  schema version/digest остаются отдельными требованиями. Placement получает
+  contract только через одноимённый source pointer экземпляра, canonical
+  `page:<id>`/`site_surface:<key>`, template/slot/position и exact Phase 1
+  definition identity. Malformed snapshots и неверные tenant/package,
+  resource, revision, typed-link или placement identities исключаются без
+  утечки чужих данных. Результат сортируется codepoint-сравнением и не зависит
+  от DB insertion order или мутации результата прошлого вызова.
+- Изменены
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts`,
+  `.spec.ts`, Task 7 plan и эта запись журнала. Controller/API, Phase 1
+  types/algorithm, release CLI и runtime не менялись.
+- БД — схема, миграции, данные и формат сохраняемых значений не менялись.
+  Reader не пишет pointers, events, revisions или пользовательские данные;
+  общая и локальная БД не запускались и не изменялись.
+- TDD RED: первый focused run — 7 ожидаемых failures на отсутствующем
+  `readCompatibilityInventory`, при этом 89 прежних тестов прошли. Review RED
+  отдельно доказал PostgreSQL-like `22P02` для malformed UUID, `TypeError` на
+  JSON `null`, 52 запроса вместо budget 9 и отсутствие managed-type filter.
+  После fixes focused GREEN — 2 suites / 103 tests; широкая Phase 1–2
+  регрессия — 8 suites / 202 tests. API production build/typecheck, targeted
+  ESLint, Prettier и `git diff --check` прошли.
+- Независимый итоговый code review: Critical 0, Important 0, Minor 0, verdict
+  READY. Коммит реализации:
+  `96dd3e4f1eefa68d5f224931e22628f6f6e53ddd`
+  (`feat: expose managed chunk compatibility inventory`).
+- По итогам spec-review усилены test-only доказательства no-fallback:
+  draft-only и published-only instances используют уникальные contract
+  identities/digests, а реальные source-specific вызовы
+  `checkManagedChunkContractCompatibility` отдельно подтверждают отсутствие
+  ложного requirement/block в обе стороны. Controlled symmetric fallback
+  mutation дала RED: 5 failures / 100 passed, включая `missing_definition` и
+  `slot_missing` для обоих источников; после восстановления production mapper
+  focused GREEN — 2 suites / 105 tests, широкая регрессия — 8 suites / 204
+  tests. API build, targeted ESLint, Prettier и `git diff --check` прошли;
+  production code не менялся. Повторный независимый review: Critical 0,
+  Important 0, Minor 0, READY. Test-only commit:
+  `46a364f99765ec19b527258678e5b4bdefbe8448` (`test: prove compatibility inventory source isolation`).
+- Quality-review fixes: reader больше не связывает explicit candidate с текущим
+  `site.templatePackageId`; null и другое assignment покрыты без mutation site.
+  Instance/layout pointer sets разделены: instance snapshots вообще не читаются,
+  layout revisions получают только identity/snapshot metadata, а resources,
+  typed links, contracts и placements — exact projections без contract JSONB.
+  Empty dependent ID sets не порождают запросов. Stateful harness материализует
+  только requested columns, содержит большие JSON sentinels, отклоняет mutation
+  APIs/raw SQL и доказывает, что standalone `SET TRANSACTION READ ONLY` является
+  первым manager command; manager-bound вызов не выполняет SET/transaction.
+- Quality-fix TDD RED: 103 прежних теста прошли, 6 новых упали отдельно на
+  current-package gating, отсутствующем manager-bound reader/READ ONLY, overfetch
+  и empty-set reads. GREEN: focused — 2 suites / 111 tests; широкая Phase 1–2
+  регрессия — 8 suites / 210 tests; полный API — 126 suites / 1079 tests, ещё
+  5 suites / 81 tests штатно skipped. API build/typecheck, targeted ESLint и
+  Prettier, `git diff --check` прошли. Task 7 plan дополнен real-PostgreSQL
+  `25006` enforcement и two-connection old/new pointer-snapshot acceptance.
+  Независимый quality-fix review после исправления journal: Critical 0,
+  Important 0, Minor 0, READY. Коммит quality fix:
+  `fix: harden compatibility inventory transactions` (этот commit).
+- Docker/VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая
+  выкладка не затрагивались.
+
+### 2026-10-08 · Phase 2 / Task 7: disposable PostgreSQL acceptance
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Задача: добавлен fail-closed real-PostgreSQL acceptance suite полного migration
+  ledger и tenant/FK/trigger/rollback/lock/concurrency контрактов managed chunks.
+  После spec-review усилены реальные lock/contention proofs и точные rollback
+  assertions. Изменены
+  `apps/api/src/template-packages/managed-chunk-persistence.database.spec.ts`,
+  unit specs repository/service, `apps/api/src/content/cms-revisions.service.ts`
+  и эта запись. Применённые migrations, entities и repository не менялись.
+- Guard TDD: исходный RED — 1 suite, 10 ожидаемых failures на отсутствующей
+  проверке. Финальный прогон без env с --detectOpenHandles — 1 suite, 12 tests
+  PASS и 20 integration cases SKIP. Guard принимает только `postgres`/`postgresql`, exact
+  `127.0.0.1:55440`, pathname и opt-in
+  `wispo_managed_chunks_phase2_test`, без query/hash; небезопасно заполненный env
+  падает, а не пропускает suite.
+- Review TDD: real DB RED воспроизвёл два ложных `ForbiddenException` после
+  same-permission delete+reinsert access. Причина — возобновившийся PostgreSQL
+  SELECT использовал старый statement snapshot. Minimal production fix повторяет
+  `SiteAccess FOR SHARE` один раз новым READ COMMITTED statement до Site/target
+  locks; instance и layout writers после commit reassignment теперь успешно
+  продолжают работу. Старые unit expectations сначала дали RED: 3 failures / 206
+  passed, затем зафиксировали два одинаковых access lookup до любых target/write;
+  focused GREEN — 7 suites / 209 tests.
+- Exceptional-path cleanup review: source initialization и session `SET` теперь
+  находятся в одном защитном `try`; setup/bootstrap/migration failure уничтожает
+  уже инициализированный source до rethrow. Все scenario-local DataSource,
+  QueryRunner и background promises регистрируются внутри общего cleanup scope.
+  Cleanup последовательно освобождает blocker/advisory locks, дожидается через
+  `Promise.allSettled` всех запущенных операций, затем независимо rollback/release
+  runners и destroy sources; cleanup errors прикрепляются к исходной ошибке и не
+  маскируют её. Unit instrumentation с injected assertion/destroy failure
+  подтверждает порядок `blocker → pending → rollback → runner → source` и
+  сохранение исходной ошибки; real PostgreSQL injected setup failure подтверждает
+  отсутствие backend по сохранённому PID. Residual review устранил последний
+  late-handler gap: down-race `insertV2` немедленно регистрируется через
+  `DatabaseTestCleanup.track` в момент создания, а cleanup освобождает blocker,
+  дожидается tracked promise и только затем закрывает runner/sources. Unit
+  instrumentation использует rejecting pending promise и подтверждает, что
+  ранний reject обработан без потери исходной assertion error.
+- БД — схема/данные/формат: полный ledger из 52 migrations применялся только к
+  временной БД `wispo_managed_chunks_phase2_test` в exact container
+  `wispo-managed-chunks-phase2-test`; исторические seed prerequisites
+  (`crazy-studio` workspace и approved privacy model) создавались только
+  test-only phased bootstrap. Fresh down-test databases с безопасным префиксом
+  создавались внутри этого container и удалялись suite. Все schema/data/rows были
+  временными; общая/рабочая БД, production schema, формат сохраняемых значений,
+  backfill и ручные данные не менялись.
+- Real PostgreSQL acceptance: два финальных последовательных прогона текущего
+  дерева после последнего cleanup-изменения на одной disposable БД — каждый
+  1 suite / 32 tests PASS (32/32).
+  Проверены полный ledger и повторный no-op; v1/v2 checks; idempotent/conflicting
+  contracts; opposite-order registration с advisory barrier и одновременно
+  наблюдаемыми `pg_locks` waits без `40P01`, duplicates или partials; прямой
+  duplicate-placement INSERT даёт `23505`; tenant/package/version constraints и
+  atomic layout rollback.
+- Page/site-surface initial races используют barrier и наблюдаемые waits: один v1,
+  Conflict loser, retry v2, одна identity и нет orphans. Access reassignment для
+  instance/layout наблюдает блокировку именно на `site_accesses` и exact waited
+  lock `transactionid:ShareLock`. Для каждой forbidden relation отдельно
+  проверено отсутствие раннего Site/page/instance/layout/resource/revision lock,
+  поэтому добавление любой одной такой блокировки ломает тест; сохранённое
+  permission обязательно приводит к успешной записи. Package activation
+  сериализуется в обоих порядках.
+- Real lifecycle: unlinked instance отклонён для approve и publish; до/после
+  обоих вызовов совпадают pointers, events, общий `cms_revisions` count и exact
+  zero typed-link count. Layout owner/resource/revision mismatch отклонён для
+  обоих переходов. No-op,
+  wrong-contract, missing/extra/changed и FK-invalid copies полностью откатывают
+  draft/approved/published pointers, review state, revisions, typed rows,
+  placements и events. Exact instance/layout restore, включая empty placements,
+  создаёт v2. Для instance и layout restore отдельные blocker transactions и
+  `pg_stat_activity`/`pg_locks` наблюдают порядок Access → Site → owner → resource
+  → revision → link/placements; точное post-copy состояние и единственный
+  `version_restored` проверены. Approve и publish races также имеют наблюдаемый
+  resource contention: ровно один transition/event, loser `Conflict`, без
+  `40P01` и partial state.
+- Compatibility acceptance подтверждает standalone READ ONLY SQLSTATE `25006`,
+  REPEATABLE READ coherent old/new inventory, writable manager-bound reader,
+  explicit candidate для NULL и другого assigned package без mutation, а unknown
+  site/package возвращают одинаковые безопасные message/response. Safe empty
+  down проходит; populated guard и двухсоединенческий down-lock race не удаляют
+  таблицы, exact v2/type/managed checks, identity и immutable triggers. Owner
+  identity SQLSTATE `55000`, разрешённые mutable поля и actor `ON DELETE SET NULL`
+  также проверены.
+- Финальная проверка: no-env guard с --detectOpenHandles — 12 PASS / 20 SKIP;
+  PostgreSQL suite дважды подряд после residual tracking fix — 32/32 PASS;
+  focused Phase 1–2 — 7 suites / 209 tests PASS; API
+  production build PASS; targeted ESLint и Prettier PASS; `git diff --check`
+  PASS. Statement/test timeouts были failure, не skip; DataSource/query runners
+  закрывались в `finally`.
+- Cleanup выполнен до закрытия записи: в финальном цикле exact container
+  `1a5a26006e6d…` подтверждён как `postgres:18-alpine`, `bridge`, `--rm`, только
+  `127.0.0.1:55440`, с `tmpfs:/var/lib/postgresql` и без volume mounts; затем
+  удалён только `wispo-managed-chunks-phase2-test`. После удаления exact container
+  отсутствует, порт `55440` свободен, оба opt-in env отсутствуют. Все семь
+  `wispo-cms-local-*` container ID/name read-only сверены и не менялись. Набор
+  Docker volumes при tmpfs-прогоне не менялся, новый anonymous volume не создан.
+  Четыре anonymous volumes
+  `6353b59d0c5ba9ab17c4d01abb2f153397227d1976a35e67ba54c5ba2ae3872a`,
+  `bde1d673395eb7f8dcb84bad994c86a2826e178950bd7a9d89deb5fb69bdc8f1`,
+  `cbe75d1c2996ef20f09007018fc7bad9b4708b3a2cdee1d15f287bffe28ede2d` и
+  `587d1e6a8659bb4c551307913357fe70d0cbe5e8628b4a0e5e769b5f2682f1bf`
+  отдельно сверены с журналом: label `com.docker.volume.anonymous`, время
+  создания совпадает с pre-tmpfs test runs, подключённых контейнеров нет. После
+  этой read-only проверки удалены только эти четыре disposable test volumes;
+  прочие dangling/named volumes и все рабочие контейнеры не затронуты.
+  Named volumes/networks тестами не создавались, `wispo-cms-local` network не
+  использовалась.
+- Первичный коммит: `7689b3be05e70a5b7b9d6626ce2f371d731551b6`
+  (`test: verify managed chunk persistence in postgres`). Первый spec-review fix:
+  `44b128186ce2b8af35352f4f3ab2e277cac357eb`
+  (`test: harden postgres concurrency acceptance`). Финальное test-only
+  уточнение: `35862046730931843dde39f88785d697da299c61`
+  (`test: make postgres lock assertions exact`). Exceptional cleanup fix:
+  `71520f1d7f1f5f143c6ba18c2e5cd7203266e9c2`
+  (`test: harden postgres cleanup paths`). Residual promise-tracking fix:
+  `59551c6c43c9e1af190601a37924043073dbe896`
+  (`test: track postgres down-race promise immediately`).
+  VDS/Registry, внешний сервер, `main`, push/merge/deploy и фактическая выкладка
+  не выполнялись.
+
+### 2026-10-08 · Phase 2 / Task 8: финальная регрессия и scope audit
+
+- Статус: **Готово, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Задача: выполнены финальные Phase 1+2 и полные API проверки, статический
+  анализ и аудит diff против актуального `origin/main`. Унаследованный
+  неизменённый lint/format baseline и два Phase 1 non-UI runtime-файла отдельно
+  зафиксированы ниже и по итоговому решению не считаются блокерами Phase 2.
+- Git baseline после свежего `git fetch origin main`: `origin/main`
+  `2f7fab19d7e5b5934ba1777173b50526279d33e6`, проверенный HEAD до этой
+  docs-записи `2bbbcb1c9943271a05709603d2b94a19185fc51d`; диапазон
+  `origin/main...HEAD` — 0 коммитов слева / 54 справа, merge-base совпадает с
+  `origin/main`, `origin/main` является предком HEAD. Не изменяющий worktree
+  `git merge-tree --write-tree origin/main HEAD` завершился с exit 0 и дал tree
+  `fd9ab877f661166f9780a014b283f5efd14fd08a`; конфликтов не выявлено. Аудирован
+  полный ряд из 54 коммитов, от
+  `33a1797113d1ec6609aff5e711c2bec06b330e99` до
+  `2bbbcb1c9943271a05709603d2b94a19185fc51d`; Phase 2-only часть после
+  `fb087ceceaffb1bc1209af26701d8752763f7621` содержит 30 коммитов.
+- Точные свежие проверки без managed DB env: выбранный Phase 1+2 command —
+  7/7 suites, 209/209 tests PASS, 0 snapshots, exit 0, warnings/errors нет.
+  Полный API Jest — 127 suites PASS, 5 suites SKIP; 1091 tests PASS, 101 tests
+  SKIP, 1192 total, 0 snapshots, exit 0. В полном Jest были ожидаемые test-log
+  warnings: 10 от `DeepseekService` (invalid JSON и retry для HTTP/connection/
+  envelope cases) и 2 от `ContentService` (transport check/connection refused);
+  поэтому нулевые warnings не заявляются. `pnpm --dir apps/api build` — exit 0.
+- Full static caveat: точный
+  `pnpm --dir apps/api exec eslint "src/**/*.ts"` — exit 1, 9 errors / 0
+  warnings в четырёх не изменённых этим диапазоном файлах:
+  `ai/json-text-whitespace.spec.ts` (1),
+  `content-center/preparation-budget.spec.ts` (1),
+  `content-center/preparation-verification.spec.ts` (1) и
+  `content-center/public-resource.spec.ts` (6). Точный полный
+  `pnpm --dir apps/api exec prettier --check "src/**/*.ts"` — exit 1, style
+  warnings по 291 неизменённому baseline-файлу. Код не менялся для маскировки
+  результатов. Диагностические ESLint и Prettier checks только всех изменённых
+  Phase 1+2 API TS-файлов оба дали exit 0. `git diff --check` рабочего diff и
+  `git diff --check origin/main...HEAD` оба завершились с exit 0.
+- Scope: cumulative `origin/main...HEAD` меняет 28 файлов. Он включает ранее
+  завершённый Phase 1, поэтому содержит два web-файла
+  `apps/web/src/app/chunk-runtime-catalog.ts` и
+  `apps/web/test/managed-chunk-runtime.test.mjs`; это trusted SDK runtime
+  registry и его test, не rendered UI/controller/route. Phase 2-only diff web
+  не меняет и ограничен 14 файлами: docs/spec/plan/tests,
+  `cms-revisions.service`, repository, entities, одна migration,
+  module/data-source. Production Skinova manifest остаётся v1 и не менялся;
+  controller/DTO/routes, legacy banners/page assignments, delete legacy,
+  seed/backfill, public/preview switch, deploy/scripts, `.codex/`, VDS/Registry
+  не менялись. Production service change — typed manager-only lifecycle и один
+  безопасный access retry: если первый `SiteAccess FOR SHARE` после concurrent
+  delete+reinsert вернул пусто со старым statement snapshot, второй READ
+  COMMITTED lookup выполняется до Site/target locks; права не расширяются.
+- Security audit: реальных credentials/secrets и внешних test URL в diff нет.
+  Единственные credential-like значения — фиксированные disposable
+  `test:test`/`any-user:any-password`, exact `127.0.0.1:55440` и
+  `example.test`/fixture repository URLs внутри fail-closed database spec и
+  synthetic fixture. Guard требует PostgreSQL, exact host/port/database
+  `wispo_managed_chunks_phase2_test`, exact opt-in и запрещает query/hash.
+- БД — схема: относительно актуального `origin/main` production ledger вырос с
+  51 до 52 migrations ровно одной новой последней migration
+  `1791876000000-ManagedChunkPersistence.ts`; номер/имя и managed table names в
+  main отсутствуют. Старый duplicate timestamp `1790107200000` уже был в main
+  у `ContentCenterSourceFiles` и `ProtectCmsRevisionHistory` и с Phase 2 не
+  пересекается. Применённые migrations не редактировались. Одна новая migration
+  создаёт ровно шесть managed tables, семь managed CHECK, 18 FK и девять
+  integrity/immutable triggers, расширяет два существующих CHECK и добавляет
+  tenant-safe `pages(id, site_id)`. `down()` сначала одним batch берёт locks и
+  проверяет пустые managed tables, отсутствие managed resource types и manifest
+  v2; guard расположен до первого DROP.
+- БД — данные/форматы: migration не содержит SQL `INSERT`, data `UPDATE` или
+  `DELETE`; seed, backfill, ручные и пользовательские изменения отсутствуют,
+  migration ни к общей, ни к рабочей БД в Task 8 не применялась. Instance
+  snapshot точно `{ formatVersion: 1, data, sanitizerPolicyVersion }`, layout
+  snapshot точно `{ formatVersion: 1, templateKey, templateVersion }`;
+  placements остаются нормализованными строками exact revision.
+- Task 7 cleanup подтверждён повторно только read-only: exact container
+  `wispo-managed-chunks-phase2-test` отсутствует, listener `127.0.0.1:55440` и
+  оба opt-in env отсутствуют, четыре записанных disposable volume ID отсутствуют.
+  Семь `wispo-cms-local-*` IDs только перечислены и не менялись: mailpit/api/
+  postgres/redis были healthy, bootstrap/dependencies — exited 0, web в момент
+  наблюдения был `Restarting (1)`; исправления Docker не выполнялись.
+- Итог: Phase 2 подтверждена в согласованных границах и локально готова к
+  отдельному решению о push. Push, merge, deploy, VDS/Registry, общая/рабочая
+  БД, `main` и фактическая выкладка не выполнялись и не изменялись.
+### 2026-10-08 · Phase 2: fail-closed hardening после финального аудита
+
+- Статус: **Готово для MVP, не выложено**. Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Задача: исключить два fail-open пути — непроверенный результат managed draft
+  hook и молчаливое исключение повреждённых present pointers из compatibility
+  inventory. Отсутствующий draft/published pointer остаётся валидным отсутствием
+  source; присутствующий pointer обязан разрешаться полностью.
+- План: без новой migration и без изменения API/UI добавить post-hook exact
+  verification instance/link либо layout/full placement set, а inventory сделать
+  fail-closed с одной безопасной ошибкой без внутренних UUID.
+- БД: схема, migration ledger, persisted format, backfill, ручные и
+  пользовательские данные не меняются. Общая/рабочая БД и VDS не используются.
+- Файлы и проверки будут дополнены по мере выполнения. Push/merge/deploy не
+  выполняются.
+- Продолжение 08.10.2026: branch/status/relevant diff проверены до изменений —
+  ветка `codex/managed-chunks-sdk-v1`, рабочее дерево чистое. Начат TDD-цикл
+  для связанных Tasks 1+2; production callsites prepared managed draft
+  ограничены instance/layout repository paths, прямой managed wrapper найден
+  только в unit tests. БД, Docker, VDS и внешние сервисы не затрагивались.
+- Реализация: `cms-revisions.service` теперь требует discriminated expected
+  proof и после hook точно перечитывает owner + instance link либо полный
+  canonical multiset layout placements до записи pointer/event; repository
+  callsites передают proof из уже проверенных входов. Compatibility inventory
+  сохраняет валидное отсутствие pointer, но любой present pointer и вся его
+  owner/revision/link/contract/snapshot/placement цепочка проверяются fail-closed
+  для явно запрошенного package без draft/published fallback и без чтения
+  instance payload. Hardened wrapper больше не имеет fail-open вызова без proof.
+- Изменены только `apps/api/src/content/cms-revisions.service.ts` и `.spec.ts`,
+  `apps/api/src/template-packages/managed-chunk-persistence.repository.ts` и
+  `.spec.ts`, а также эта существующая запись журнала. Migration, entity,
+  schema, API/controller/UI и persisted format не менялись.
+- TDD RED: точная Task 1 command завершилась exit 1 — 13 новых negative cases
+  ошибочно resolved (154 существующих теста PASS); Task 2 command завершилась
+  exit 1 — compatibility suite PASS, новые corruption cases repository ещё
+  исключались вместо безопасного reject. Review regression RED для mutable
+  caller-owned proof: Task 1 command — 1 failed / 177 passed (promise ошибочно
+  resolved). Proof/entity identity теперь runtime-валидируются, клонируются и
+  замораживаются до hook; negative harness отдельно доказывает отсутствие попыток
+  pointer/event writes. Финальный GREEN: Task 1 command — 2/2 suites, 180/180
+  tests PASS, 0 snapshots; Task 2 command — 2/2 suites, 130/130 tests PASS,
+  0 snapshots.
+- Проверки: scoped ESLint четырёх изменённых TS-файлов — exit 0; scoped
+  Prettier check — exit 0; `pnpm --dir apps/api build` — exit 0;
+  `git diff --check` — exit 0. Реальный PostgreSQL и Docker по границам задачи
+  не запускались. Коммит реализации: `fix: fail closed managed chunk persistence`.
+- MVP hardening: managed input теперь целиком клонируется до первого `await`;
+  hook получает defensive entity copies, а pointer, event и version metadata
+  используют сохранённые primitive identities. RED подтвердил три дефекта:
+  mutable input, mutable version/resource metadata и подмену новой revision на
+  старую. Итоговый целевой прогон — 2 suites / 183 tests PASS; API build и
+  `git diff --check` PASS.
+- Некритичные масштабные проверки и рефакторинг вынесены в
+  `docs/managed-chunks-post-mvp-review.md`; они не блокируют MVP.
+- БД: схема, migration ledger, данные, backfill, ручные изменения и формат
+  сохранённых значений не менялись; общая/рабочая БД, VDS, push, merge и deploy
+  не затрагивались. Полный PostgreSQL/regression аудит отложен до отдельного
+  post-MVP этапа.
+### 2026-10-08 · Phase 3.1: Skinova v2 registration MVP
+
+- Статус: **Реализовано локально, не выпущено**. Владелец: Роман / Codex;
+  ветка `codex/managed-chunks-sdk-v1`.
+- Задача: добавить отдельный реальный Skinova manifest v2 и атомарно
+  materialize его managed chunk contracts при регистрации package version.
+  Production v1 manifest, текущий сайт и legacy banners остаются активными.
+- Scope: validator-dispatch v1/v2, DTO/service registration boundary,
+  manager-aware contract registration и критичные TDD-проверки. Backfill,
+  shadow-read, API/UI, runtime switch и VDS в этот шаг не входят.
+- На старте подтверждено: новая migration и изменение схемы не требуются;
+  данные общей/рабочей БД и формат существующих записей не меняются.
+- Реализация: добавлен отдельный `manifest.v2.template.json` Skinova версии 2
+  с категорией «Баннеры», тремя managed definitions и точными allow-list для
+  `homepage_top`, `homepage_middle`, `article_sidebar`. Существующий v1 manifest
+  не изменялся и остаётся активным.
+- Release boundary и DTO принимают v1/v2. При регистрации v2 package version и
+  contracts записываются одной транзакцией; идентичный повтор идемпотентно
+  достраивает отсутствующие contracts. V1 не запускает materialization.
+- Изменены registration validator/DTO/service, manager-aware метод persistence,
+  production v2 manifest и связанные unit-тесты. API/UI, runtime, activation,
+  legacy banners/assignments и public/preview не менялись.
+- БД: migration/entity/schema не менялись. Формат существующих значений не
+  менялся. При будущем вызове регистрации v2 используются уже существующие
+  таблицы package versions/contracts; в этой итерации локальная, общая и
+  рабочая БД не запускались и данные не изменялись.
+- TDD RED: общий release validator отсутствовал; production service отклонял
+  v2; manager-bound contract method отсутствовал. GREEN: 4 связанных suites,
+  141/141 tests PASS. После форматирования `pnpm --dir apps/api build` — PASS,
+  `git diff --check` — PASS.
+- Некритичные E2E/PostgreSQL, race matrix, visual/runtime smoke и backfill
+  mapping добавлены в `docs/managed-chunks-post-mvp-review.md`; MVP не блокируют.
+- Коммит реализации: `fix: register Skinova v2 managed contracts`.
+  Push, merge, deploy, VDS и общая БД не затрагивались.
+### 2026-10-08 · Phase 3.2a: published Skinova managed backfill
+
+- Статус: **Реализовано локально, не выпущено**. Владелец: Роман / Codex;
+  ветка `codex/managed-chunks-sdk-v1`.
+- Задача: отдельной управляемой release-командой идемпотентно перенести
+  опубликованные `banners`/`page_banner_assignments` Skinova в managed
+  instances/layouts/placements без переключения runtime и package pointers.
+- Утверждено: backfill не запускается автоматически при регистрации v2.
+  Legacy rows не изменяются; история/drafts, shadow-read, dual-write и UI
+  остаются следующими этапами.
+- Read-only аудит выявил обязательную коррекцию v2 contract: добавить
+  `sort_order` и `homepage_top` slot для `system_page`, иначе текущие Skinova
+  данные 404/privacy переносятся неполно.
+- Design: `docs/superpowers/specs/2026-10-08-skinova-managed-backfill-design.md`.
+- План реализации:
+  `docs/superpowers/plans/2026-10-08-skinova-managed-backfill.md`.
+- Реализация: v2 contract дополнен `sort_order` и системным
+  `homepage_top`; добавлены строгая pure projection и транзакционный
+  `SkinovaManagedBackfillService`. Он создаёт опубликованные baseline
+  revisions, 3 instances, 4 layouts, 5 placements и 8 immutable provenance
+  rows; checksum drift, неизвестный mapping и partial target отклоняются с
+  полным rollback. Идентичный повтор — no-op; отсутствующий provenance
+  восстанавливается только при полном совпадении target.
+- Release boundary: добавлен защищённый release-token endpoint, явная
+  `backfill-managed-content --site-id <uuid>` команда и отдельный allow-listed
+  v2 manifest script. Существующие v1 register/preflight/deployed сохранены.
+- Изменены:
+  `apps/web/template-packages/skinova/manifest.v2.template.json`,
+  `apps/api/src/template-packages/skinova-managed-backfill.{projection,service}.ts`
+  и их specs, DTO, controller/module и focused database/release specs,
+  `scripts/template-package-release.mjs` и его test, `package.json`,
+  этот журнал, implementation plan и post-MVP review.
+- БД: новая migration/entity/schema не добавлялись; применённые migrations не
+  редактировались. Формат новых значений использует существующий managed
+  snapshot v1: snake_case data, image object `{mediaId, alt, decorative}`,
+  `sanitizerPolicyVersion: null`; legacy rows и site package pointers не
+  меняются. Команда является повторяемой только для полностью совпадающего
+  source/target; восстановление — удаление созданного managed baseline по
+  отдельному согласованному data-migration, не destructive `down`.
+- Проверки: TDD RED/GREEN для contract, projection, service, endpoint и CLI;
+  focused API — 4 suites / 20 tests PASS; 4 релевантных release CLI-сценария
+  PASS, включая явные v2/backfill cases; API build PASS; disposable PostgreSQL acceptance —
+  1 suite / 33 tests PASS. Одноразовый контейнер на 55440 остановлен и удалён.
+- Общая/рабочая БД, локальная БД приложения, VDS, public runtime, push, merge и
+  deploy не затрагивались. Команда backfill на них не запускалась.
+- Некритичные shadow-read, расширенная concurrency/history matrix, visual
+  runtime smoke и performance сохранены в
+  `docs/managed-chunks-post-mvp-review.md`.
+- Коммит реализации: `feat: backfill Skinova managed content` (текущий коммит
+  ветки; точный хеш — в истории Git).
+
+### 2026-10-09 · Phase 4.1: managed chunks API и UI для Skinova
+
+- Статус: **Локально реализовано и зафиксировано этим commit; не выпущено**.
+  Владелец: Роман / Codex; ветка
+  `codex/managed-chunks-sdk-v1`.
+- Реализовано: site-scoped API каталога/instances, contract-driven create и
+  immutable draft, submit/approve/request-changes/publish/restore; раздел CMS
+  «Чанки» с категорией «Баннеры», формой `text`/`textarea`/`image`/`number`/
+  `boolean`, server-driven actions, dirty guard и доступным modal focus flow.
+- Безопасность: exact first-seen contract/catalog fail-closed, tenant isolation,
+  Ajv и same-site image validation внутри транзакции, optimistic draft, typed
+  lifecycle proof. Удаление media блокируется для активных managed draft/
+  published snapshots; историческая revision повторно проверяется при restore.
+- Изменены API: `cms-revisions.service.ts`, `content.service.ts`,
+  `content.media.spec.ts`, managed persistence repository/spec, новый managed
+  chunk service/controller/DTO и specs, `template-package.module.ts`.
+- Изменены Web: `managed-chunks-model.ts` и spec,
+  `managed-chunks-view.tsx`, `page.tsx`, `media-site-view.tsx`,
+  `globals.css`, focused `site-shell-navigation.spec.ts`.
+- Документация: design и implementation plan Phase 4.1, этот журнал и
+  `docs/managed-chunks-post-mvp-review.md`.
+- БД — схема: не менялась, migration/entity не добавлялись, применённые
+  migrations не редактировались. В изолированной локальной БД зарегистрированы
+  Skinova package v1/v2 и идемпотентно выполнен site-specific backfill для
+  Skinova `51a00000-0000-4000-8000-000000000002`: созданы 3 active managed
+  instances и 3 `chunk_instance` resources, у всех есть draft/published
+  pointers. Persisted format остаётся managed snapshot v1
+  `{formatVersion: 1, data, sanitizerPolicyVersion: null}`.
+- Перед локальным backfill создан свежий backup
+  `.local/backups/wispo-before-phase41-20261009-130305.dump`; читаемость backup
+  проверена командой `pg_restore --list`. Локальный dump на VDS не переносился.
+- Runtime/совместимость: public/preview Skinova, legacy banner write, layouts/
+  placements не переключались; current runtime pointer Skinova остаётся на
+  package v1 / manifest v1. Изменилось только безопасное поведение legacy media
+  delete: активная managed-ссылка теперь запрещает удаление файла.
+- Критические проверки: focused API — 5 suites / 212 tests PASS на последнем
+  полном прогоне исполнителя; дополнительные targeted suites 12/12 и 144/144
+  PASS после review-fixes; API build PASS. Web model spec PASS, focused shell
+  scenario 1 PASS, scoped ESLint PASS, Web production build PASS; независимые
+  API/Web spec и quality review — Approved. Локальный browser smoke PASS:
+  категория «Баннеры», 3 строки, открытие editor и dirty guard после отмены
+  закрытия; после login не зафиксировано 4xx/5xx. Дополнительный общий прогон
+  остановлен по решению владельца; расширенные проверки вынесены в post-MVP
+  список.
+- Отложено: historical media reference index, pagination/N+1, full browser/
+  responsive/pixel/security/performance matrix — в
+  `docs/managed-chunks-post-mvp-review.md`.
+- Commit реализации: этот локальный commit `feat: add managed chunks API and
+  CMS UI`. Push/merge/deploy/VDS и ветка `main` не затрагивались.

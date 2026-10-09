@@ -13,6 +13,8 @@ import { IsString, Matches, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import { PlatformAdminGuard } from '../platform/platform-admin.guard';
+import { BackfillSkinovaManagedContentDto } from './dto/backfill-skinova-managed-content.dto';
+import { SkinovaManagedBackfillService } from './skinova-managed-backfill.service';
 import { RegisterTemplatePackageDto } from './template-package.dto';
 import { ReleaseTokenGuard } from './release-token.guard';
 import { TemplatePackageService } from './template-package.service';
@@ -32,11 +34,19 @@ class TemplatePackageVersionDto {
 @Controller('internal')
 @UseGuards(ReleaseTokenGuard)
 export class TemplatePackageController {
-  constructor(private readonly templatePackages: TemplatePackageService) {}
+  constructor(
+    private readonly templatePackages: TemplatePackageService,
+    private readonly skinovaManagedBackfill: SkinovaManagedBackfillService,
+  ) {}
 
   @Post('template-packages/register')
   register(@Body() dto: RegisterTemplatePackageDto) {
     return this.templatePackages.register(dto.manifest);
+  }
+
+  @Post('template-packages/skinova/backfill-managed-content')
+  backfillSkinovaManagedContent(@Body() dto: BackfillSkinovaManagedContentDto) {
+    return this.skinovaManagedBackfill.backfill(dto.siteId);
   }
 
   @Post('sites/:siteSlug/template-package/preflight')

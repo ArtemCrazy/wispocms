@@ -17,6 +17,7 @@ import {
   TemplatePackageController,
   TemplatePackageCurrentController,
 } from './template-package.controller';
+import { SkinovaManagedBackfillService } from './skinova-managed-backfill.service';
 import { TemplatePackageService } from './template-package.service';
 
 function manifest() {
@@ -59,6 +60,12 @@ describe('TemplatePackageController', () => {
     ),
     candidates: jest.fn().mockResolvedValue([]),
   };
+  const backfill = {
+    backfill: jest.fn().mockResolvedValue({
+      siteId: '11111111-1111-4111-8111-111111111111',
+      status: 'created',
+    }),
+  };
 
   beforeAll(async () => {
     process.env.WISPO_RELEASE_TOKEN = 'release-only-secret';
@@ -68,7 +75,10 @@ describe('TemplatePackageController', () => {
         TemplatePackageCurrentController,
         TemplatePackageCandidatesController,
       ],
-      providers: [{ provide: TemplatePackageService, useValue: service }],
+      providers: [
+        { provide: TemplatePackageService, useValue: service },
+        { provide: SkinovaManagedBackfillService, useValue: backfill },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({
@@ -143,6 +153,29 @@ describe('TemplatePackageController', () => {
     expect(service.reportDeployed).toHaveBeenCalledWith('skinova', version);
   });
 
+  it('protects and validates the explicit Skinova managed backfill command', async () => {
+    const http = app.getHttpServer();
+    const siteId = '11111111-1111-4111-8111-111111111111';
+
+    await request(http)
+      .post('/api/internal/template-packages/skinova/backfill-managed-content')
+      .send({ siteId })
+      .expect(401);
+    await request(http)
+      .post('/api/internal/template-packages/skinova/backfill-managed-content')
+      .set('x-wispo-release-token', 'release-only-secret')
+      .send({ siteId: 'not-a-uuid' })
+      .expect(400);
+    await request(http)
+      .post('/api/internal/template-packages/skinova/backfill-managed-content')
+      .set('x-wispo-release-token', 'release-only-secret')
+      .send({ siteId })
+      .expect(201);
+
+    expect(backfill.backfill).toHaveBeenCalledTimes(1);
+    expect(backfill.backfill).toHaveBeenCalledWith(siteId);
+  });
+
   it('does not expose activation or rollback routes', async () => {
     const http = app.getHttpServer();
     for (const action of ['activate', 'rollback']) {
@@ -152,6 +185,21 @@ describe('TemplatePackageController', () => {
         .send({ packageId: 'skinova-media', packageVersion: '1' })
         .expect(404);
     }
+  });
+
+  it('keeps the release-only backfill dependency out of user controllers', () => {
+    expect(
+      Reflect.getMetadata(
+        'design:paramtypes',
+        TemplatePackageCurrentController,
+      ),
+    ).toEqual([TemplatePackageService]);
+    expect(
+      Reflect.getMetadata(
+        'design:paramtypes',
+        TemplatePackageCandidatesController,
+      ),
+    ).toEqual([TemplatePackageService]);
   });
 
   it('keeps current state behind user auth and candidates behind Wispo admin auth', async () => {

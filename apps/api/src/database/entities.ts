@@ -7,6 +7,7 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
+  PrimaryColumn,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
   Unique,
@@ -413,7 +414,7 @@ export class TemplatePackageEntity {
 )
 @Check(
   'CHK_template_package_versions_manifest_version',
-  `"manifest_version" = 1`,
+  `"manifest_version" IN (1, 2)`,
 )
 @Check(
   'CHK_template_package_versions_manifest_object',
@@ -1577,6 +1578,7 @@ export class ContentStatusScheduleEntity {
 
 @Entity('pages')
 @Unique(['siteId', 'slug'])
+@Unique(['id', 'siteId'])
 export class PageEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -2134,6 +2136,7 @@ export class CmsRevisionResourceEntity {
 
 @Entity('cms_revisions')
 @Unique(['resourceId', 'versionNumber'])
+@Unique(['resourceId', 'id'])
 @Index(['resourceId', 'createdAt'])
 export class CmsRevisionEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -2180,6 +2183,360 @@ export class CmsRevisionEventEntity {
   createdAt!: Date;
 }
 
+@Entity('managed_chunk_contracts')
+@Unique(['templatePackageId', 'definitionKey', 'schemaVersion'])
+@Check(
+  'CHK_managed_chunk_contracts_field_contract_object',
+  `jsonb_typeof("field_contract") = 'object'`,
+)
+@Check(
+  'CHK_managed_chunk_contracts_data_schema_object',
+  `jsonb_typeof("data_schema") = 'object'`,
+)
+@Check(
+  'CHK_managed_chunk_contracts_digest',
+  `"contract_digest" ~ '^sha256:[0-9a-f]{64}$'`,
+)
+export class ManagedChunkContractEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'template_package_id', type: 'uuid' })
+  templatePackageId!: string;
+
+  @ManyToOne(() => TemplatePackageEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'template_package_id' })
+  templatePackage!: TemplatePackageEntity;
+
+  @Column({ name: 'first_seen_template_package_version_id', type: 'uuid' })
+  firstSeenTemplatePackageVersionId!: string;
+
+  @ManyToOne(() => TemplatePackageVersionEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn([
+    {
+      name: 'first_seen_template_package_version_id',
+      referencedColumnName: 'id',
+    },
+    {
+      name: 'template_package_id',
+      referencedColumnName: 'templatePackageId',
+    },
+  ])
+  firstSeenTemplatePackageVersion!: TemplatePackageVersionEntity;
+
+  @Column({ name: 'definition_key', type: 'varchar', length: 80 })
+  definitionKey!: string;
+
+  @Column({ name: 'schema_version', type: 'varchar', length: 40 })
+  schemaVersion!: string;
+
+  @Column({ name: 'contract_digest', type: 'varchar', length: 80 })
+  contractDigest!: string;
+
+  @Column({ name: 'field_contract', type: 'jsonb' })
+  fieldContract!: Record<string, unknown>;
+
+  @Column({ name: 'data_schema', type: 'jsonb' })
+  dataSchema!: Record<string, unknown>;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('managed_chunk_instances')
+@Unique(['revisionResourceId'])
+@Unique(['siteId', 'id'])
+@Unique(['siteId', 'id', 'revisionResourceId'])
+@Index(['siteId', 'isArchived'])
+export class ManagedChunkInstanceEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ name: 'revision_resource_id', type: 'uuid' })
+  revisionResourceId!: string;
+
+  @ManyToOne(() => CmsRevisionResourceEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'revision_resource_id' })
+  revisionResource!: CmsRevisionResourceEntity;
+
+  @Column({ name: 'display_name', type: 'varchar', length: 160 })
+  displayName!: string;
+
+  @Column({ name: 'is_archived', type: 'boolean', default: false })
+  isArchived!: boolean;
+
+  @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
+  createdByUserId!: string | null;
+
+  @ManyToOne(() => UserEntity, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'created_by_user_id' })
+  createdByUser!: UserEntity | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt!: Date;
+}
+
+@Entity('managed_chunk_instance_revisions')
+@Index(['siteId', 'instanceId'])
+@Index(['contractId'])
+export class ManagedChunkInstanceRevisionEntity {
+  @PrimaryColumn({ name: 'revision_id', type: 'uuid' })
+  revisionId!: string;
+
+  @Column({ name: 'revision_resource_id', type: 'uuid' })
+  revisionResourceId!: string;
+
+  @ManyToOne(() => CmsRevisionEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn([
+    {
+      name: 'revision_resource_id',
+      referencedColumnName: 'resourceId',
+    },
+    { name: 'revision_id', referencedColumnName: 'id' },
+  ])
+  revision!: CmsRevisionEntity;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @Column({ name: 'instance_id', type: 'uuid' })
+  instanceId!: string;
+
+  @ManyToOne(() => ManagedChunkInstanceEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn([
+    { name: 'site_id', referencedColumnName: 'siteId' },
+    { name: 'instance_id', referencedColumnName: 'id' },
+    {
+      name: 'revision_resource_id',
+      referencedColumnName: 'revisionResourceId',
+    },
+  ])
+  instance!: ManagedChunkInstanceEntity;
+
+  @Column({ name: 'contract_id', type: 'uuid' })
+  contractId!: string;
+
+  @ManyToOne(() => ManagedChunkContractEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'contract_id' })
+  contract!: ManagedChunkContractEntity;
+}
+
+@Entity('managed_chunk_layouts')
+@Unique(['revisionResourceId'])
+@Unique(['siteId', 'id'])
+@Unique(['siteId', 'id', 'revisionResourceId'])
+@Index(['siteId', 'pageId'], {
+  unique: true,
+  where: `"scope_kind" = 'page'`,
+})
+@Index(['siteId', 'surfaceKey'], {
+  unique: true,
+  where: `"scope_kind" = 'site_surface'`,
+})
+@Check(
+  'CHK_managed_chunk_layouts_scope',
+  `(
+    ("scope_kind" = 'page' AND "page_id" IS NOT NULL AND "surface_key" IS NULL)
+    OR
+    ("scope_kind" = 'site_surface' AND "page_id" IS NULL AND "surface_key" IS NOT NULL)
+  )`,
+)
+export class ManagedChunkLayoutEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ name: 'revision_resource_id', type: 'uuid' })
+  revisionResourceId!: string;
+
+  @ManyToOne(() => CmsRevisionResourceEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'revision_resource_id' })
+  revisionResource!: CmsRevisionResourceEntity;
+
+  @Column({ name: 'scope_kind', type: 'varchar', length: 24 })
+  scopeKind!: 'page' | 'site_surface';
+
+  @Column({ name: 'page_id', type: 'uuid', nullable: true })
+  pageId!: string | null;
+
+  @ManyToOne(() => PageEntity, { nullable: true, onDelete: 'RESTRICT' })
+  @JoinColumn([
+    { name: 'page_id', referencedColumnName: 'id' },
+    { name: 'site_id', referencedColumnName: 'siteId' },
+  ])
+  page!: PageEntity | null;
+
+  @Column({ name: 'surface_key', type: 'varchar', length: 80, nullable: true })
+  surfaceKey!: string | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
+@Entity('managed_chunk_placements')
+@Unique(['siteId', 'id'])
+@Unique(['layoutRevisionId', 'slotKey', 'position'])
+@Index(['siteId', 'instanceId'])
+@Check('CHK_managed_chunk_placements_position', `"position" >= 0`)
+export class ManagedChunkPlacementEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @Column({ name: 'layout_id', type: 'uuid' })
+  layoutId!: string;
+
+  @Column({ name: 'layout_revision_resource_id', type: 'uuid' })
+  layoutRevisionResourceId!: string;
+
+  @ManyToOne(() => ManagedChunkLayoutEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn([
+    { name: 'site_id', referencedColumnName: 'siteId' },
+    { name: 'layout_id', referencedColumnName: 'id' },
+    {
+      name: 'layout_revision_resource_id',
+      referencedColumnName: 'revisionResourceId',
+    },
+  ])
+  layout!: ManagedChunkLayoutEntity;
+
+  @Column({ name: 'layout_revision_id', type: 'uuid' })
+  layoutRevisionId!: string;
+
+  @ManyToOne(() => CmsRevisionEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn([
+    {
+      name: 'layout_revision_resource_id',
+      referencedColumnName: 'resourceId',
+    },
+    { name: 'layout_revision_id', referencedColumnName: 'id' },
+  ])
+  layoutRevision!: CmsRevisionEntity;
+
+  @Column({ name: 'instance_id', type: 'uuid' })
+  instanceId!: string;
+
+  @ManyToOne(() => ManagedChunkInstanceEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn([
+    { name: 'site_id', referencedColumnName: 'siteId' },
+    { name: 'instance_id', referencedColumnName: 'id' },
+  ])
+  instance!: ManagedChunkInstanceEntity;
+
+  @Column({ name: 'slot_key', type: 'varchar', length: 80 })
+  slotKey!: string;
+
+  @Column({ type: 'integer' })
+  position!: number;
+}
+
+@Entity('managed_chunk_migration_provenance')
+@Unique(['migrationVersion', 'sourceType', 'sourceId'])
+@Index(['siteId', 'instanceId'], {
+  where: `"instance_id" IS NOT NULL`,
+})
+@Index(['siteId', 'layoutId'], {
+  where: `"layout_id" IS NOT NULL`,
+})
+@Index(['siteId', 'placementId'], {
+  where: `"placement_id" IS NOT NULL`,
+})
+@Check(
+  'CHK_managed_chunk_migration_provenance_source_type',
+  `"source_type" IN ('banner', 'page_banner_assignment')`,
+)
+@Check(
+  'CHK_managed_chunk_migration_provenance_target',
+  `
+    (CASE WHEN "instance_id" IS NULL THEN 0 ELSE 1 END) +
+    (CASE WHEN "layout_id" IS NULL THEN 0 ELSE 1 END) +
+    (CASE WHEN "placement_id" IS NULL THEN 0 ELSE 1 END) = 1
+  `,
+)
+export class ManagedChunkMigrationProvenanceEntity {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ name: 'site_id', type: 'uuid' })
+  siteId!: string;
+
+  @ManyToOne(() => SiteEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'site_id' })
+  site!: SiteEntity;
+
+  @Column({ name: 'migration_version', type: 'varchar', length: 80 })
+  migrationVersion!: string;
+
+  @Column({ name: 'source_type', type: 'varchar', length: 40 })
+  sourceType!: 'banner' | 'page_banner_assignment';
+
+  @Column({ name: 'source_id', type: 'uuid' })
+  sourceId!: string;
+
+  @Column({ name: 'source_checksum', type: 'varchar', length: 128 })
+  sourceChecksum!: string;
+
+  @Column({ name: 'instance_id', type: 'uuid', nullable: true })
+  instanceId!: string | null;
+
+  @ManyToOne(() => ManagedChunkInstanceEntity, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn([
+    { name: 'site_id', referencedColumnName: 'siteId' },
+    { name: 'instance_id', referencedColumnName: 'id' },
+  ])
+  instance!: ManagedChunkInstanceEntity | null;
+
+  @Column({ name: 'layout_id', type: 'uuid', nullable: true })
+  layoutId!: string | null;
+
+  @ManyToOne(() => ManagedChunkLayoutEntity, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn([
+    { name: 'site_id', referencedColumnName: 'siteId' },
+    { name: 'layout_id', referencedColumnName: 'id' },
+  ])
+  layout!: ManagedChunkLayoutEntity | null;
+
+  @Column({ name: 'placement_id', type: 'uuid', nullable: true })
+  placementId!: string | null;
+
+  @ManyToOne(() => ManagedChunkPlacementEntity, {
+    nullable: true,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn([
+    { name: 'site_id', referencedColumnName: 'siteId' },
+    { name: 'placement_id', referencedColumnName: 'id' },
+  ])
+  placement!: ManagedChunkPlacementEntity | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt!: Date;
+}
+
 export const databaseEntities = [
   UserEntity,
   AdminPasswordResetEntity,
@@ -2215,4 +2572,10 @@ export const databaseEntities = [
   CmsRevisionResourceEntity,
   CmsRevisionEntity,
   CmsRevisionEventEntity,
+  ManagedChunkContractEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
+  ManagedChunkLayoutEntity,
+  ManagedChunkPlacementEntity,
+  ManagedChunkMigrationProvenanceEntity,
 ];

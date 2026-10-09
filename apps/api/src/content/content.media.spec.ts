@@ -1,6 +1,14 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ContentService } from './content.service';
-import { PlatformRole } from '../database/entities';
+import {
+  CmsRevisionEntity,
+  CmsRevisionResourceEntity,
+  ManagedChunkContractEntity,
+  ManagedChunkInstanceEntity,
+  ManagedChunkInstanceRevisionEntity,
+  MediaEntity,
+  PlatformRole,
+} from '../database/entities';
 
 describe('ContentService media management', () => {
   const actor = { userId: 'admin-id', platformRole: PlatformRole.WISPO_ADMIN };
@@ -11,6 +19,7 @@ describe('ContentService media management', () => {
     pageUsed?: boolean;
     nestedPageSection?: 'catalog' | 'terms';
     corruptArmaturexPage?: boolean;
+    managedUsed?: boolean;
   }) {
     const sites = {
       findOne: jest
@@ -83,6 +92,82 @@ describe('ContentService media management', () => {
       save: jest.fn().mockImplementation((item) => Promise.resolve(item)),
       remove: jest.fn().mockResolvedValue(mediaItem),
     };
+    const managedRemove = jest.fn();
+    const managedManager = {
+      find: jest.fn((entity: unknown) =>
+        Promise.resolve(
+          entity === ManagedChunkInstanceEntity
+            ? [
+                Object.assign(new ManagedChunkInstanceEntity(), {
+                  id: 'managed-instance-id',
+                  siteId: 'site-id',
+                  revisionResourceId: 'managed-resource-id',
+                  isArchived: false,
+                }),
+              ]
+            : [],
+        ),
+      ),
+      findOne: jest.fn((entity: unknown) => {
+        if (entity === MediaEntity) return Promise.resolve(mediaItem);
+        if (entity === CmsRevisionResourceEntity)
+          return Promise.resolve(
+            Object.assign(new CmsRevisionResourceEntity(), {
+              id: 'managed-resource-id',
+              siteId: 'site-id',
+              resourceType: 'chunk_instance',
+              entityId: 'managed-instance-id',
+              draftRevisionId: 'managed-revision-id',
+              publishedRevisionId: null,
+            }),
+          );
+        if (entity === CmsRevisionEntity)
+          return Promise.resolve(
+            Object.assign(new CmsRevisionEntity(), {
+              id: 'managed-revision-id',
+              resourceId: 'managed-resource-id',
+              snapshot: {
+                formatVersion: 1,
+                data: {
+                  picture: { mediaId: 'media-id', alt: '', decorative: true },
+                },
+                sanitizerPolicyVersion: null,
+              },
+            }),
+          );
+        if (entity === ManagedChunkInstanceRevisionEntity)
+          return Promise.resolve(
+            Object.assign(new ManagedChunkInstanceRevisionEntity(), {
+              revisionId: 'managed-revision-id',
+              revisionResourceId: 'managed-resource-id',
+              siteId: 'site-id',
+              instanceId: 'managed-instance-id',
+              contractId: 'managed-contract-id',
+            }),
+          );
+        if (entity === ManagedChunkContractEntity)
+          return Promise.resolve(
+            Object.assign(new ManagedChunkContractEntity(), {
+              id: 'managed-contract-id',
+              fieldContract: {
+                fields: [
+                  {
+                    key: 'picture',
+                    widget: 'image',
+                    required: false,
+                    nullable: true,
+                  },
+                ],
+              },
+            }),
+          );
+        return Promise.resolve(null);
+      }),
+      remove: managedRemove,
+    };
+    const dataSource = overrides?.managedUsed
+      ? { transaction: jest.fn((callback) => callback(managedManager)) }
+      : undefined;
     const emptyRepository = {};
     const categories = { existsBy: jest.fn().mockResolvedValue(false) };
     const service = new ContentService(
@@ -95,8 +180,19 @@ describe('ContentService media management', () => {
       media as never,
       pages as never,
       banners as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      dataSource as never,
     );
-    return { service, sites, media, mediaItem };
+    return { service, sites, media, mediaItem, managedRemove };
   }
 
   it('lists one shared workspace library from any site in that workspace', async () => {
@@ -170,6 +266,16 @@ describe('ContentService media management', () => {
       expect(media.remove).not.toHaveBeenCalled();
     },
   );
+
+  it('refuses to delete media referenced by an active managed draft', async () => {
+    const { service, media, managedRemove } = setup({ managedUsed: true });
+
+    await expect(
+      service.deleteMedia('site-id', 'media-id', actor),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(media.remove).not.toHaveBeenCalled();
+    expect(managedRemove).not.toHaveBeenCalled();
+  });
 
   it('deletes an unused image record', async () => {
     const { service, media } = setup();

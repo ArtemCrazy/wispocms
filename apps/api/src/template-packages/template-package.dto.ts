@@ -1,12 +1,12 @@
 import { IsObject, Validate, ValidatorConstraint } from 'class-validator';
 import type { ValidatorConstraintInterface } from 'class-validator';
-import { assertValidTemplatePackageManifest } from './template-package.validation';
+import { assertValidTemplatePackageRelease } from './template-package-release-validation';
 
 @ValidatorConstraint({ name: 'templatePackageManifest', async: false })
 export class TemplatePackageManifestConstraint implements ValidatorConstraintInterface {
   validate(value: unknown): boolean {
     try {
-      assertValidTemplatePackageManifest(value);
+      assertValidTemplatePackageRelease(value);
       return true;
     } catch {
       return false;
