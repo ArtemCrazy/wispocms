@@ -7,8 +7,13 @@ import { posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const defaultProjectRoot = process.cwd();
-const manifestPath =
+const defaultManifestPath =
   "apps/web/template-packages/skinova/manifest.template.json";
+const allowedManifestPaths = new Set([
+  defaultManifestPath,
+  "apps/web/template-packages/skinova/manifest.v2.template.json",
+]);
+let manifestPath = defaultManifestPath;
 const publicRoot = "apps/web/public/skinova";
 const previewRoot = "apps/web/src/app/preview/[siteSlug]";
 const buildConventionInputs = [
@@ -50,9 +55,43 @@ const dependencyScanExtensions = new Set([
   ".cjs",
 ]);
 const requestTimeoutMs = 2_000;
-const operations = new Set(["register", "preflight", "report-deployed"]);
-
 class SafeCliError extends Error {}
+
+const siteIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function parseCliArguments(args) {
+  const usage =
+    "Использование: template-package-release.mjs " +
+    "<register [--manifest <path>]|preflight|report-deployed|" +
+    "backfill-managed-content --site-id <uuid>>.";
+  if (args[0] === "backfill-managed-content") {
+    if (
+      args.length !== 3 ||
+      args[1] !== "--site-id" ||
+      !siteIdPattern.test(args[2])
+    )
+      throw new SafeCliError(usage);
+    return {
+      operation: "backfill-managed-content",
+      siteId: args[2].toLowerCase(),
+      manifestPath: null,
+    };
+  }
+  if (!["register", "preflight", "report-deployed"].includes(args[0]))
+    throw new SafeCliError(usage);
+  if (args[0] === "register" && args.length === 3) {
+    if (args[1] !== "--manifest" || !allowedManifestPaths.has(args[2]))
+      throw new SafeCliError(usage);
+    return { operation: "register", siteId: null, manifestPath: args[2] };
+  }
+  if (args.length !== 1) throw new SafeCliError(usage);
+  return {
+    operation: args[0],
+    siteId: null,
+    manifestPath: defaultManifestPath,
+  };
+}
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -612,20 +651,35 @@ async function send(operation, template, token, root, identity) {
 }
 
 export async function runCli({ root = defaultProjectRoot } = {}) {
-  const args = process.argv.slice(2);
-  if (args.length !== 1 || !operations.has(args[0]))
-    throw new SafeCliError(
-      "Использование: template-package-release.mjs <register|preflight|report-deployed>.",
-    );
-  const operation = args[0];
+  const parsed = parseCliArguments(process.argv.slice(2));
   const token = releaseToken();
+  if (parsed.operation === "backfill-managed-content") {
+    const config = releaseConfiguration();
+    await sendReleaseRequest({
+      operation: parsed.operation,
+      request: {
+        method: "POST",
+        url: new URL(
+          "internal/template-packages/skinova/backfill-managed-content",
+          config.apiUrl,
+        ),
+        body: Promise.resolve({ siteId: parsed.siteId }),
+      },
+      token,
+      requestTimeoutMs: config.requestTimeoutMs,
+    });
+    process.stdout.write(`backfill-managed-content: ${parsed.siteId}\n`);
+    return;
+  }
+
+  manifestPath = parsed.manifestPath;
   const identity = gitIdentity(root);
   const template = await readManifestTemplate(root, identity.revision);
-  if (operation !== "register")
+  if (parsed.operation !== "register")
     await collectReleaseInputs({ root, revision: identity.revision });
-  await send(operation, template, token, root, identity);
+  await send(parsed.operation, template, token, root, identity);
   process.stdout.write(
-    `${operation}: ${template.packageId}@${template.packageVersion}\n`,
+    `${parsed.operation}: ${template.packageId}@${template.packageVersion}\n`,
   );
 }
 

@@ -54,6 +54,21 @@ describe('template package release validation', () => {
       'skinova-consultation-banner',
       'skinova-article-sidebar-banner',
     ]);
+    for (const definition of validated.definitions) {
+      expect(definition.fields.map(({ key }) => key)).toHaveLength(8);
+      expect(definition.fields).toContainEqual(
+        expect.objectContaining({
+          key: 'sort_order',
+          widget: 'number',
+          required: true,
+          constraints: expect.objectContaining({
+            min: 0,
+            max: 9999,
+            step: 1,
+          }),
+        }),
+      );
+    }
     expect(
       validated.manifest.templates.flatMap((template) =>
         (template.slots ?? []).map((slot) => ({
@@ -84,6 +99,12 @@ describe('template package release validation', () => {
             definitionKey: 'skinova-article-sidebar-banner',
             schemaVersion: '1',
           },
+        ],
+      },
+      {
+        placement: 'homepage_top',
+        allowedChunks: [
+          { definitionKey: 'skinova-promo-strip', schemaVersion: '1' },
         ],
       },
     ]);

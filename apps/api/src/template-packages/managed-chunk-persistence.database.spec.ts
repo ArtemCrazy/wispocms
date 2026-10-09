@@ -8,21 +8,33 @@
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 import {
   CmsRevisionEntity,
   CmsRevisionEventEntity,
+  BannerEntity,
   CmsRevisionResourceEntity,
   ManagedChunkInstanceEntity,
   ManagedChunkInstanceRevisionEntity,
+  ManagedChunkLayoutEntity,
+  ManagedChunkMigrationProvenanceEntity,
   ManagedChunkPlacementEntity,
+  PageBannerAssignmentEntity,
   PlatformRole,
   SiteAccessEntity,
   SiteEntity,
+  SiteType,
+  TemplatePackageEntity,
+  TemplatePackageVersionEntity,
 } from '../database/entities';
 import { createDataSourceOptions } from '../database/data-source';
 import { CmsRevisionsService } from '../content/cms-revisions.service';
 import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
+import { assertValidTemplatePackageRelease } from './template-package-release-validation';
+import { canonicalManifestDigest } from './template-package.service';
+import { SkinovaManagedBackfillService } from './skinova-managed-backfill.service';
 import type { ManagedChunkDefinition } from './managed-chunk.types';
 const EXPECTED_DATABASE = 'wispo_managed_chunks_phase2_test';
 
@@ -810,6 +822,211 @@ integrationSuite('managed chunk persistence in disposable PostgreSQL', () => {
     );
     expect(count).toBe(expectedLedgerCount);
   });
+  it('backfills the current Skinova publication atomically and idempotently', async () => {
+    const manifestTemplate = JSON.parse(
+      readFileSync(
+        resolve(
+          __dirname,
+          '../../../web/template-packages/skinova/manifest.v2.template.json',
+        ),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    const manifest = {
+      ...manifestTemplate,
+      source: {
+        ...(manifestTemplate.source as Record<string, unknown>),
+        revision: 'a'.repeat(40),
+      },
+      build: {
+        ...(manifestTemplate.build as Record<string, unknown>),
+        releaseDigest: 'b'.repeat(64),
+        artifactDigest: null,
+        builtAt: '2026-10-08T00:00:00Z',
+      },
+    };
+    const release = assertValidTemplatePackageRelease(manifest);
+    const packageRepository = source.getRepository(TemplatePackageEntity);
+    let templatePackage = await packageRepository.findOne({
+      where: { packageId: 'skinova-media' },
+    });
+    if (!templatePackage) {
+      templatePackage = await packageRepository.save({
+        packageId: release.manifest.packageId,
+        title: release.manifest.title,
+        siteType: release.manifest.siteType as SiteType,
+        repositoryUrl: release.manifest.source.repository,
+      });
+    }
+    let version = await source
+      .getRepository(TemplatePackageVersionEntity)
+      .findOne({
+        where: {
+          templatePackageId: templatePackage.id,
+          packageVersion: '2',
+        },
+      });
+    if (!version) {
+      version = await source.getRepository(TemplatePackageVersionEntity).save({
+        templatePackageId: templatePackage.id,
+        packageVersion: '2',
+        sourceRevision: 'a'.repeat(40),
+        releaseDigest: 'b'.repeat(64),
+        artifactDigest: null,
+        manifestDigest: canonicalManifestDigest(
+          release.manifest as unknown as Record<string, unknown>,
+        ),
+        manifestVersion: 2,
+        manifest: release.manifest as unknown as Record<string, unknown>,
+        cmsApiMinSchemaVersion: release.manifest.cmsApi.minSchemaVersion,
+        cmsApiMaxSchemaVersion:
+          release.manifest.cmsApi.maxSchemaVersion ?? null,
+        builtAt: new Date('2026-10-08T00:00:00Z'),
+        runtimeMode: release.manifest.build.runtimeMode,
+        runtimeUrl: release.manifest.build.runtimeUrl ?? null,
+      });
+    }
+    await servicesFor(source).repository.registerContracts({
+      templatePackageId: templatePackage.id,
+      templatePackageVersionId: version.id,
+      definitions: release.definitions,
+    });
+
+    const siteId = '51a00000-0000-4000-8000-000000000002';
+    const [legacyBefore, siteBefore] = await Promise.all([
+      source.query(
+        `SELECT
+          (SELECT jsonb_agg(to_jsonb(b) ORDER BY b.id)
+             FROM banners b WHERE b.site_id = $1) AS banners,
+          (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id)
+             FROM page_banner_assignments a WHERE a.site_id = $1) AS assignments`,
+        [siteId],
+      ),
+      source.query(
+        `SELECT template_package_id, current_template_package_version_id
+           FROM sites WHERE id = $1`,
+        [siteId],
+      ),
+    ]);
+    const service = new SkinovaManagedBackfillService(source);
+
+    await expect(service.backfill(siteId)).resolves.toMatchObject({
+      status: 'created',
+      created: {
+        instances: 3,
+        layouts: 4,
+        placements: 5,
+        provenance: 8,
+      },
+      repairedProvenance: 0,
+    });
+    const [counts] = await source.query(
+      `SELECT
+        (SELECT count(*)::int FROM managed_chunk_instances
+          WHERE site_id = $1) AS instances,
+        (SELECT count(*)::int FROM managed_chunk_layouts
+          WHERE site_id = $1) AS layouts,
+        (SELECT count(*)::int FROM managed_chunk_placements
+          WHERE site_id = $1) AS placements,
+        (SELECT count(*)::int FROM managed_chunk_migration_provenance
+          WHERE site_id = $1) AS provenance,
+        (SELECT count(*)::int
+           FROM cms_revision_resources
+          WHERE site_id = $1
+            AND resource_type IN ('chunk_instance', 'chunk_layout')
+            AND latest_version_number = 1
+            AND review_state = 'approved'
+            AND draft_revision_id = approved_revision_id
+            AND approved_revision_id = published_revision_id) AS baselines`,
+      [siteId],
+    );
+    expect(counts).toEqual({
+      instances: 3,
+      layouts: 4,
+      placements: 5,
+      provenance: 8,
+      baselines: 7,
+    });
+    const [{ count: nullSanitizerPolicies }] = await source.query(
+      `SELECT count(*)::int AS count
+         FROM managed_chunk_instances instance
+         JOIN cms_revision_resources resource
+           ON resource.id = instance.revision_resource_id
+         JOIN cms_revisions revision
+           ON revision.id = resource.published_revision_id
+          AND revision.resource_id = resource.id
+        WHERE instance.site_id = $1
+          AND revision.snapshot->>'sanitizerPolicyVersion' IS NULL`,
+      [siteId],
+    );
+    expect(nullSanitizerPolicies).toBe(3);
+    const [legacyAfter, siteAfter] = await Promise.all([
+      source.query(
+        `SELECT
+          (SELECT jsonb_agg(to_jsonb(b) ORDER BY b.id)
+             FROM banners b WHERE b.site_id = $1) AS banners,
+          (SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id)
+             FROM page_banner_assignments a WHERE a.site_id = $1) AS assignments`,
+        [siteId],
+      ),
+      source.query(
+        `SELECT template_package_id, current_template_package_version_id
+           FROM sites WHERE id = $1`,
+        [siteId],
+      ),
+    ]);
+    expect(legacyAfter).toEqual(legacyBefore);
+    expect(siteAfter).toEqual(siteBefore);
+    await expect(service.backfill(siteId)).resolves.toMatchObject({
+      status: 'unchanged',
+      created: {
+        instances: 0,
+        layouts: 0,
+        placements: 0,
+        provenance: 0,
+      },
+      repairedProvenance: 0,
+    });
+
+    const [promo] = await source.query(
+      `SELECT id, title FROM banners
+        WHERE site_id = $1 AND name = 'Промо Skinova'`,
+      [siteId],
+    );
+    const countsBeforeConflict = await source.query(
+      `SELECT
+        (SELECT count(*)::int FROM managed_chunk_instances WHERE site_id = $1) AS instances,
+        (SELECT count(*)::int FROM managed_chunk_layouts WHERE site_id = $1) AS layouts,
+        (SELECT count(*)::int FROM managed_chunk_placements WHERE site_id = $1) AS placements,
+        (SELECT count(*)::int FROM managed_chunk_migration_provenance WHERE site_id = $1) AS provenance`,
+      [siteId],
+    );
+    try {
+      await source.query('UPDATE banners SET title = $2 WHERE id = $1', [
+        promo.id,
+        'Conflict title',
+      ]);
+      await expect(service.backfill(siteId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(
+        await source.query(
+          `SELECT
+            (SELECT count(*)::int FROM managed_chunk_instances WHERE site_id = $1) AS instances,
+            (SELECT count(*)::int FROM managed_chunk_layouts WHERE site_id = $1) AS layouts,
+            (SELECT count(*)::int FROM managed_chunk_placements WHERE site_id = $1) AS placements,
+            (SELECT count(*)::int FROM managed_chunk_migration_provenance WHERE site_id = $1) AS provenance`,
+          [siteId],
+        ),
+      ).toEqual(countsBeforeConflict);
+    } finally {
+      await source.query('UPDATE banners SET title = $2 WHERE id = $1', [
+        promo.id,
+        promo.title,
+      ]);
+    }
+  }, 30_000);
+
   it('destroys an initialized source when setup fails and leaves no backend', async () => {
     const injected = new Error('injected source setup failure');
     let failedPid: number | undefined;

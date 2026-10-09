@@ -143,6 +143,21 @@ async function fixture({ reverseAssets = false } = {}) {
     "apps/web/template-packages/skinova/manifest.template.json",
     `${JSON.stringify(manifestTemplate, null, 2)}\n`,
   );
+  await put(
+    root,
+    "apps/web/template-packages/skinova/manifest.v2.template.json",
+    `${JSON.stringify(
+      {
+        ...manifestTemplate,
+        manifestVersion: 2,
+        packageVersion: "2",
+        chunkCategories: [],
+        chunkDefinitions: [],
+      },
+      null,
+      2,
+    )}\n`,
+  );
   for (const path of buildConventionInputs)
     await put(
       root,
@@ -526,6 +541,52 @@ test("register sends one complete manifest and never calls lifecycle endpoints",
     server.requests[1].body.manifest,
     server.requests[0].body.manifest,
   );
+});
+
+test("register v2 requires an explicit allowlisted manifest", async () => {
+  const root = await fixture();
+  const server = await api();
+
+  const result = await cli(root, "register", server.url, {}, [
+    "--manifest",
+    "apps/web/template-packages/skinova/manifest.v2.template.json",
+  ]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(server.requests.length, 1);
+  assert.equal(server.requests[0].body.manifest.manifestVersion, 2);
+  assert.equal(server.requests[0].body.manifest.packageVersion, "2");
+
+  const unsafe = await cli(root, "register", server.url, {}, [
+    "--manifest",
+    "../outside.json",
+  ]);
+  assert.notEqual(unsafe.status, 0);
+  assert.equal(server.requests.length, 1);
+});
+
+test("managed backfill requires a site UUID and sends one protected request", async () => {
+  const root = await fixture();
+  const server = await api();
+  const siteId = "11111111-1111-4111-8111-111111111111";
+
+  const missing = await cli(root, "backfill-managed-content", server.url);
+  assert.notEqual(missing.status, 0);
+  assert.equal(server.requests.length, 0);
+
+  const result = await cli(root, "backfill-managed-content", server.url, {}, [
+    "--site-id",
+    siteId,
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(server.requests.length, 1);
+  assert.equal(
+    server.requests[0].url,
+    "/api/internal/template-packages/skinova/backfill-managed-content",
+  );
+  assert.equal(server.requests[0].method, "POST");
+  assert.equal(server.requests[0].headers["x-wispo-release-token"], secret);
+  assert.deepEqual(server.requests[0].body, { siteId });
 });
 
 test("preflight and report-deployed are separate one-request operations", async () => {

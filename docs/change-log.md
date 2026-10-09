@@ -3415,8 +3415,8 @@
   Push, merge, deploy, VDS и общая БД не затрагивались.
 ### 2026-10-08 · Phase 3.2a: published Skinova managed backfill
 
-- Статус: **В работе, утверждён design; код не начат**. Владелец: Роман /
-  Codex; ветка `codex/managed-chunks-sdk-v1`.
+- Статус: **Реализовано локально, не выпущено**. Владелец: Роман / Codex;
+  ветка `codex/managed-chunks-sdk-v1`.
 - Задача: отдельной управляемой release-командой идемпотентно перенести
   опубликованные `banners`/`page_banner_assignments` Skinova в managed
   instances/layouts/placements без переключения runtime и package pointers.
@@ -3427,5 +3427,39 @@
   `sort_order` и `homepage_top` slot для `system_page`, иначе текущие Skinova
   данные 404/privacy переносятся неполно.
 - Design: `docs/superpowers/specs/2026-10-08-skinova-managed-backfill-design.md`.
-- БД: в этой записи схема, migration ledger и данные не менялись; backfill,
-  Docker, VDS, общая/рабочая БД и deploy не запускались.
+- План реализации:
+  `docs/superpowers/plans/2026-10-08-skinova-managed-backfill.md`.
+- Реализация: v2 contract дополнен `sort_order` и системным
+  `homepage_top`; добавлены строгая pure projection и транзакционный
+  `SkinovaManagedBackfillService`. Он создаёт опубликованные baseline
+  revisions, 3 instances, 4 layouts, 5 placements и 8 immutable provenance
+  rows; checksum drift, неизвестный mapping и partial target отклоняются с
+  полным rollback. Идентичный повтор — no-op; отсутствующий provenance
+  восстанавливается только при полном совпадении target.
+- Release boundary: добавлен защищённый release-token endpoint, явная
+  `backfill-managed-content --site-id <uuid>` команда и отдельный allow-listed
+  v2 manifest script. Существующие v1 register/preflight/deployed сохранены.
+- Изменены:
+  `apps/web/template-packages/skinova/manifest.v2.template.json`,
+  `apps/api/src/template-packages/skinova-managed-backfill.{projection,service}.ts`
+  и их specs, DTO, controller/module и focused database/release specs,
+  `scripts/template-package-release.mjs` и его test, `package.json`,
+  этот журнал, implementation plan и post-MVP review.
+- БД: новая migration/entity/schema не добавлялись; применённые migrations не
+  редактировались. Формат новых значений использует существующий managed
+  snapshot v1: snake_case data, image object `{mediaId, alt, decorative}`,
+  `sanitizerPolicyVersion: null`; legacy rows и site package pointers не
+  меняются. Команда является повторяемой только для полностью совпадающего
+  source/target; восстановление — удаление созданного managed baseline по
+  отдельному согласованному data-migration, не destructive `down`.
+- Проверки: TDD RED/GREEN для contract, projection, service, endpoint и CLI;
+  focused API — 4 suites / 20 tests PASS; 4 релевантных release CLI-сценария
+  PASS, включая явные v2/backfill cases; API build PASS; disposable PostgreSQL acceptance —
+  1 suite / 33 tests PASS. Одноразовый контейнер на 55440 остановлен и удалён.
+- Общая/рабочая БД, локальная БД приложения, VDS, public runtime, push, merge и
+  deploy не затрагивались. Команда backfill на них не запускалась.
+- Некритичные shadow-read, расширенная concurrency/history matrix, visual
+  runtime smoke и performance сохранены в
+  `docs/managed-chunks-post-mvp-review.md`.
+- Коммит реализации: `feat: backfill Skinova managed content` (текущий коммит
+  ветки; точный хеш — в истории Git).

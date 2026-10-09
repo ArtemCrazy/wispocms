@@ -16,15 +16,15 @@
    производительности после завершения пользовательского API/UI.
 5. Разобрать существующий общий ESLint/Prettier baseline отдельно от этого
    функционала.
-6. Выполнить CLI/API end-to-end регистрацию реального Skinova manifest v2 на
-   одноразовой PostgreSQL-БД и проверить фактические строки contracts.
+6. Добавить полноценный shadow-read: сравнивать публичный API/runtime output
+   legacy и managed-модели до переключения package pointers.
 7. Расширить v2 race/concurrency matrix для одновременной регистрации package
-   version и contracts; базовая идемпотентность уже покрыта unit-тестами.
+   version, contracts и двух запусков backfill на одном сайте.
 8. После появления runtime bindings провести visual smoke трёх Skinova
    renderers и проверить preview/current switch.
-9. Перед legacy backfill утвердить явное сопоставление `buttonText` →
-   `button_text`, `linkUrl` → `link_url`, `mediaId` → `media_id`,
-   `mobileMediaId` → `mobile_media_id`, `isActive` → `is_active`.
+9. Отдельно спроектировать перенос legacy draft/history, dual-write и
+   восстановление повреждённого provenance; текущий MVP переносит только
+   опубликованное состояние и fail-closed отклоняет расхождения.
 
 ## Уже закрыто для MVP
 
@@ -32,4 +32,11 @@
 - hook не может изменить фактические revision/resource metadata;
 - проверяется именно новая revision, а не подставленная старая;
 - битые present pointers не превращаются в ложный результат совместимости;
-- схема БД, данные, API и UI этим hardening не менялись.
+- схема БД, данные, API и UI этим hardening не менялись;
+- реальный Skinova manifest v2 зарегистрирован в одноразовой PostgreSQL-БД,
+  contracts и backfill проверены одним focused acceptance;
+- утверждён и покрыт mapping legacy banner → managed data, включая
+  `sort_order`, image-object и сохранение null;
+- backfill подтверждён для 3 instances, 4 layouts, 5 placements и 8 provenance
+  rows; идентичный повтор является no-op, checksum conflict не оставляет
+  частичных записей.

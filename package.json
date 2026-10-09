@@ -7,6 +7,8 @@
     "dev:web": "pnpm --dir apps/web dev",
     "dev:api": "pnpm --dir apps/api start:dev",
     "template-package:register:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs register",
+    "template-package:register:skinova:v2": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs register --manifest apps/web/template-packages/skinova/manifest.v2.template.json",
+    "template-package:backfill-managed-content:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs backfill-managed-content",
     "template-package:preflight:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs preflight",
     "template-package:report-deployed:skinova": "node --env-file-if-exists=.env.local scripts/template-package-release.mjs report-deployed",
     "build": "pnpm --dir apps/web build && pnpm --dir apps/api build",

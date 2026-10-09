@@ -10,6 +10,7 @@ import {
   TemplatePackageCurrentController,
 } from './template-package.controller';
 import { ManagedChunkPersistenceRepository } from './managed-chunk-persistence.repository';
+import { SkinovaManagedBackfillService } from './skinova-managed-backfill.service';
 import { TemplatePackageService } from './template-package.service';
 
 @Module({
@@ -22,6 +23,7 @@ import { TemplatePackageService } from './template-package.service';
   providers: [
     TemplatePackageService,
     ManagedChunkPersistenceRepository,
+    SkinovaManagedBackfillService,
     ReleaseTokenGuard,
     PlatformAdminGuard,
   ],

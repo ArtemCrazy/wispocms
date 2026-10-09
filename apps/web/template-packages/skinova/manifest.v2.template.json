@@ -708,7 +708,21 @@
         "type": "object",
         "properties": {},
         "additionalProperties": false
-      }
+      },
+      "slots": [
+        {
+          "key": "homepage_top",
+          "title": "Верхняя промо-полоса",
+          "placement": "homepage_top",
+          "maxItems": 1,
+          "allowedChunks": [
+            {
+              "definitionKey": "skinova-promo-strip",
+              "schemaVersion": "1"
+            }
+          ]
+        }
+      ]
     }
   ],
   "chunkCategories": [
@@ -776,6 +790,17 @@
           "nullable": true
         },
         {
+          "key": "sort_order",
+          "label": "Порядок",
+          "widget": "number",
+          "required": true,
+          "constraints": {
+            "min": 0,
+            "max": 9999,
+            "step": 1
+          }
+        },
+        {
           "key": "is_active",
           "label": "Активен",
           "widget": "boolean",
@@ -839,6 +864,17 @@
           "nullable": true
         },
         {
+          "key": "sort_order",
+          "label": "Порядок",
+          "widget": "number",
+          "required": true,
+          "constraints": {
+            "min": 0,
+            "max": 9999,
+            "step": 1
+          }
+        },
+        {
           "key": "is_active",
           "label": "Активен",
           "widget": "boolean",
@@ -900,6 +936,17 @@
           "label": "Мобильное изображение",
           "widget": "image",
           "nullable": true
+        },
+        {
+          "key": "sort_order",
+          "label": "Порядок",
+          "widget": "number",
+          "required": true,
+          "constraints": {
+            "min": 0,
+            "max": 9999,
+            "step": 1
+          }
         },
         {
           "key": "is_active",
