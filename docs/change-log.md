@@ -3463,3 +3463,19 @@
   `docs/managed-chunks-post-mvp-review.md`.
 - Коммит реализации: `feat: backfill Skinova managed content` (текущий коммит
   ветки; точный хеш — в истории Git).
+
+### 2026-10-09 · Phase 4.1: managed chunks API и UI для Skinova
+
+- Статус: **В работе, утверждена граница этапа; код не начат**. Владелец:
+  Роман / Codex; ветка `codex/managed-chunks-sdk-v1`.
+- Задача: добавить site-scoped generic API и видимый раздел CMS «Чанки» с
+  категорией «Баннеры», чтением backfilled instances, contract-driven формой и
+  существующим revision/approval workflow.
+- Design:
+  `docs/superpowers/specs/2026-10-09-managed-chunks-api-ui-design.md`.
+- Граница: public/preview runtime, legacy write/dual-write, layouts/placements,
+  TinyMCE/richText и рабочая/VDS БД не меняются. Новая migration и изменение
+  persisted format не ожидаются; при обнаружении такой необходимости этап
+  останавливается для отдельного согласования.
+- Изменены только design и эта запись журнала. Схема/данные БД, API/UI код,
+  Docker, VDS, deploy и внешние сервисы не затрагивались.
